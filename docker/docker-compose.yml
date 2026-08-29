@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # BANCO POSTGRESQL PARA A EVOLUTION API (Armazenamento de Sessões / Tokens)
+  # ==============================================================================
+  evolution-postgres:
+    image: postgres:15-alpine
+    container_name: condo-evolution-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: evolution_password_secret
+    volumes:
+      - evolution_pgdata:/var/lib/postgresql/data
+    networks:
+      - condo-network
+
+  # ==============================================================================
+  # EVOLUTION API v2 (API do WhatsApp para Notificação na Portaria)
+  # ==============================================================================
+  evolution-api:
+    image: atendai/evolution-api:v2.2.3
+    container_name: condo-evolution-api
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_URL=http://localhost:8080
+      - DOCKER_ENV=true
+      - LOG_LEVEL=ERROR,WARN,DEBUG,INFO,LOG,VERBOSE,DARK,WEBHOOKS
+      - LOG_COLOR=true
+      
+      # Autenticação da Evolution API
+      - AUTHENTICATION_API_KEY=condo_evolution_super_secret_key_2026
+      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+      
+      # Banco de Dados
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evolution:evolution_password_secret@evolution-postgres:5432/evolution?schema=public
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_CHATS=true
+      
+      # Webhooks (Opcional se desejar receber status de entrega das msgs)
+      - WEBHOOK_GLOBAL_ENABLED=false
+      
+      # Integração QR Code / Baileys
+      - QRCODE_LIMIT=30
+    depends_on:
+      - evolution-postgres
+    networks:
+      - condo-network
+
+volumes:
+  evolution_pgdata:
+    driver: local
+
+networks:
+  condo-network:
+    driver: bridge

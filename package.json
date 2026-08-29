@@ -1,0 +1,16 @@
+{
+  "name": "condobox-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --prefix apps/web",
+    "dev:web": "npm run dev --prefix apps/web",
+    "dev:api": "npm run dev --prefix apps/local-api",
+    "build": "npm run build --prefix apps/web && npm run build --prefix apps/local-api",
+    "build:web": "npm run build --prefix apps/web",
+    "build:api": "npm run build --prefix apps/local-api"
+  }
+}
