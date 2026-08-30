@@ -49,8 +49,23 @@ export default function PublicPackagePage() {
   const [pkg, setPkg] = useState<PublicPackageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
   const [copied, setCopied] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pkg?.notes?.includes('CIENTE') || pkg?.status === 'DELIVERED') {
+      setUnlocked(true);
+    }
+  }, [pkg]);
+
+  const handleUnlockAndSendWhatsApp = () => {
+    setUnlocked(true);
+    fetch(`/api/package/${token}`, { method: 'POST' }).catch(() => {});
+    const portariaPhone = '557398419901';
+    const waText = encodeURIComponent(`Estou ciente da encomenda ${pkg?.pickup_code}`);
+    window.open(`https://wa.me/${portariaPhone}?text=${waText}`, '_blank');
+  };
 
   useEffect(() => {
     if (token) {
@@ -181,64 +196,99 @@ export default function PublicPackagePage() {
             </div>
 
             {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
-              <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            {!unlocked ? (
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
+                <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-              {/* QR Code Container */}
-              <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
-                <QRCodeSVG
-                  value={pkg.qr_token || pkg.pickup_code}
-                  size={190}
-                  level="H"
-                  includeMargin={false}
-                  className="mx-auto"
-                />
-              </div>
-
-              {/* Código Numérico de 4 Dígitos */}
-              <div className="space-y-1.5">
-                <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
-                  Código de Retirada
-                </span>
-                <div className="flex items-center justify-center gap-3">
-                  <div className="bg-slate-950 border border-emerald-500/40 px-5 py-2 rounded-2xl shadow-inner inline-flex items-center gap-2">
-                    <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-emerald-400">
-                      {pkg.pickup_code}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyCode}
-                    title="Copiar Código"
-                    className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl transition active:scale-95 flex items-center justify-center"
-                  >
-                    {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
-                  </button>
+                <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-3xl flex items-center justify-center mx-auto shadow-lg shadow-emerald-950">
+                  <Package className="w-8 h-8" />
                 </div>
-                {copied && (
-                  <p className="text-[11px] font-semibold text-emerald-400 animate-fade-in">
-                    Código copiado para a área de transferência!
+
+                <div>
+                  <span className="text-[11px] uppercase font-bold tracking-widest text-emerald-400">
+                    Nova Encomenda na Portaria
+                  </span>
+                  <h2 className="text-xl font-black text-slate-100 mt-1">
+                    {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Sua Unidade'}
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Remetente: <strong className="text-slate-200">{pkg.carrier}</strong>
                   </p>
+                </div>
+
+                <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">
+                  Toque no botão abaixo para <strong>liberar seu QR Code</strong> e <strong>enviar a confirmação para a portaria</strong> via WhatsApp.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={handleUnlockAndSendWhatsApp}
+                  className="w-full py-4 px-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-3 shadow-xl shadow-emerald-950/60 transition active:scale-98 group"
+                >
+                  <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition" />
+                  <span>Ver Código e Enviar Confirmação</span>
+                </button>
+              </div>
+            ) : (
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden animate-fade-in">
+                <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+                {/* QR Code Container */}
+                <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
+                  <QRCodeSVG
+                    value={pkg.qr_token || pkg.pickup_code}
+                    size={190}
+                    level="H"
+                    includeMargin={false}
+                    className="mx-auto"
+                  />
+                </div>
+
+                {/* Código Numérico de 4 Dígitos */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
+                    Código de Retirada
+                  </span>
+                  <div className="flex items-center justify-center gap-3">
+                    <div className="bg-slate-950 border border-emerald-500/40 px-5 py-2 rounded-2xl shadow-inner inline-flex items-center gap-2">
+                      <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-emerald-400">
+                        {pkg.pickup_code}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyCode}
+                      title="Copiar Código"
+                      className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl transition active:scale-95 flex items-center justify-center"
+                    >
+                      {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  {copied && (
+                    <p className="text-[11px] font-semibold text-emerald-400 animate-fade-in">
+                      Código copiado para a área de transferência!
+                    </p>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-400 px-4 leading-relaxed">
+                  💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
+                </p>
+
+                {!isDelivered && (
+                  <a
+                    href={`https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98"
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-400" />
+                    Enviar confirmação novamente no WhatsApp
+                  </a>
                 )}
               </div>
-
-              <p className="text-xs text-slate-400 px-4 leading-relaxed">
-                💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
-              </p>
-
-              {!isDelivered && (
-                <a
-                  href={`https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition active:scale-98"
-                >
-                  <MessageSquare className="w-4 h-4 text-emerald-100" />
-                  Responder no WhatsApp que estou ciente (1 Clique)
-                </a>
-              )}
-            </div>
+            )}
 
             {/* DETALHES DA ENCOMENDA */}
             <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3.5 text-xs text-slate-300">
