@@ -51,4 +51,23 @@ export async function uploadRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * POST /api/ocr-live
+   * Scanner rápido de bloco + apto em tempo real
+   */
+  fastify.post('/api/ocr-live', async (request, reply) => {
+    try {
+      const data = await request.file();
+      if (!data) {
+        return reply.send({ block: null, unitNumber: null, confidence: 0 });
+      }
+
+      const buffer = await data.toBuffer();
+      const liveOcr = await ocrService.extractLiveOCR(buffer, data.mimetype);
+      return reply.send(liveOcr);
+    } catch {
+      return reply.send({ block: null, unitNumber: null, confidence: 0 });
+    }
+  });
 }

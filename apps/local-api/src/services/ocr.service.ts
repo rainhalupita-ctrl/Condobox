@@ -139,6 +139,59 @@ REGRAS CRÍTICAS DE PRECISÃO:
     return this.fallbackHeuristic(imageBuffer);
   }
 
+  async extractLiveOCR(imageBuffer: Buffer, mimeType: string = 'image/jpeg') {
+    this.initClient();
+    if (!env.GEMINI_API_KEY) {
+      return { block: null, unitNumber: null, confidence: 0 };
+    }
+
+    const base64Image = imageBuffer.toString('base64');
+    const prompt = 'Extraia o numero do apartamento e bloco desta etiqueta. Retorne JSON {"block":"string ou null","unitNumber":"string ou null","confidence":0.9}. Se for A805 ou B102, unitNumber="805", block="Bloco A". Apenas o JSON.';
+
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-goog-api-key': env.GEMINI_API_KEY,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                { inlineData: { mimeType, data: base64Image } }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0,
+            maxOutputTokens: 60
+          }
+        }),
+        signal: AbortSignal.timeout(8000)
+      });
+
+      if (res.ok) {
+        const data = await res.json() as any;
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+          const unitNumberClean = parsed.unitNumber ? String(parsed.unitNumber).replace(/\D/g, '') : '';
+          const hasUnit = unitNumberClean.length >= 1;
+          return {
+            block: parsed.block ? String(parsed.block).trim() : null,
+            unitNumber: hasUnit ? String(parsed.unitNumber).trim() : null,
+            confidence: hasUnit ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.9) : 0
+          };
+        }
+      }
+    } catch {}
+
+    return { block: null, unitNumber: null, confidence: 0 };
+  }
+
   private fallbackHeuristic(imageBuffer: Buffer): OCRExtractionResult {
     return {
       recipientName: null,
