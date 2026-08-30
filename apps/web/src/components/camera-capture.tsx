@@ -307,7 +307,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         isScanning = false;
         setIsLiveAnalyzing(false);
       }
-    }, 900);
+    }, 2200);
 
     return () => {
       clearInterval(interval);
