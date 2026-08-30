@@ -13,7 +13,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>(() => {
+    if (typeof window !== 'undefined') {
+      const savedFacing = localStorage.getItem('condobox_camera_facing');
+      if (savedFacing === 'user' || savedFacing === 'environment') return savedFacing;
+    }
+    return 'environment';
+  });
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -25,18 +31,49 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   }, [facingMode]);
 
   const startCamera = async () => {
-    stopCamera();
     setCameraError(null);
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: facingMode,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
+      // 1. Tentar reusar o deviceId e configurações salvas em cache/cookies
+      let preferredDeviceId: string | null = null;
+      if (typeof window !== 'undefined') {
+        preferredDeviceId = localStorage.getItem('condobox_camera_device_id');
+      }
+
+      const constraints: MediaStreamConstraints = {
+        video: preferredDeviceId
+          ? {
+              deviceId: { ideal: preferredDeviceId },
+              facingMode: { ideal: facingMode },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            }
+          : {
+              facingMode: { ideal: facingMode },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
         audio: false
-      });
+      };
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       setStream(mediaStream);
+
+      // 2. Salvar em cookies e localStorage para evitar perguntas repetidas de permissão
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('condobox_camera_permission', 'granted');
+        localStorage.setItem('condobox_camera_facing', facingMode);
+        document.cookie = 'condobox_camera_permission=granted; path=/; max-age=31536000; SameSite=Lax';
+
+        const track = mediaStream.getVideoTracks()[0];
+        if (track) {
+          const settings = track.getSettings();
+          if (settings.deviceId) {
+            localStorage.setItem('condobox_camera_device_id', settings.deviceId);
+            document.cookie = `condobox_camera_device_id=${settings.deviceId}; path=/; max-age=31536000; SameSite=Lax`;
+          }
+        }
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
@@ -54,7 +91,12 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   };
 
   const switchCamera = () => {
-    setFacingMode(prev => (prev === 'environment' ? 'user' : 'environment'));
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextFacing);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('condobox_camera_facing', nextFacing);
+      localStorage.removeItem('condobox_camera_device_id'); // Limpa deviceId anterior para achar nova câmera
+    }
   };
 
   const takeSnapshot = () => {

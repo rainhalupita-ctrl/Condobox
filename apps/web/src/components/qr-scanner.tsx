@@ -23,8 +23,16 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         const html5QrCode = new Html5Qrcode(elementId);
         scannerRef.current = html5QrCode;
 
+        let cameraConfig: any = { facingMode: 'environment' };
+        if (typeof window !== 'undefined') {
+          const preferredDeviceId = localStorage.getItem('condobox_camera_device_id');
+          if (preferredDeviceId) {
+            cameraConfig = { deviceId: { exact: preferredDeviceId } };
+          }
+        }
+
         await html5QrCode.start(
-          { facingMode: 'environment' },
+          cameraConfig,
           {
             fps: 10,
             qrbox: { width: 250, height: 250 },
@@ -33,6 +41,10 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
           (decodedText) => {
             if (isMounted) {
               if (navigator.vibrate) navigator.vibrate(100);
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('condobox_camera_permission', 'granted');
+                document.cookie = 'condobox_camera_permission=granted; path=/; max-age=31536000; SameSite=Lax';
+              }
               html5QrCode.stop().then(() => {
                 onScanSuccess(decodedText);
               }).catch(() => {
