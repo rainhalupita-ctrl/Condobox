@@ -44,25 +44,57 @@ export class WhatsAppService {
         return clean;
     }
     /**
-     * Envia notificação de chegada de encomenda
+     * Registra webhook na Evolution API para receber respostas dos moradores
+     */
+    async ensureWebhookConfigured() {
+        try {
+            const webhookEndpoint = `${this.apiUrl}/webhook/set/${this.instanceName}`;
+            const webhookUrl = 'http://host.docker.internal:3001/api/whatsapp/webhook';
+            await fetch(webhookEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': this.apiKey
+                },
+                body: JSON.stringify({
+                    webhook: {
+                        enabled: true,
+                        url: webhookUrl,
+                        events: ['MESSAGES_UPSERT']
+                    }
+                }),
+                signal: AbortSignal.timeout(8000)
+            });
+            console.log('🔗 [WhatsAppService] Webhook registrado com sucesso na Evolution API.');
+        }
+        catch (err) {
+            console.warn('[WhatsAppService] Aviso ao registrar webhook na Evolution API:', err.message);
+        }
+    }
+    /**
+     * Envia notificação de chegada de encomenda com link 1-clique wa.me para confirmar ciência
      */
     async notifyPackageArrival(params) {
         const webBaseUrl = this.getPublicWebUrl();
         const token = params.qrToken || params.pickupCode;
         const pickupUrl = `${webBaseUrl}/p/${token}`;
+        const portariaPhone = process.env.WHATSAPP_PORTARIA_NUMBER || '557398419901';
+        const waConfirmLink = `https://wa.me/${portariaPhone}?text=${encodeURIComponent(`Estou ciente da encomenda ${params.pickupCode}`)}`;
         const text = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
             `Olá, *${params.residentName}*!\n\n` +
-            `Uma encomenda da *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
+            `Uma encomenda de *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
             `🔑 *Código de Retirada:* *${params.pickupCode}*\n\n` +
-            `📱 *Link Direto com QR Code (Sem login necessário):*\n` +
+            `👇 *Toque no link abaixo para responder que está ciente (1 clique):*\n` +
+            `${waConfirmLink}\n\n` +
+            `📱 *Link com QR Code de retirada:*\n` +
             `${pickupUrl}\n\n` +
-            `_Abra o link acima para exibir o QR Code direto na portaria ou informe o código numérico de 4 dígitos._\n\n` +
+            `_Apresente o QR Code ou informe o código de 4 dígitos na portaria._\n\n` +
             `🏢 Portaria do Condomínio`;
         return this.sendMessage({
             phone: params.phone,
             message: text,
             mediaUrl: params.labelImageUrl,
-            caption: `📦 Encomenda ${params.carrier} (${params.unitInfo})\n🔑 Código: ${params.pickupCode}\n📱 QR Code: ${pickupUrl}`
+            caption: text
         });
     }
     /**
