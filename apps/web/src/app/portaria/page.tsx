@@ -165,6 +165,23 @@ export default function PortariaDashboardPage() {
         </div>
       )}
 
+      {/* Título e Botão de Configuração */}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => {
+            const current = LocalApiClient.getCurrentImageBaseUrl();
+            const url = window.prompt("Configuração para Uso no Celular:\n\nDigite o IP do computador da portaria (Ex: http://192.168.0.10:3001)\n\nIsso fará o celular enviar as mensagens direto pelo seu computador em vez da nuvem.", current);
+            if (url !== null) {
+              LocalApiClient.setCustomBaseUrl(url);
+              alert("Configuração salva no seu aparelho!");
+            }
+          }}
+          className="text-[10px] text-slate-500 hover:text-slate-300 underline"
+        >
+          Configurar IP Local (Apenas para Celular)
+        </button>
+      </div>
+
       {/* Ações Rápidas da Portaria (Touch/Tablet) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Link
