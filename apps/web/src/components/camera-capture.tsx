@@ -135,37 +135,34 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }, 'image/jpeg', 0.78);
   }, [onCapture]);
 
-  // Análise em Tempo Real em Segundo Plano enquanto a câmera estiver aberta
+  // ─── Análise em Tempo Real em 2 Estágios ───────────────────────────────────
+  // Estágio 1 (rápido): imagem 320px → /api/ocr-live → só bloco+ap+confiança
+  //   → sem lookup Supabase, timeout 4s, ciclo a cada 800ms
+  // Estágio 2 (completo): ao detectar ap, captura frame 720px → /api/upload
+  //   → enriquecimento completo em background enquanto UI já avança
   useEffect(() => {
     if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
 
     let isScanning = false;
-    const interval = setInterval(async () => {
-      if (
-        autoCaptureFiredRef.current ||
-        !videoRef.current ||
-        videoRef.current.readyState < 2 ||
-        isScanning
-      ) {
-        return;
-      }
 
-      isScanning = true;
-      setIsLiveAnalyzing(true);
-
-      try {
+    // Captura um frame do vídeo em uma resolução alvo e retorna blob + ctx
+    const captureFrame = (
+      targetDim: number,
+      quality: number
+    ): Promise<{ blob: Blob; avgBrightness: number } | null> =>
+      new Promise((resolve) => {
         const video = videoRef.current;
-        const maxDim = 720;
-        let width = video.videoWidth || 720;
-        let height = video.videoHeight || 480;
+        if (!video || video.readyState < 2) return resolve(null);
 
-        if (width > maxDim || height > maxDim) {
+        let width = video.videoWidth || targetDim;
+        let height = video.videoHeight || Math.round(targetDim * 0.75);
+        if (width > targetDim || height > targetDim) {
           if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
+            height = Math.round((height * targetDim) / width);
+            width = targetDim;
           } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
+            width = Math.round((width * targetDim) / height);
+            height = targetDim;
           }
         }
 
@@ -173,81 +170,121 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          isScanning = false;
-          setIsLiveAnalyzing(false);
-          return;
-        }
-
+        if (!ctx) return resolve(null);
         ctx.drawImage(video, 0, 0, width, height);
 
-        // Checagem visual rápida: Descarta se a imagem estiver completamente preta/escura
+        // Checagem de brilho — rejeita frames escuros/pretos
+        let brightnessSum = 0;
+        let count = 0;
         try {
           const imgData = ctx.getImageData(0, 0, width, height);
           const pixels = imgData.data;
-          let brightnessSum = 0;
           const step = Math.max(1, Math.floor(pixels.length / 400));
-          let count = 0;
           for (let i = 0; i < pixels.length; i += step * 4) {
             brightnessSum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
             count++;
           }
-          const avgBrightness = count > 0 ? brightnessSum / count : 128;
-          // Se for quase 100% preta (< 15), descarta na hora sem chamar OCR
-          if (avgBrightness < 15) {
-            isScanning = false;
-            setIsLiveAnalyzing(false);
-            return;
-          }
         } catch {}
+        const avgBrightness = count > 0 ? brightnessSum / count : 128;
 
-        canvas.toBlob(async (blob) => {
-          if (!blob || autoCaptureFiredRef.current) {
-            isScanning = false;
-            setIsLiveAnalyzing(false);
-            return;
-          }
+        canvas.toBlob(
+          (blob) => resolve(blob ? { blob, avgBrightness } : null),
+          'image/jpeg',
+          quality
+        );
+      });
 
+    const interval = setInterval(async () => {
+      if (autoCaptureFiredRef.current || isScanning) return;
+
+      isScanning = true;
+      setIsLiveAnalyzing(true);
+
+      try {
+        // ── Estágio 1: Frame leve (320px, q=0.65) → /api/ocr-live ──
+        const fast = await captureFrame(320, 0.65);
+        if (!fast || fast.avgBrightness < 15) {
+          // Frame escuro/preto — ignora silenciosamente
+          return;
+        }
+
+        const fd = new FormData();
+        fd.append('file', fast.blob, 'live.jpg');
+        const liveRes = await fetch('/api/ocr-live', {
+          method: 'POST',
+          body: fd,
+          signal: AbortSignal.timeout(4500),
+        });
+
+        if (!liveRes.ok || autoCaptureFiredRef.current) return;
+
+        const liveOcr = await liveRes.json();
+        const unitClean = liveOcr?.unitNumber
+          ? String(liveOcr.unitNumber).replace(/\D/g, '')
+          : '';
+        const detected =
+          unitClean.length >= 1 &&
+          typeof liveOcr.confidence === 'number' &&
+          liveOcr.confidence >= 0.5;
+
+        if (!detected || autoCaptureFiredRef.current) return;
+
+        // ── Estágio 2: Etiqueta encontrada → captura frame completo (720px) ──
+        autoCaptureFiredRef.current = true;
+        setIsDetected(true);
+        clearInterval(interval);
+
+        try { navigator.vibrate?.([50, 50, 100]); } catch {}
+
+        // Usa o frame leve como preview instantâneo enquanto o upload completo ocorre
+        const previewUrl = URL.createObjectURL(fast.blob);
+        setCapturedBlob(fast.blob);
+        setCapturedPreview(previewUrl);
+        stopCamera();
+
+        // Dispara upload completo em background (com Supabase lookup)
+        // O onCapture é chamado primeiro com resultado parcial para UI não bloquear
+        const partialOcr = {
+          ocr: {
+            recipientName: null,
+            block: liveOcr.block,
+            unitNumber: liveOcr.unitNumber,
+            carrier: 'Outro',
+            trackingCode: null,
+            invoiceNumber: null,
+            confidence: liveOcr.confidence,
+          },
+          suggestedMatch: { unit: null, resident: null },
+          image: { path: '', url: previewUrl },
+          success: true,
+        };
+        onCapture(fast.blob, previewUrl, partialOcr as any);
+
+        // Em background: enriquece com frame 720px → /api/upload (nome, morador, rastreio)
+        captureFrame(720, 0.80).then(async (full) => {
+          if (!full) return;
           try {
-            const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
-
-            const ocr = ocrResult?.ocr;
-            const unitNumberClean = ocr?.unitNumber ? ocr.unitNumber.replace(/\D/g, '') : '';
-            
-            // A leitura automática ao vivo SÓ deve avançar se identificar com clareza o Apartamento / Unidade
-            const hasEssentialFields =
-              Boolean(ocr) &&
-              unitNumberClean.length >= 1 &&
-              (ocr.confidence === undefined || typeof ocr.confidence !== 'number' || ocr.confidence >= 0.5);
-
-            if (hasEssentialFields && !autoCaptureFiredRef.current) {
-              autoCaptureFiredRef.current = true;
-              setIsDetected(true);
-              clearInterval(interval);
-
-              try {
-                navigator.vibrate?.([50, 50, 100]);
-              } catch {}
-
-              const previewUrl = URL.createObjectURL(blob);
-              setCapturedBlob(blob);
-              setCapturedPreview(previewUrl);
-              stopCamera();
-              onCapture(blob, previewUrl, ocrResult);
-              return;
+            const fd2 = new FormData();
+            fd2.append('file', full.blob, 'label.jpg');
+            const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd2 });
+            if (uploadRes.ok) {
+              const fullOcr = await uploadRes.json();
+              // Dispara evento customizado para a página atualizar campos já preenchidos
+              window.dispatchEvent(
+                new CustomEvent('ocr-enriched', { detail: fullOcr })
+              );
             }
-          } catch (err) {
-            // Silencioso em background enquanto busca foco na etiqueta
-          } finally {
-            isScanning = false;
-            setIsLiveAnalyzing(false);
-          }
-        }, 'image/jpeg', 0.75);
+          } catch {}
+        });
+
+        return;
       } catch {
+        // Silencioso
+      } finally {
         isScanning = false;
         setIsLiveAnalyzing(false);
       }
-    }, 1500);
+    }, 800);
 
     return () => {
       clearInterval(interval);

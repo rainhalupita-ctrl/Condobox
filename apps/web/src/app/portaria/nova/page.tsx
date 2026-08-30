@@ -80,6 +80,34 @@ export default function NovaEncomendaPage() {
     loadUnitsAndResidents();
   }, []);
 
+  // Escuta enriquecimento em segundo plano (Estágio 2 do OCR live)
+  // Atualiza campos que o Estágio 1 (rápido) não preencheu: nome, transportadora, rastreio, morador
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const fullOcr = (e as CustomEvent).detail as OCRResponse;
+      if (!fullOcr?.ocr) return;
+      // Só enriquece — nunca substitui campos já definidos pelo usuário
+      if (fullOcr.ocr.carrier && fullOcr.ocr.carrier !== 'Outro') setCarrier(fullOcr.ocr.carrier);
+      if (fullOcr.ocr.trackingCode) setTrackingCode((prev) => prev || fullOcr.ocr.trackingCode || '');
+      if ((fullOcr.ocr as any).invoiceNumber) setInvoiceNumber((prev) => prev || (fullOcr.ocr as any).invoiceNumber || '');
+      if (fullOcr.ocr.recipientName) setRecipientNameOcr((prev) => prev || fullOcr.ocr.recipientName || '');
+      // Se encontrou morador no Supabase e ainda não há seleção do usuário
+      if (fullOcr.suggestedMatch?.resident) {
+        setSelectedResidentId((prev) => prev || fullOcr.suggestedMatch!.resident!.id);
+        setCustomPhone((prev) => prev || fullOcr.suggestedMatch!.resident!.phone);
+      }
+      if (fullOcr.suggestedMatch?.unit) {
+        const u = fullOcr.suggestedMatch.unit;
+        setSelectedBlock((prev) => prev || u.block || 'Bloco A');
+        setSelectedUnitNumber((prev) => prev || u.unit_number);
+        setSelectedUnitId((prev) => prev || u.id);
+      }
+      setOcrData(fullOcr);
+    };
+    window.addEventListener('ocr-enriched', handler);
+    return () => window.removeEventListener('ocr-enriched', handler);
+  }, []);
+
   // Monitora o status das notificações de WhatsApp em segundo plano a cada 2.5s
   useEffect(() => {
     if (recentSaved.length === 0) return;
