@@ -230,47 +230,67 @@ export default function NovaEncomendaPage() {
   const applyOcrData = (ocrResult: OCRResponse) => {
     setOcrData(ocrResult);
 
-    let currentUnits = units;
-    let currentResidents = residents;
+    if (ocrResult.ocr.carrier) {
+      setCarrier(ocrResult.ocr.carrier);
+    }
+    if (ocrResult.ocr.trackingCode) {
+      setTrackingCode(ocrResult.ocr.trackingCode);
+    }
+    if ((ocrResult.ocr as any).invoiceNumber) {
+      setInvoiceNumber((ocrResult.ocr as any).invoiceNumber);
+    }
+    if (ocrResult.ocr.recipientName) {
+      setRecipientNameOcr(ocrResult.ocr.recipientName);
+    }
 
-    if (ocrResult.ocr.carrier) setCarrier(ocrResult.ocr.carrier);
-    if (ocrResult.ocr.trackingCode) setTrackingCode(ocrResult.ocr.trackingCode);
-    if ((ocrResult.ocr as any).invoiceNumber) setInvoiceNumber((ocrResult.ocr as any).invoiceNumber);
-    if (ocrResult.ocr.recipientName) setRecipientNameOcr(ocrResult.ocr.recipientName);
-
-    // Match inteligente da unidade
+    // Match inteligente e instantâneo da unidade e bloco
     let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
-    if (!targetUnitId && ocrResult.ocr.unitNumber) {
-      const cleanNum = ocrResult.ocr.unitNumber.replace(/\D/g, '');
-      const found = currentUnits.find(u => {
+    const rawUnitStr = String(ocrResult.ocr.unitNumber || '');
+    const cleanNum = rawUnitStr.replace(/\D/g, '');
+    const blockLetterMatch = rawUnitStr.match(/([A-Za-z])/);
+    const suggestedBlock = ocrResult.ocr.block || (blockLetterMatch ? `Bloco ${blockLetterMatch[1].toUpperCase()}` : null);
+
+    if (!targetUnitId && cleanNum) {
+      // 1. Tenta match exato por número e bloco
+      let found = units.find((u) => {
         const uNum = u.unit_number.replace(/\D/g, '');
         const matchNum = uNum === cleanNum;
-        if (ocrResult.ocr.block) {
-          return matchNum && u.block.toLowerCase().includes(ocrResult.ocr.block.toLowerCase());
+        if (suggestedBlock) {
+          const uBlock = (u.block || '').toLowerCase();
+          const sBlock = suggestedBlock.toLowerCase();
+          return matchNum && (uBlock.includes(sBlock) || sBlock.includes(uBlock));
         }
         return matchNum;
-      }) || currentUnits.find(u => u.unit_number.replace(/\D/g, '') === cleanNum);
+      });
+
+      // 2. Se não achou com bloco, busca só por número da unidade
+      if (!found) {
+        found = units.find((u) => u.unit_number.replace(/\D/g, '') === cleanNum);
+      }
+
       if (found) targetUnitId = found.id;
     }
 
     if (targetUnitId) {
-      const matchedUnit = currentUnits.find(u => u.id === targetUnitId);
+      const matchedUnit = units.find((u) => u.id === targetUnitId);
       if (matchedUnit) {
         setSelectedBlock(matchedUnit.block || 'Bloco A');
         setSelectedUnitNumber(matchedUnit.unit_number);
+        setSelectedUnitId(targetUnitId);
       }
-      setSelectedUnitId(targetUnitId);
-      const unitRes = currentResidents.filter(r => r.unit_id === targetUnitId);
+      const unitRes = residents.filter((r) => r.unit_id === targetUnitId);
       if (ocrResult.suggestedMatch?.resident) {
         setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
         setCustomPhone(ocrResult.suggestedMatch.resident.phone);
       } else if (unitRes.length > 0) {
-        const matchByName = unitRes.find(r => 
-          ocrResult.ocr.recipientName && 
-          r.name.toLowerCase().includes(ocrResult.ocr.recipientName.toLowerCase().split(' ')[0])
-        ) || unitRes[0];
-        setSelectedResidentId(matchByName.id);
-        setCustomPhone(matchByName.phone);
+        const recipientFirst = (ocrResult.ocr.recipientName || '').toLowerCase().trim().split(/\s+/)[0];
+        const matchByName =
+          recipientFirst && recipientFirst.length >= 3
+            ? unitRes.find((r) => r.name.toLowerCase().includes(recipientFirst))
+            : null;
+        const chosen = matchByName || unitRes[0];
+        setSelectedResidentId(chosen.id);
+        setCustomPhone(chosen.phone);
       }
     }
   };

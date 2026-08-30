@@ -310,12 +310,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           navigator.vibrate?.([50, 50, 100]);
         } catch {}
 
-        // Captura foto em alta resolução (800px) para salvamento final
-        const highRes = await captureFrame(800, 0.85);
-        const finalBlob = highRes?.blob || fast.blob;
-        const previewUrl = URL.createObjectURL(finalBlob);
-
-        setCapturedBlob(finalBlob);
+        const previewUrl = URL.createObjectURL(fast.blob);
+        setCapturedBlob(fast.blob);
         setCapturedPreview(previewUrl);
         stopCamera();
 
@@ -324,7 +320,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             recipientName: liveOcr.recipientName || null,
             block: liveOcr.block || null,
             unitNumber: liveOcr.unitNumber || null,
-            carrier: 'Outro',
+            carrier: liveOcr.carrier || 'Mercado Livre',
             trackingCode: liveOcr.trackingCode || null,
             invoiceNumber: null,
             confidence: liveOcr.confidence || 0.95,
@@ -333,11 +329,12 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           image: { path: '', url: previewUrl },
           success: true,
         };
-        onCapture(finalBlob, previewUrl, partialOcr as any);
+        // Transição e preenchimento instantâneo (0ms)
+        onCapture(fast.blob, previewUrl, partialOcr as any);
 
-        // Enriquecimento completo em background com a imagem em alta resolução
+        // Enriquecimento completo em background com a imagem
         const fd2 = new FormData();
-        fd2.append('file', finalBlob, 'label.jpg');
+        fd2.append('file', fast.blob, 'label.jpg');
         fetch('/api/upload', { method: 'POST', body: fd2 })
           .then((r) => r.ok && r.json())
           .then((fullOcr) => {
