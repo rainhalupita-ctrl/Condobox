@@ -64,9 +64,16 @@ export default function PublicPackagePage() {
   const handleUnlockAndSendWhatsApp = async () => {
     setIsSendingConfirm(true);
     try {
-      await fetch(`/api/package/${token}`, { method: 'POST' });
-    } catch {}
-    setUnlocked(true);
+      const res = await fetch(`/api/package/${token}`, { method: 'POST' });
+      if (res.ok) {
+        setUnlocked(true);
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Não foi possível enviar a confirmação. Tente novamente.');
+      }
+    } catch {
+      alert('Erro de conexão. Verifique sua internet.');
+    }
     setIsSendingConfirm(false);
   };
 

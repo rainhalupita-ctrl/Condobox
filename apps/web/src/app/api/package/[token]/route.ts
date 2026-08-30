@@ -132,20 +132,29 @@ export async function POST(
         `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
         `🏢 Apresente este código ou o QR Code na portaria ao retirar.`;
 
-      fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': evolutionKey
-        },
-        body: JSON.stringify({
-          number: cleanPhone,
-          text: confirmMsg
-        }),
-        signal: AbortSignal.timeout(6000)
-      }).catch((err) => {
-        console.warn('[API Package Confirm] Falha ao disparar mensagem via Evolution API:', err.message);
-      });
+      try {
+        const evoRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': evolutionKey
+          },
+          body: JSON.stringify({
+            number: cleanPhone,
+            text: confirmMsg
+          }),
+          signal: AbortSignal.timeout(8000)
+        });
+
+        if (!evoRes.ok) {
+          const errText = await evoRes.text();
+          console.warn('[API Package Confirm] Evolution API retornou erro:', errText);
+          return NextResponse.json({ error: 'Falha ao enviar mensagem de confirmação.' }, { status: 502 });
+        }
+      } catch (err: any) {
+        console.warn('[API Package Confirm] Falha na requisição para Evolution API:', err.message);
+        return NextResponse.json({ error: 'Erro de comunicação com o servidor de mensagens.' }, { status: 502 });
+      }
     }
 
     return NextResponse.json({
