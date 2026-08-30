@@ -58,39 +58,57 @@ export default function RetiradaPage() {
       if (supabase) {
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanCode);
         let query = supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
+        
         if (isUUID) {
           query = query.eq('id', cleanCode);
         } else {
+          // Fallback seguro: se não encontrar com qr_token, vai tentar encontrar com pickup_code no or
           query = query.or(`pickup_code.eq.${cleanCode},qr_token.eq.${cleanCode}`);
         }
+        
         const { data, error } = await query.maybeSingle();
 
-        if (data && !error) {
+        if (error) {
+          console.error('[handleScanCode] Supabase query error:', error);
+        } else if (data) {
           found = data as PackageType;
         }
       }
 
       // Se não encontrou via Supabase, tenta buscar na API local
       if (!found) {
-        const res = await fetch(`${LocalApiClient.getCurrentImageBaseUrl()}/api/packages/search?q=${cleanCode}&status=RECEIVED`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.packages && json.packages.length > 0) {
-            found = json.packages[0];
+        try {
+          console.log('[handleScanCode] Tentando buscar na API local...');
+          // Evita travamento da UI se a API local estiver fora do ar
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          
+          const res = await fetch(`${LocalApiClient.getCurrentImageBaseUrl()}/api/packages/search?q=${cleanCode}`, {
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const json = await res.json();
+            if (json.packages && json.packages.length > 0) {
+              found = json.packages[0];
+            }
+          } else {
+            console.warn('[handleScanCode] Local API retornou status não-ok:', res.status);
           }
+        } catch (fetchErr) {
+          console.warn('[handleScanCode] Fallback Local API falhou:', fetchErr);
         }
       }
 
-
       if (!found) {
-        setErrorMessage(`Nenhuma encomenda pendente encontrada com o código "${cleanCode}". Verifique e tente novamente.`);
-        setIsLoading(false);
+        setErrorMessage(`Nenhuma encomenda encontrada com o código "${cleanCode}". Verifique e tente novamente.`);
         return;
       }
 
       if (found.status === 'DELIVERED') {
         setErrorMessage(`Esta encomenda (${found.carrier} - Apto ${found.unit?.unit_number}) já foi entregue anteriormente.`);
-        setIsLoading(false);
         return;
       }
 
@@ -98,6 +116,7 @@ export default function RetiradaPage() {
       setDeliveredToName(found.resident?.name || found.recipient_name_ocr || '');
       setStep('SIGN');
     } catch (err: any) {
+      console.error('[handleScanCode] Unexpected error:', err);
       setErrorMessage(`Erro ao consultar encomenda: ${err.message}`);
     } finally {
       setIsLoading(false);
