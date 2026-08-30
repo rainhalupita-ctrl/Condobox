@@ -34,20 +34,6 @@ export function CookieConsent() {
       localStorage.setItem('condobox_camera_facing', 'environment');
       localStorage.setItem('condobox_cache_enabled', 'true');
 
-      // 3. Pré-autoriza o acesso à câmera para fixar a permissão no navegador
-      try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' } },
-            audio: false
-          });
-          // Para o stream imediatamente após a autorização permanente
-          stream.getTracks().forEach(track => track.stop());
-        }
-      } catch (err) {
-        console.log('Permissão de câmera será concedida na primeira captura:', err);
-      }
-
       setShowBanner(false);
 
       // Detecta se é iPhone/iOS Safari para oferecer a dica de fixar permanente na tela inicial

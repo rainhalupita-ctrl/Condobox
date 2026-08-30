@@ -67,8 +67,33 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
 
     return () => {
       isMounted = false;
-      if (scannerRef.current && scannerRef.current.isScanning) {
-        scannerRef.current.stop().catch(() => {});
+      if (scannerRef.current) {
+        try {
+          if (scannerRef.current.isScanning) {
+            scannerRef.current.stop().then(() => {
+              try { scannerRef.current?.clear(); } catch {}
+            }).catch(() => {});
+          } else {
+            try { scannerRef.current.clear(); } catch {}
+          }
+        } catch {}
+      }
+      // Garante parada de qualquer elemento de vídeo do container
+      const container = document.getElementById(elementId);
+      if (container) {
+        const videos = container.getElementsByTagName('video');
+        for (let i = 0; i < videos.length; i++) {
+          const v = videos[i];
+          if (v.srcObject) {
+            try {
+              (v.srcObject as MediaStream).getTracks().forEach(t => {
+                t.stop();
+                t.enabled = false;
+              });
+            } catch {}
+            v.srcObject = null;
+          }
+        }
       }
     };
   }, []);

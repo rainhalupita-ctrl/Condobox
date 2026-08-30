@@ -11,6 +11,9 @@ interface CameraCaptureProps {
 
 export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const isMountedRef = useRef(true);
+
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
@@ -26,36 +29,45 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [isDetected, setIsDetected] = useState(false);
   const autoCaptureFiredRef = useRef(false);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const savedFacing = localStorage.getItem('condobox_camera_facing');
-      if (savedFacing === 'user' || savedFacing === 'environment') {
-        setFacingMode(savedFacing);
-      } else {
-        setFacingMode(isMobile ? 'environment' : 'user');
+  // Função centralizada para desligar completamente a câmera e liberar o hardware
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+          track.enabled = false;
+        } catch {}
+      });
+      streamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      if (videoRef.current.srcObject) {
+        try {
+          const s = videoRef.current.srcObject as MediaStream;
+          s.getTracks?.().forEach((t) => {
+            try {
+              t.stop();
+              t.enabled = false;
+            } catch {}
+          });
+        } catch {}
+        videoRef.current.srcObject = null;
       }
     }
+
+    setStream(null);
   }, []);
 
-  useEffect(() => {
-    autoCaptureFiredRef.current = false;
-    startCamera();
-    return () => {
-      stopCamera();
-    };
-  }, [facingMode]);
-
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
     setCameraError(null);
     setIsDetected(false);
     autoCaptureFiredRef.current = false;
 
-    try {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-      }
+    // Desliga qualquer stream anterior antes de iniciar novo
+    stopCamera();
 
+    try {
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: facingMode },
@@ -66,6 +78,19 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       };
 
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Se o componente foi desmontado enquanto o usuário dava permissão, encerra imediatamente!
+      if (!isMountedRef.current) {
+        mediaStream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+            t.enabled = false;
+          } catch {}
+        });
+        return;
+      }
+
+      streamRef.current = mediaStream;
       setStream(mediaStream);
 
       if (typeof window !== 'undefined') {
@@ -79,20 +104,52 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         videoRef.current.play().catch(() => {});
       }
     } catch (err: any) {
-      console.warn('Câmera nativa não disponível:', err);
-      setCameraError('Não foi possível acessar a câmera do dispositivo. Use o botão de upload de foto.');
+      if (isMountedRef.current) {
+        console.warn('Câmera nativa não disponível:', err);
+        setCameraError('Não foi possível acessar a câmera do dispositivo. Use o botão de upload de foto.');
+      }
     }
-  };
+  }, [facingMode, stopCamera]);
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => {
-        track.stop();
-        track.enabled = false;
-      });
-      setStream(null);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const savedFacing = localStorage.getItem('condobox_camera_facing');
+      if (savedFacing === 'user' || savedFacing === 'environment') {
+        setFacingMode(savedFacing);
+      } else {
+        setFacingMode(isMobile ? 'environment' : 'user');
+      }
     }
-  };
+  }, []);
+
+  // Ciclo de vida da Câmera: Inicia e garante desligamento em navegações, troca de aba e unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    autoCaptureFiredRef.current = false;
+
+    startCamera();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stopCamera();
+      } else if (document.visibilityState === 'visible' && !capturedBlob && isMountedRef.current) {
+        startCamera();
+      }
+    };
+
+    window.addEventListener('beforeunload', stopCamera);
+    window.addEventListener('pagehide', stopCamera);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMountedRef.current = false;
+      stopCamera();
+      window.removeEventListener('beforeunload', stopCamera);
+      window.removeEventListener('pagehide', stopCamera);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [facingMode, startCamera, stopCamera]);
 
   const switchCamera = () => {
     stopCamera();
@@ -149,11 +206,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       'image/jpeg',
       0.82
     );
-  }, [onCapture]);
+  }, [onCapture, stopCamera]);
 
   // ─── Análise em Tempo Real em 2 Estágios ───────────────────────────────────
-  // Estágio 1 (rápido): frame 600px → /api/ocr-live → identifica bloco + apto
-  // Estágio 2 (completo): enriquece em segundo plano com /api/upload
   useEffect(() => {
     if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
 
@@ -209,7 +264,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       });
 
     const interval = setInterval(async () => {
-      if (autoCaptureFiredRef.current || isScanning) return;
+      if (autoCaptureFiredRef.current || isScanning || !isMountedRef.current) return;
 
       isScanning = true;
       setIsLiveAnalyzing(true);
@@ -217,7 +272,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       try {
         // Estágio 1: Resolução de 800px para leitura nítida e de alta precisão
         const fast = await captureFrame(800, 0.82);
-        if (!fast || fast.avgBrightness < 15) {
+        if (!fast || fast.avgBrightness < 15 || !isMountedRef.current) {
           return;
         }
 
@@ -229,7 +284,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           signal: AbortSignal.timeout(9000),
         });
 
-        if (!liveRes.ok || autoCaptureFiredRef.current) return;
+        if (!liveRes.ok || autoCaptureFiredRef.current || !isMountedRef.current) return;
 
         const liveOcr = await liveRes.json();
         const unitClean = liveOcr?.unitNumber
@@ -243,7 +298,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           (hasUnit || hasRecipient || hasTracking) &&
           (typeof liveOcr.confidence === 'number' ? liveOcr.confidence >= 0.5 : true);
 
-        if (!detected || autoCaptureFiredRef.current) return;
+        if (!detected || autoCaptureFiredRef.current || !isMountedRef.current) return;
 
         // Estágio 2: Encontrou dados da etiqueta com sucesso!
         autoCaptureFiredRef.current = true;
@@ -292,14 +347,16 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         // Silencioso
       } finally {
         isScanning = false;
-        setIsLiveAnalyzing(false);
+        if (isMountedRef.current) {
+          setIsLiveAnalyzing(false);
+        }
       }
     }, 4000);
 
     return () => {
       clearInterval(interval);
     };
-  }, [stream, capturedBlob, onCapture]);
+  }, [stream, capturedBlob, onCapture, stopCamera]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -316,26 +373,31 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     if (capturedPreview) {
       URL.revokeObjectURL(capturedPreview);
     }
-    setCapturedPreview(null);
     setCapturedBlob(null);
-    autoCaptureFiredRef.current = false;
+    setCapturedPreview(null);
     setIsDetected(false);
-    setIsLiveAnalyzing(false);
+    autoCaptureFiredRef.current = false;
     startCamera();
   };
 
   return (
-    <div className="flex flex-col items-center w-full max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl p-4">
-      <div className="w-full flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+    <div className="flex flex-col items-center w-full max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl p-4 sm:p-5">
+      {/* Top Header */}
+      <div className="w-full flex items-center justify-between pb-3 mb-2 border-b border-slate-800/80">
         <div className="flex items-center gap-2">
           <Camera className="w-5 h-5 text-emerald-400" />
-          <h3 className="text-sm font-semibold text-slate-200">
-            {capturedPreview ? 'Confirmar Foto da Etiqueta' : 'Posicione a Etiqueta da Encomenda'}
+          <h3 className="text-sm font-bold text-slate-100">
+            {capturedPreview ? 'Foto da Encomenda' : 'Posicione a Etiqueta da Encomenda'}
           </h3>
         </div>
+
         {onCancel && (
           <button
-            onClick={onCancel}
+            type="button"
+            onClick={() => {
+              stopCamera();
+              onCancel();
+            }}
             className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
@@ -343,9 +405,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Visualizador da Câmera ou Preview - Modo Padrão Nativo do Dispositivo */}
-      <div className={`relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border transition-all duration-300 ${isDetected ? 'border-emerald-400 ring-4 ring-emerald-500/30' : 'border-slate-800 shadow-inner'}`}>
+      {/* Viewport da Câmera ou Preview */}
+      <div className="relative w-full aspect-[4/3] sm:aspect-[16/10] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800">
         {capturedPreview ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={capturedPreview}
             alt="Etiqueta capturada"
@@ -374,7 +437,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               webkit-playsinline="true"
               className="w-full h-full object-cover pointer-events-none select-none"
             />
-
 
             {/* Grid overlay */}
             <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
