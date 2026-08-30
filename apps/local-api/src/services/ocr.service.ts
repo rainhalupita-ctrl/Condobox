@@ -97,7 +97,7 @@ Responda ESTRITAMENTE em formato JSON:
         });
 
         if (res.ok) {
-          const data = await res.json();
+          const data = (await res.json()) as any;
           const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
           const parsed = JSON.parse(responseText);
 
