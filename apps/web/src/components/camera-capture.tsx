@@ -375,8 +375,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
-            {/* Linha Laser Animada de Scanner */}
-            <div className="absolute inset-x-6 top-1/3 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#10b981] animate-pulse pointer-events-none" />
 
             {/* Grid overlay */}
             <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
