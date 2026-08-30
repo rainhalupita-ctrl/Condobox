@@ -71,8 +71,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: facingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       };
@@ -405,8 +405,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Viewport da Câmera ou Preview */}
-      <div className="relative w-full aspect-[4/3] sm:aspect-[16/10] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800">
+      {/* Viewport da Câmera ou Preview - Altura expandida e imersiva para facilitar o enquadramento */}
+      <div className="relative w-full h-[58vh] sm:h-[62vh] min-h-[440px] max-h-[680px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner">
         {capturedPreview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
