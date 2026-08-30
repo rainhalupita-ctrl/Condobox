@@ -56,7 +56,7 @@ export default function PublicPackagePage() {
   const [modalImage, setModalImage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (pkg?.notes?.includes('CIENTE') || pkg?.status === 'DELIVERED') {
+    if (pkg?.status === 'DELIVERED') {
       setUnlocked(true);
     }
   }, [pkg]);
