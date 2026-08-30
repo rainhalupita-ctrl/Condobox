@@ -192,17 +192,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
 
             const ocr = ocrResult?.ocr;
-            // Se identificou o morador, unidade, NF ou código de rastreio com sucesso
-            const hasSignificantInfo =
+            // A leitura automática ao vivo SÓ deve disparar se identificar com certeza o Apartamento / Unidade
+            const hasEssentialUnit =
               ocr &&
-              (
-                (ocr.recipientName && ocr.recipientName.length >= 3) ||
-                (ocr.unitNumber && ocr.unitNumber.length >= 1) ||
-                (ocr.trackingCode && ocr.trackingCode.length >= 5) ||
-                (ocr.invoiceNumber && ocr.invoiceNumber.length >= 4)
+              Boolean(
+                (ocr.unitNumber && ocr.unitNumber.replace(/\D/g, '').length >= 1) ||
+                ocrResult?.suggestedMatch?.unit
               );
 
-            if (hasSignificantInfo && !autoCaptureFiredRef.current) {
+            if (hasEssentialUnit && !autoCaptureFiredRef.current) {
               autoCaptureFiredRef.current = true;
               setIsDetected(true);
               clearInterval(interval);
