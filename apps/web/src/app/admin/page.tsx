@@ -27,8 +27,12 @@ import {
   QrCode,
   Send,
   Smartphone,
-  Terminal
+  Smartphone,
+  Terminal,
+  FileSpreadsheet,
+  Mail
 } from 'lucide-react';
+import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 
 export default function AdminPage() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -73,8 +77,10 @@ export default function AdminPage() {
   const [testMsgResult, setTestMsgResult] = useState<string | null>(null);
   const [testMsgLoading, setTestMsgLoading] = useState(false);
 
-  // Formulário de novo morador
+  // Formulário de novo morador e importação em lote
   const [isAddResidentModalOpen, setIsAddResidentModalOpen] = useState(false);
+  const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
+  const [residentSearchQuery, setResidentSearchQuery] = useState('');
   const [newResName, setNewResName] = useState('');
   const [newResPhone, setNewResPhone] = useState('');
   const [newResEmail, setNewResEmail] = useState('');
@@ -728,14 +734,46 @@ export default function AdminPage() {
       {/* ABA 2: CADASTRO DE MORADORES */}
       {activeTab === 'RESIDENTS' && (
         <div className="space-y-4 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-slate-100">Moradores e Unidades</h3>
-            <button
-              onClick={() => setIsAddResidentModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition"
-            >
-              <Plus className="w-4 h-4" /> Novo Morador
-            </button>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-400" />
+                Moradores e Unidades ({residents.length})
+              </h3>
+              <p className="text-xs text-slate-400">
+                Gerencie todos os moradores cadastrados no sistema.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setIsBatchImportModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 transition active:scale-95"
+              >
+                <FileSpreadsheet className="w-4 h-4" /> Importar em Lote (Planilha / Lista)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsAddResidentModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition"
+              >
+                <Plus className="w-4 h-4" /> Novo Morador
+              </button>
+            </div>
+          </div>
+
+          {/* Barra de Busca de Moradores */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={residentSearchQuery}
+              onChange={(e) => setResidentSearchQuery(e.target.value)}
+              placeholder="Buscar por nome, bloco, apartamento ou WhatsApp..."
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+            />
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
@@ -746,28 +784,58 @@ export default function AdminPage() {
                     <th className="p-4">Morador</th>
                     <th className="p-4">Unidade</th>
                     <th className="p-4">WhatsApp</th>
+                    <th className="p-4">E-mail</th>
                     <th className="p-4">Status</th>
+                    <th className="p-4 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {residents.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-800/40 transition">
-                      <td className="p-4 font-semibold text-slate-100">
-                        {r.name} {r.is_primary && <span className="text-[10px] text-indigo-400 ml-1">(Titular)</span>}
-                      </td>
-                      <td className="p-4 font-medium text-slate-200">
-                        {r.unit ? `${r.unit.block} - Apto ${r.unit.unit_number}` : 'Sem Unidade'}
-                      </td>
-                      <td className="p-4 font-mono text-slate-300">
-                        {r.phone}
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          Ativo
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {residents
+                    .filter((r) => {
+                      if (!residentSearchQuery.trim()) return true;
+                      const q = residentSearchQuery.toLowerCase();
+                      const nameMatch = r.name?.toLowerCase().includes(q);
+                      const unitMatch = r.unit && `${r.unit.block} ${r.unit.unit_number}`.toLowerCase().includes(q);
+                      const phoneMatch = r.phone?.includes(q);
+                      const emailMatch = r.email?.toLowerCase().includes(q);
+                      return nameMatch || unitMatch || phoneMatch || emailMatch;
+                    })
+                    .map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-800/40 transition">
+                        <td className="p-4 font-semibold text-slate-100">
+                          {r.name} {r.is_primary && <span className="text-[10px] text-indigo-400 ml-1">(Titular)</span>}
+                        </td>
+                        <td className="p-4 font-medium text-slate-200">
+                          {r.unit ? `${r.unit.block} - Apto ${r.unit.unit_number}` : 'Sem Unidade'}
+                        </td>
+                        <td className="p-4 font-mono text-slate-300">
+                          {r.phone}
+                        </td>
+                        <td className="p-4 text-slate-400">
+                          {r.email || '—'}
+                        </td>
+                        <td className="p-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Ativo
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm(`Deseja remover o morador ${r.name}?`)) return;
+                              const supabase = createClient();
+                              await supabase.from('residents').delete().eq('id', r.id);
+                              loadData();
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
+                            title="Excluir Morador"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
@@ -1185,6 +1253,115 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Cadastro Individual de Morador */}
+      {isAddResidentModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/15 border border-indigo-500/30 rounded-xl text-indigo-400">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-white">Cadastrar Novo Morador</h3>
+              </div>
+              <button
+                onClick={() => setIsAddResidentModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddResident} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Nome Completo *</label>
+                <input
+                  type="text"
+                  required
+                  value={newResName}
+                  onChange={(e) => setNewResName(e.target.value)}
+                  placeholder="Ex: Carlos Eduardo da Silva"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Unidade / Apartamento *</label>
+                <select
+                  required
+                  value={newResUnitId}
+                  onChange={(e) => setNewResUnitId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">Selecione o apartamento...</option>
+                  {Array.from(new Set(units.map((u) => u.block))).sort().map((blockName) => (
+                    <optgroup key={blockName} label={blockName} className="bg-slate-900 text-indigo-400 font-bold">
+                      {units
+                        .filter((u) => u.block === blockName)
+                        .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
+                        .map((u) => (
+                          <option key={u.id} value={u.id} className="text-white font-normal">
+                            {u.block} — Apto {u.unit_number}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">WhatsApp para Notificações *</label>
+                <input
+                  type="text"
+                  required
+                  value={newResPhone}
+                  onChange={(e) => setNewResPhone(e.target.value)}
+                  placeholder="Ex: 11988887777 ou 73981953741"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">E-mail (Opcional)</label>
+                <input
+                  type="email"
+                  value={newResEmail}
+                  onChange={(e) => setNewResEmail(e.target.value)}
+                  placeholder="morador@exemplo.com"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddResidentModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow-lg shadow-indigo-950"
+                >
+                  Salvar Morador
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Importação de Moradores em Lote */}
+      <BatchResidentImportModal
+        isOpen={isBatchImportModalOpen}
+        onClose={() => setIsBatchImportModalOpen(false)}
+        onSuccess={() => {
+          setIsBatchImportModalOpen(false);
+          loadData();
+        }}
+      />
     </div>
   );
 }
