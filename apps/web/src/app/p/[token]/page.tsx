@@ -82,7 +82,7 @@ export default function PublicPackagePage() {
 
   const loadPackageSilently = async () => {
     try {
-      const res = await fetch(`/api/package/${token}`);
+      const res = await fetch(`/api/package/${token}?t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok && data.package) {
         setPkg(data.package);
@@ -94,7 +94,7 @@ export default function PublicPackagePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/package/${token}`);
+      const res = await fetch(`/api/package/${token}?t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok && data.package) {
         setPkg(data.package);
