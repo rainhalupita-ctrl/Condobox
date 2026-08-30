@@ -226,13 +226,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Visualizador da Câmera ou Preview */}
-      <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
+      {/* Visualizador da Câmera ou Preview - Otimizado na Vertical */}
+      <div className="relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner">
         {capturedPreview ? (
           <img
             src={capturedPreview}
             alt="Etiqueta capturada"
-            className="w-full h-full object-contain"
+            className="w-full h-full object-contain bg-black"
           />
         ) : cameraError ? (
           <div className="p-6 text-center text-slate-400 flex flex-col items-center gap-3">
@@ -253,10 +253,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               muted
               className="w-full h-full object-cover"
             />
-            {/* Grid overlay de alinhamento */}
-            <div className="absolute inset-4 border-2 border-dashed border-emerald-400/40 rounded-lg pointer-events-none flex flex-col justify-between p-2">
-              <span className="text-[11px] text-emerald-400 font-mono bg-black/60 px-2 py-0.5 rounded self-start">
-                Enquadre a etiqueta com o nome e apto
+            {/* Grid overlay de enquadramento vertical */}
+            <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
+              <span className="text-xs text-emerald-300 font-mono bg-black/80 backdrop-blur-sm px-3 py-1 rounded-full self-center border border-emerald-500/30 shadow-lg">
+                Posicione a etiqueta aqui
+              </span>
+              <span className="text-[11px] text-slate-300 font-mono bg-black/75 px-2.5 py-0.5 rounded-full self-center">
+                Apto • Morador • NF • Rastreio
               </span>
             </div>
           </>
