@@ -89,29 +89,29 @@ function parseRawText(text: string) {
   };
 }
 
-// ─── Provider: Google Gemini Flash (Paralelo Ultra-Rápido) ──────────────────
+// ─── Provider: Google Gemini Flash-Lite (Ultra-Rápido ~1.2s) ─────────────────
 async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {
   const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.95}';
 
-  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
-  const promises = models.map(async (model) => {
+  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+  for (const model of models) {
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 80 },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 60 },
           }),
-          signal: AbortSignal.timeout(3200),
+          signal: AbortSignal.timeout(3000),
         }
       );
-      if (!res.ok) return null;
+      if (!res.ok) continue;
       const data = await res.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) return null;
+      if (!text) continue;
       const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
       const result = formatOcrResult(parsed);
       if (result.confidence > 0) {
@@ -119,23 +119,19 @@ async function tryGemini(base64Image: string, mimeType: string, apiKey: string) 
         return result;
       }
     } catch {}
-    return null;
-  });
-
-  return Promise.any(
-    promises.map((p) => p.then((r) => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data')))))
-  ).catch(() => null);
+  }
+  return null;
 }
 
-// ─── Provider: Groq Vision (llama-4-scout) ────────────────────────────────────
-async function tryGroq(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.95}';
+// ─── Provider: NVIDIA NIM (Llama 3.2 Vision) ──────────────────────────────────
+async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) {
+  const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.9}';
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'meta/llama-3.2-11b-vision-instruct',
         messages: [
           {
             role: 'user',
@@ -146,46 +142,10 @@ async function tryGroq(base64Image: string, mimeType: string, apiKey: string) {
           },
         ],
         temperature: 0,
-        max_tokens: 80,
+        max_tokens: 60,
         response_format: { type: 'json_object' },
       }),
-      signal: AbortSignal.timeout(3200),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    const parsed = JSON.parse(jsonMatch[0]);
-    const result = formatOcrResult(parsed);
-    if (result.confidence > 0) {
-      console.log('[OCR-LIVE] ✅ Groq Vision', result);
-      return result;
-    }
-  } catch {}
-  return null;
-}
-
-// ─── Provider: NVIDIA NIM (Llama 3.2 Vision) ──────────────────────────────────
-async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = `Extraia o destinatario, apartamento e bloco desta etiqueta. Retorne APENAS JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.9}`;
-  try {
-    const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: 'meta/llama-3.2-11b-vision-instruct',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: PROMPT },
-            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-          ],
-        }],
-        temperature: 0,
-        max_tokens: 150,
-      }),
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(3500),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -204,28 +164,11 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
   return null;
 }
 
-// ─── Provider: Tesseract.js (local, sem rede) ─────────────────────────────────
-async function tryTesseract(buffer: Buffer) {
-  try {
-    const { data: { text } } = await Tesseract.recognize(buffer, 'por+eng', { logger: () => {} });
-    if (!text || text.trim().length < 5) return null;
-    const result = parseRawText(text);
-    if (result.confidence > 0) {
-      console.log('[OCR-LIVE] ✅ Tesseract (local)', result);
-      return result;
-    }
-  } catch (e: any) {
-    console.warn('[OCR-LIVE] Tesseract falhou:', e.message?.slice(0, 80));
-  }
-  return null;
-}
-
-// ─── Handler principal ────────────────────────────────────────────────────────
+// ─── Handler principal (Ultra Rápido, Fail-Fast) ──────────────────────────────
 export async function POST(request: NextRequest) {
   const EMPTY = { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
   try {
     const geminiKey = process.env.GEMINI_API_KEY || '';
-    const groqKey = process.env.GROQ_API_KEY || '';
     const nvidiaKey = process.env.NVIDIA_API_KEY || '';
 
     const formData = await request.formData();
@@ -237,31 +180,21 @@ export async function POST(request: NextRequest) {
     const base64Image = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    // ── TIER 0: Gemini e Groq em paralelo (Race — vence quem responder primeiro) ──
-    const tier0Promises: Promise<any>[] = [];
-    if (geminiKey) tier0Promises.push(tryGemini(base64Image, mimeType, geminiKey));
-    if (groqKey) tier0Promises.push(tryGroq(base64Image, mimeType, groqKey));
-
-    if (tier0Promises.length > 0) {
-      // race que ignora nulos — retorna o primeiro resultado válido
-      const tier0Result = await Promise.any(
-        tier0Promises.map(p =>
-          p.then(r => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data'))))
-        )
-      ).catch(() => null);
-
-      if (tier0Result) return NextResponse.json(tier0Result);
+    // ── 1. Gemini 3.5 Flash-Lite (Principal, ~1.2s) ──
+    if (geminiKey) {
+      const geminiResult = await tryGemini(base64Image, mimeType, geminiKey);
+      if (geminiResult && geminiResult.confidence > 0) {
+        return NextResponse.json(geminiResult);
+      }
     }
 
-    // ── TIER 1: NVIDIA NIM Vision ──────────────────────────────────────────────
+    // ── 2. NVIDIA NIM Vision (Fallback Imediato) ──
     if (nvidiaKey) {
       const nvidiaResult = await tryNvidia(base64Image, mimeType, nvidiaKey);
-      if (nvidiaResult) return NextResponse.json(nvidiaResult);
+      if (nvidiaResult && nvidiaResult.confidence > 0) {
+        return NextResponse.json(nvidiaResult);
+      }
     }
-
-    // ── TIER 2: Tesseract.js — offline, sem limite ─────────────────────────────
-    const tesseractResult = await tryTesseract(buffer);
-    if (tesseractResult) return NextResponse.json(tesseractResult);
 
     return NextResponse.json(EMPTY);
   } catch {
