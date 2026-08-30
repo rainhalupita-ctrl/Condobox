@@ -9,16 +9,21 @@ import Link from 'next/link';
 type Tab = 'portaria' | 'morador';
 
 export default function LoginPage() {
-  const [tab, setTab] = useState<Tab>('morador');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirect') || '';
+
+  const initialTab: Tab = redirectTo.includes('/portaria') || redirectTo.includes('/admin')
+    ? 'portaria'
+    : 'morador';
+
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect');
   const supabase = createClient();
 
   const handleLogin = async (e: React.FormEvent) => {

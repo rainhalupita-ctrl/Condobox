@@ -150,6 +150,12 @@ export default function NovaEncomendaPage() {
   const loadUnitsAndResidents = async () => {
     const supabase = createClient();
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = '/login?redirect=/portaria/nova';
+        return;
+      }
+
       const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
       const { data: rData } = await supabase.from('residents').select('*').eq('active', true);
       if (uData) {

@@ -109,14 +109,20 @@ export default function AdminPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const health = await LocalApiClient.checkHealth();
-    setHealthStatus(health);
-
-    const wa = await LocalApiClient.getWhatsAppStatus();
-    setWhatsappState(wa);
-
     const supabase = createClient();
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = '/login?redirect=/admin';
+        return;
+      }
+
+      const health = await LocalApiClient.checkHealth();
+      setHealthStatus(health);
+
+      const wa = await LocalApiClient.getWhatsAppStatus();
+      setWhatsappState(wa);
+
       const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
       const { data: rData } = await supabase.from('residents').select('*, unit:units(*)').order('name');
       const { data: pData } = await supabase.from('packages').select('*, unit:units(*), resident:residents(*)');

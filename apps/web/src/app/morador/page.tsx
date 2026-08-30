@@ -81,6 +81,11 @@ export default function MoradorPage() {
   };
 
   useEffect(() => {
+    if (!authLoading && !user) {
+      window.location.href = '/login?redirect=/morador';
+      return;
+    }
+
     if (!authLoading && user) {
       loadResidentAndPackages();
 

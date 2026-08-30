@@ -29,6 +29,17 @@ export default function RetiradaPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [receiptData, setReceiptData] = useState<any | null>(null);
 
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = '/login?redirect=/portaria/retirada';
+      }
+    };
+    checkAuth();
+  }, []);
+
   const handleScanCode = async (codeOrToken: string) => {
     setIsLoading(true);
     setErrorMessage(null);

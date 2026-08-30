@@ -38,6 +38,12 @@ export default function PortariaDashboardPage() {
     setLoading(true);
     const supabase = createClient();
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = '/login?redirect=/portaria';
+        return;
+      }
+
       const { data, error } = await supabase
         .from('packages')
         .select('*, unit:units(*), resident:residents(*)')
