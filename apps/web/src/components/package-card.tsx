@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Package as PackageType } from '../types/database';
 import { LocalApiClient } from '../lib/local-api';
+import { createClient } from '../lib/supabase/client';
 import {
   Package,
   Clock,
@@ -28,6 +29,32 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [whatsAppFeedback, setWhatsAppFeedback] = useState<string | null>(null);
+  // true = confirmado que WhatsApp foi enviado em algum momento via notifications_log
+  const [wasNotified, setWasNotified] = useState<boolean | null>(null);
+
+  // Verifica se existe log de notificação enviada (SENT) para este pacote
+  useEffect(() => {
+    if (pkg.status === 'DELIVERED') { setWasNotified(null); return; }
+    if (pkg.status === 'NOTIFIED') { setWasNotified(true); return; }
+
+    // Status RECEIVED: verifica se há notificação enviada no log
+    const checkNotification = async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from('notifications_log')
+          .select('id, status')
+          .eq('package_id', pkg.id)
+          .in('status', ['SENT', 'DELIVERED'])
+          .limit(1);
+        setWasNotified(!!(data && data.length > 0));
+      } catch {
+        setWasNotified(false);
+      }
+    };
+
+    checkNotification();
+  }, [pkg.id, pkg.status]);
 
   const getCarrierColor = (carrier: string) => {
     const c = carrier.toLowerCase();
@@ -40,28 +67,38 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     return 'bg-slate-700/40 text-slate-300 border-slate-600/40';
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'DELIVERED':
-        return (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Entregue
-          </span>
-        );
-      case 'NOTIFIED':
-        return (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" /> Aguardando (WhatsApp Enviado)
-          </span>
-        );
-      case 'RECEIVED':
-      default:
-        return (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-            <Clock className="w-3.5 h-3.5 animate-pulse" /> Aguardando (Sem WhatsApp)
-          </span>
-        );
+  const getStatusBadge = () => {
+    if (pkg.status === 'DELIVERED') {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Entregue
+        </span>
+      );
     }
+
+    if (pkg.status === 'NOTIFIED' || wasNotified === true) {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+          <MessageSquare className="w-3.5 h-3.5 text-emerald-400" /> Mensagem Enviada
+        </span>
+      );
+    }
+
+    if (wasNotified === null && pkg.status === 'RECEIVED') {
+      // Ainda verificando — mostra shimmer neutro
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-700/40 text-slate-400 border border-slate-600/40 animate-pulse">
+          <Clock className="w-3.5 h-3.5" /> Verificando...
+        </span>
+      );
+    }
+
+    // wasNotified === false + status RECEIVED: sem mensagem enviada
+    return (
+      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+        <Clock className="w-3.5 h-3.5 animate-pulse" /> Aguardando
+      </span>
+    );
   };
 
   const handleSendWhatsApp = async (force = false) => {
@@ -75,6 +112,8 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
         } else {
           setWhatsAppFeedback('✅ Notificação enviada para o morador!');
         }
+        // Atualiza badge local imediatamente
+        setWasNotified(true);
         if (onPackageUpdated) onPackageUpdated();
       } else {
         setWhatsAppFeedback(`❌ Erro: ${res.error || 'Falha ao enviar.'}`);
@@ -97,6 +136,8 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     minute: '2-digit'
   });
 
+  const isEffectivelyNotified = pkg.status === 'NOTIFIED' || wasNotified === true;
+
   return (
     <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl hover:border-slate-700 transition flex flex-col justify-between gap-4">
       {/* Header do Card */}
@@ -110,7 +151,7 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
               <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${getCarrierColor(pkg.carrier)}`}>
                 {pkg.carrier}
               </span>
-              {getStatusBadge(pkg.status)}
+              {getStatusBadge()}
             </div>
             <h4 className="text-base font-bold text-slate-100 mt-1">
               {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Unidade'}
@@ -184,23 +225,23 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
         {pkg.status !== 'DELIVERED' && (
           <button
             type="button"
-            onClick={() => handleSendWhatsApp(pkg.status === 'NOTIFIED')}
+            onClick={() => handleSendWhatsApp(isEffectivelyNotified)}
             disabled={isSendingWhatsApp}
-            title={pkg.status === 'NOTIFIED' ? 'Reenviar notificação de WhatsApp' : 'Verificar e disparar mensagem WhatsApp'}
+            title={isEffectivelyNotified ? 'Reenviar notificação de WhatsApp' : 'Verificar e disparar mensagem WhatsApp'}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-50 ${
-              pkg.status === 'NOTIFIED'
+              isEffectivelyNotified
                 ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
                 : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40 animate-pulse'
             }`}
           >
             {isSendingWhatsApp ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : pkg.status === 'NOTIFIED' ? (
+            ) : isEffectivelyNotified ? (
               <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
             ) : (
               <Send className="w-3.5 h-3.5 text-emerald-400" />
             )}
-            <span>{pkg.status === 'NOTIFIED' ? 'Reenviar WhatsApp' : 'Enviar WhatsApp'}</span>
+            <span>{isEffectivelyNotified ? 'Reenviar WhatsApp' : 'Enviar WhatsApp'}</span>
           </button>
         )}
       </div>
