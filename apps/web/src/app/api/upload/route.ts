@@ -84,7 +84,8 @@ Responda ESTRITAMENTE em formato JSON:
             const data = await res.json();
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text) {
-              const parsed = JSON.parse(text);
+              const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+              const parsed = JSON.parse(cleanJson);
               ocrResult = {
                 recipientName: parsed.recipientName || null,
                 block: parsed.block || null,
@@ -96,9 +97,12 @@ Responda ESTRITAMENTE em formato JSON:
               console.log(`[OCR] ✅ Sucesso com [${modelName}]:`, ocrResult);
               break;
             }
+          } else {
+            const errData = await res.text();
+            console.warn(`[OCR] ⚠️ Modelo ${modelName} retornou status ${res.status}:`, errData.slice(0, 150));
           }
         } catch (e: any) {
-          console.warn(`[OCR] Modelo ${modelName} falhou:`, e.message?.slice(0, 80));
+          console.warn(`[OCR] Modelo ${modelName} exceção:`, e.message?.slice(0, 80));
         }
       }
     }
