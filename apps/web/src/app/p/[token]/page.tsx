@@ -55,33 +55,40 @@ export default function PublicPackagePage() {
   const [copied, setCopied] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
 
+  const [isWaitingConfirmation, setIsWaitingConfirmation] = useState(false);
+
   useEffect(() => {
-    if (pkg?.status === 'DELIVERED') {
+    if (pkg?.status === 'DELIVERED' || pkg?.notes?.includes('CIENTE')) {
       setUnlocked(true);
+      setIsWaitingConfirmation(false);
     }
   }, [pkg]);
-
-  const handleUnlockAndSendWhatsApp = async () => {
-    setIsSendingConfirm(true);
-    try {
-      const res = await fetch(`/api/package/${token}`, { method: 'POST' });
-      if (res.ok) {
-        setUnlocked(true);
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Não foi possível enviar a confirmação. Tente novamente.');
-      }
-    } catch {
-      alert('Erro de conexão. Verifique sua internet.');
-    }
-    setIsSendingConfirm(false);
-  };
 
   useEffect(() => {
     if (token) {
       loadPackage();
     }
   }, [token]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isWaitingConfirmation && !unlocked) {
+      interval = setInterval(() => {
+        loadPackageSilently();
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isWaitingConfirmation, unlocked, token]);
+
+  const loadPackageSilently = async () => {
+    try {
+      const res = await fetch(`/api/package/${token}`);
+      const data = await res.json();
+      if (res.ok && data.package) {
+        setPkg(data.package);
+      }
+    } catch (err) {}
+  };
 
   const loadPackage = async () => {
     setLoading(true);
@@ -276,28 +283,31 @@ export default function PublicPackagePage() {
                       Código e QR Code Bloqueados
                     </h3>
                     <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
-                      Envie a confirmação para a portaria via WhatsApp para liberar seu código de retirada instantaneamente.
+                      {isWaitingConfirmation 
+                        ? 'Aguardando sua confirmação no WhatsApp... Assim que enviar, esta tela será liberada automaticamente.' 
+                        : 'Envie a confirmação para a portaria via WhatsApp para liberar seu código de retirada instantaneamente.'}
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleUnlockAndSendWhatsApp}
-                    disabled={isSendingConfirm}
-                    className="w-full max-w-xs py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 shadow-2xl shadow-emerald-950 transition active:scale-98 group cursor-pointer disabled:opacity-75"
+                  <a
+                    href={`https://wa.me/557398419901?text=Estou ciente da encomenda ${pkg.pickup_code}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setIsWaitingConfirmation(true)}
+                    className="w-full max-w-xs py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 shadow-2xl shadow-emerald-950 transition active:scale-98 group cursor-pointer"
                   >
-                    {isSendingConfirm ? (
+                    {isWaitingConfirmation ? (
                       <>
                         <RefreshCw className="w-5 h-5 text-emerald-100 animate-spin shrink-0" />
-                        <span>Enviando Confirmação...</span>
+                        <span>Aguardando Envio...</span>
                       </>
                     ) : (
                       <>
                         <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition shrink-0" />
-                        <span>Enviar Confirmação e Ver Código</span>
+                        <span>Abrir WhatsApp e Confirmar</span>
                       </>
                     )}
-                  </button>
+                  </a>
                 </div>
               )}
             </div>
