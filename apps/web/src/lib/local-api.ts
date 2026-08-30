@@ -23,6 +23,11 @@ export class LocalApiClient {
     if (typeof window !== 'undefined') {
       const savedIp = localStorage.getItem('condo_local_api_url');
       if (savedIp) return savedIp.replace(/\/$/, '');
+
+      // Se estiver no Vercel ou em produção na nuvem sem API local configurada, usa as rotas internas /api
+      if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+        return '';
+      }
     }
     return (process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001').replace(/\/$/, '');
   }
@@ -39,29 +44,45 @@ export class LocalApiClient {
 
   public static getImageUrl(path?: string | null): string {
     if (!path) return '';
-    if (path.startsWith('http')) return path;
-    return `${this.getBaseUrl()}/images/${path}`;
+    if (path.startsWith('http') || path.startsWith('data:')) return path;
+    const base = this.getBaseUrl() || 'http://localhost:3001';
+    return `${base}/images/${path}`;
   }
 
   /**
-   * Envia a foto da etiqueta para a API local para salvar e extrair com Gemini OCR
+   * Envia a foto da etiqueta para processar e extrair com Gemini OCR (com fallback nuvem automático)
    */
   static async uploadLabelAndOCR(file: File | Blob): Promise<OCRResponse> {
     const baseUrl = this.getBaseUrl();
     const formData = new FormData();
     formData.append('file', file, 'label.jpg');
 
-    const res = await fetch(`${baseUrl}/api/upload`, {
+    try {
+      const targetUrl = baseUrl ? `${baseUrl}/api/upload` : '/api/upload';
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (localErr) {
+      console.warn('[LocalApiClient] API local indisponível, tentando OCR em nuvem /api/upload...');
+    }
+
+    // Fallback garantido na nuvem Vercel
+    const fallbackRes = await fetch('/api/upload', {
       method: 'POST',
       body: formData,
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Erro no servidor' }));
-      throw new Error(err.details || err.error || 'Falha ao processar etiqueta');
+    if (!fallbackRes.ok) {
+      const err = await fallbackRes.json().catch(() => ({ error: 'Erro no servidor' }));
+      throw new Error(err.details || err.error || 'Falha ao processar etiqueta via OCR');
     }
 
-    return res.json();
+    return fallbackRes.json();
   }
 
   /**
@@ -81,18 +102,29 @@ export class LocalApiClient {
     unitInfo?: string | null;
   }) {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/packages`, {
+    try {
+      const targetUrl = baseUrl ? `${baseUrl}/api/packages` : '/api/packages';
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) return await res.json();
+    } catch {}
+
+    const fallbackRes = await fetch('/api/packages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Erro ao salvar' }));
+    if (!fallbackRes.ok) {
+      const err = await fallbackRes.json().catch(() => ({ error: 'Erro ao salvar' }));
       throw new Error(err.details || err.error || 'Falha ao registrar encomenda');
     }
 
-    return res.json();
+    return fallbackRes.json();
   }
 
   /**
@@ -106,18 +138,29 @@ export class LocalApiClient {
     sendWhatsAppConfirmation?: boolean;
   }) {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/signature`, {
+    try {
+      const targetUrl = baseUrl ? `${baseUrl}/api/signature` : '/api/signature';
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) return await res.json();
+    } catch {}
+
+    const fallbackRes = await fetch('/api/signature', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Erro ao registrar assinatura' }));
+    if (!fallbackRes.ok) {
+      const err = await fallbackRes.json().catch(() => ({ error: 'Erro ao registrar assinatura' }));
       throw new Error(err.details || err.error || 'Falha ao concluir retirada');
     }
 
-    return res.json();
+    return fallbackRes.json();
   }
 
   /**
