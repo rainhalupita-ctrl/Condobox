@@ -438,8 +438,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
-            {/* Grid overlay */}
-            <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
+            {/* Overlay limpo sem linhas ou traços poluindo a visão */}
+            <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
               {/* Badge de Análise em Tempo Real no topo */}
               <div className="self-center flex items-center gap-2 bg-black/85 backdrop-blur-md px-4 py-2 rounded-full border border-emerald-500/40 shadow-xl">
                 {isDetected ? (
@@ -459,7 +459,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
                 )}
               </div>
 
-              {/* Rodapé informativo */}
+              {/* Rodapé informativo discreto */}
               <span className="text-[11px] text-slate-300 font-mono bg-black/75 px-3 py-1 rounded-full self-center border border-slate-800">
                 Apto • Morador • NF • Rastreio
               </span>
