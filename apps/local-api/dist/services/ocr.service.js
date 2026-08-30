@@ -21,16 +21,25 @@ export class OCRService {
         }
         const base64Image = imageBuffer.toString('base64');
         const apiKey = env.GEMINI_API_KEY;
-        const prompt = `Analise a etiqueta de encomenda e extraia em JSON estrito:
+        const prompt = `Você é um especialista em OCR e leitura de etiquetas de encomendas brasileiras (Mercado Livre, Shopee, Amazon, Correios, Magalu, Shein, Jadlog, Loggi, etc.).
+Analise a imagem da etiqueta e extraia APENAS dados válidos e legíveis em formato JSON estrito:
 {
-  "recipientName": string ou null (nome impresso no pacote),
-  "block": string ou null (bloco ou torre),
-  "unitNumber": string ou null (número do apartamento),
-  "carrier": string (Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro),
-  "trackingCode": string ou null (código de rastreio),
-  "invoiceNumber": string ou null (número da NF ou DANFE se houver),
+  "recipientName": string ou null,
+  "block": string ou null,
+  "unitNumber": string ou null,
+  "carrier": string,
+  "trackingCode": string ou null,
+  "invoiceNumber": string ou null,
   "confidence": number
-}`;
+}
+
+REGRAS CRÍTICAS DE PRECISÃO:
+1. "recipientName": Extraia APENAS o nome da pessoa física (destinatário/morador). NUNCA coloque nomes de empresas, remetentes, avisos (ex: "FRÁGIL", "DOCS", "DESTINATÁRIO", "REMETENTE", "DANFE", transportadoras) nem textos cortados ou ilegíveis. Se não tiver certeza absoluta do nome do morador, retorne null.
+2. "unitNumber": Número do apartamento/unidade residencial (ex: "101", "805", "402", "12"). Procure por termos como "Apto", "Ap", "Unidade", "Casa", "Apto.", "Ap.". Se não estiver legível, retorne null.
+3. "block": Identificação do bloco/torre (ex: "Bloco A", "Torre 1", "Bloco B"). Se não houver bloco na etiqueta, retorne null.
+4. "carrier": Identifique a transportadora: Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro.
+5. "trackingCode": Código de rastreio ou código de barras da entrega.
+6. "invoiceNumber": Número da Nota Fiscal ou DANFE se visível na etiqueta.`;
         const modelsToTry = [
             'gemini-3.6-flash',
             'gemini-3.1-flash-lite',
@@ -72,13 +81,27 @@ export class OCRService {
                     const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
                     const parsed = JSON.parse(responseText);
                     console.log(`[OCRService] ✅ Extração com sucesso usando [${modelName}]:`, parsed);
+                    // Sanitização rigorosa do nome do destinatário para evitar ruídos ou nomes de transportadora
+                    let cleanRecipient = (parsed.recipientName || '').trim();
+                    const forbiddenWords = [
+                        'MERCADO LIVRE', 'SHOPEE', 'AMAZON', 'CORREIOS', 'LOGGI', 'TOTAL EXPRESS',
+                        'JADLOG', 'SHEIN', 'MAGALU', 'MAGAZINE LUIZA', 'FRAGIL', 'FRÁGIL',
+                        'DESTINATARIO', 'DESTINATÁRIO', 'REMETENTE', 'DANFE', 'NOTA FISCAL',
+                        'NF-E', 'ENCOMENDA', 'ENTREGA', 'CONDOMINIO', 'CONDOMÍNIO', 'PORTARIA',
+                        'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO'
+                    ];
+                    if (!cleanRecipient ||
+                        cleanRecipient.length < 3 ||
+                        forbiddenWords.some(fw => cleanRecipient.toUpperCase() === fw || cleanRecipient.toUpperCase().startsWith(fw))) {
+                        cleanRecipient = null;
+                    }
                     return {
-                        recipientName: parsed.recipientName || null,
-                        block: parsed.block || null,
-                        unitNumber: parsed.unitNumber || null,
+                        recipientName: cleanRecipient,
+                        block: parsed.block ? String(parsed.block).trim() : null,
+                        unitNumber: parsed.unitNumber ? String(parsed.unitNumber).trim() : null,
                         carrier: parsed.carrier || 'Outro',
-                        trackingCode: parsed.trackingCode || null,
-                        invoiceNumber: parsed.invoiceNumber || null,
+                        trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
+                        invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
                         confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
                     };
                 }

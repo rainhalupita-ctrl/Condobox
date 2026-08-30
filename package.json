@@ -13,7 +13,8 @@
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "tunnel": "npx --yes localtunnel --port 3000",
-    "build": "npm run build --prefix apps/web && npm run build --prefix apps/local-api",
+    "build": "npm run build --prefix apps/web",
+    "build:all": "npm run build --prefix apps/web && npm run build --prefix apps/local-api",
     "build:web": "npm run build --prefix apps/web",
     "build:api": "npm run build --prefix apps/local-api"
   }
