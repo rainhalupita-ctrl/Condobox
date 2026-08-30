@@ -89,15 +89,12 @@ function parseRawText(text: string) {
   };
 }
 
-// ─── Provider: Google Gemini Flash ───────────────────────────────────────────
+// ─── Provider: Google Gemini Flash (Paralelo Ultra-Rápido) ──────────────────
 async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = `Você é especialista em OCR de etiquetas de encomendas brasileiras.
-Extraia APENAS dados do DESTINATÁRIO (morador) da etiqueta. Retorne JSON estrito:
-{"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":number}
-REGRAS: recipientName = nome da PESSOA FÍSICA (nunca empresa/transportadora). unitNumber = número do apto/unidade.`;
+  const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.95}';
 
-  const models = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
-  for (const model of models) {
+  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
+  const promises = models.map(async (model) => {
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -106,15 +103,15 @@ REGRAS: recipientName = nome da PESSOA FÍSICA (nunca empresa/transportadora). u
           headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 150 },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 80 },
           }),
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(3200),
         }
       );
-      if (!res.ok) continue;
+      if (!res.ok) return null;
       const data = await res.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) continue;
+      if (!text) return null;
       const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
       const result = formatOcrResult(parsed);
       if (result.confidence > 0) {
@@ -122,15 +119,17 @@ REGRAS: recipientName = nome da PESSOA FÍSICA (nunca empresa/transportadora). u
         return result;
       }
     } catch {}
-  }
-  return null;
+    return null;
+  });
+
+  return Promise.any(
+    promises.map((p) => p.then((r) => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data')))))
+  ).catch(() => null);
 }
 
 // ─── Provider: Groq Vision (llama-4-scout) ────────────────────────────────────
 async function tryGroq(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = `Você é especialista em OCR de etiquetas de encomendas brasileiras.
-Extraia os dados do DESTINATÁRIO. Retorne APENAS JSON:
-{"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":number}`;
+  const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.95}';
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -147,10 +146,10 @@ Extraia os dados do DESTINATÁRIO. Retorne APENAS JSON:
           },
         ],
         temperature: 0,
-        max_tokens: 150,
+        max_tokens: 80,
         response_format: { type: 'json_object' },
       }),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(3200),
     });
     if (!res.ok) return null;
     const data = await res.json();

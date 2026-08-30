@@ -208,11 +208,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     );
   }, [onCapture, stopCamera]);
 
-  // ─── Análise em Tempo Real em 2 Estágios ───────────────────────────────────
+  // ─── Análise em Tempo Real Ultra-Rápida ───────────────────────────────────
   useEffect(() => {
     if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
 
     let isScanning = false;
+    let scanTimeout: NodeJS.Timeout | null = null;
+    let isActive = true;
 
     const captureFrame = (
       targetDim: number,
@@ -242,13 +244,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         ctx.drawImage(video, 0, 0, width, height);
 
-        // Checagem de brilho — descarta frames pretos/cobertos
+        // Checagem rápida de brilho — descarta frames escuros/cobertos
         let brightnessSum = 0;
         let count = 0;
         try {
           const imgData = ctx.getImageData(0, 0, width, height);
           const pixels = imgData.data;
-          const step = Math.max(1, Math.floor(pixels.length / 400));
+          const step = Math.max(1, Math.floor(pixels.length / 200));
           for (let i = 0; i < pixels.length; i += step * 4) {
             brightnessSum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
             count++;
@@ -263,16 +265,16 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         );
       });
 
-    const interval = setInterval(async () => {
-      if (autoCaptureFiredRef.current || isScanning || !isMountedRef.current) return;
+    const runLiveScan = async () => {
+      if (!isActive || autoCaptureFiredRef.current || isScanning || !isMountedRef.current) return;
 
       isScanning = true;
       setIsLiveAnalyzing(true);
 
       try {
-        // Estágio 1: Resolução de 800px para leitura nítida e de alta precisão
-        const fast = await captureFrame(800, 0.82);
-        if (!fast || fast.avgBrightness < 15 || !isMountedRef.current) {
+        // Frame leve e otimizado (560px, qualidade 0.60 ~25KB) para upload ultra-rápido em milissegundos
+        const fast = await captureFrame(560, 0.60);
+        if (!fast || fast.avgBrightness < 15 || !isMountedRef.current || !isActive) {
           return;
         }
 
@@ -281,10 +283,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const liveRes = await fetch('/api/ocr-live', {
           method: 'POST',
           body: fd,
-          signal: AbortSignal.timeout(9000),
+          signal: AbortSignal.timeout(4500),
         });
 
-        if (!liveRes.ok || autoCaptureFiredRef.current || !isMountedRef.current) return;
+        if (!liveRes.ok || autoCaptureFiredRef.current || !isMountedRef.current || !isActive) return;
 
         const liveOcr = await liveRes.json();
         const unitClean = liveOcr?.unitNumber
@@ -298,19 +300,22 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           (hasUnit || hasRecipient || hasTracking) &&
           (typeof liveOcr.confidence === 'number' ? liveOcr.confidence >= 0.5 : true);
 
-        if (!detected || autoCaptureFiredRef.current || !isMountedRef.current) return;
+        if (!detected || autoCaptureFiredRef.current || !isMountedRef.current || !isActive) return;
 
-        // Estágio 2: Encontrou dados da etiqueta com sucesso!
+        // Sucesso: Etiqueta detectada!
         autoCaptureFiredRef.current = true;
         setIsDetected(true);
-        clearInterval(interval);
 
         try {
           navigator.vibrate?.([50, 50, 100]);
         } catch {}
 
-        const previewUrl = URL.createObjectURL(fast.blob);
-        setCapturedBlob(fast.blob);
+        // Captura foto em alta resolução (800px) para salvamento final
+        const highRes = await captureFrame(800, 0.85);
+        const finalBlob = highRes?.blob || fast.blob;
+        const previewUrl = URL.createObjectURL(finalBlob);
+
+        setCapturedBlob(finalBlob);
         setCapturedPreview(previewUrl);
         stopCamera();
 
@@ -328,11 +333,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           image: { path: '', url: previewUrl },
           success: true,
         };
-        onCapture(fast.blob, previewUrl, partialOcr as any);
+        onCapture(finalBlob, previewUrl, partialOcr as any);
 
-        // Enriquecimento completo e match com banco em background
+        // Enriquecimento completo em background com a imagem em alta resolução
         const fd2 = new FormData();
-        fd2.append('file', fast.blob, 'label.jpg');
+        fd2.append('file', finalBlob, 'label.jpg');
         fetch('/api/upload', { method: 'POST', body: fd2 })
           .then((r) => r.ok && r.json())
           .then((fullOcr) => {
@@ -344,17 +349,25 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         return;
       } catch {
-        // Silencioso
+        // Silencioso para não travar loop
       } finally {
         isScanning = false;
-        if (isMountedRef.current) {
+        if (isMountedRef.current && isActive) {
           setIsLiveAnalyzing(false);
+          // Agenda a próxima leitura 700ms após o término da atual se ainda não capturou
+          if (!autoCaptureFiredRef.current) {
+            scanTimeout = setTimeout(runLiveScan, 700);
+          }
         }
       }
-    }, 4000);
+    };
+
+    // Dispara a primeira leitura quase imediatamente (350ms) assim que a câmera abre
+    scanTimeout = setTimeout(runLiveScan, 350);
 
     return () => {
-      clearInterval(interval);
+      isActive = false;
+      if (scanTimeout) clearTimeout(scanTimeout);
     };
   }, [stream, capturedBlob, onCapture, stopCamera]);
 
