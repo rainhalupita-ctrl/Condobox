@@ -3,25 +3,28 @@ import { whatsappService } from './whatsapp.service.js';
 import { env } from '../config/env.js';
 
 /**
- * Worker que monitora novos pacotes no Supabase e dispara o WhatsApp
- * usando a Evolution API local conectada no computador da portaria.
+ * Worker que monitora pacotes no Supabase e dispara o WhatsApp
+ * usando a Evolution API local conectada no computador da portaria:
+ * 1. Chegada de Encomenda (INSERT / status: RECEIVED)
+ * 2. Retirada de Encomenda (UPDATE / status: DELIVERED)
  */
 export class WhatsAppQueueWorker {
   private isProcessing = false;
   private isRunning = false;
   private intervalId: NodeJS.Timeout | null = null;
-  private processedPackageIds = new Set<string>();
+  private processedArrivalIds = new Set<string>();
+  private processedDeliveryIds = new Set<string>();
 
   start() {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    console.log('🔄 [WhatsApp Worker] Inicializando fila de notificações automáticas...');
+    console.log('🔄 [WhatsApp Worker] Inicializando fila de notificações automáticas (Chegada + Retirada)...');
 
-    // 1. Polling a cada 4 segundos como garantia máxima de entrega
+    // 1. Polling a cada 3 segundos como garantia máxima de entrega
     this.intervalId = setInterval(() => {
       this.processQueue();
-    }, 4000);
+    }, 3000);
 
     // 2. Realtime listener via Supabase WebSocket
     this.setupRealtimeListener();
@@ -51,7 +54,19 @@ export class WhatsAppQueueWorker {
           async (payload) => {
             console.log('⚡ [WhatsApp Worker] Novo pacote recebido via Realtime:', payload.new?.id);
             if (payload.new?.id) {
-              await this.dispatchNotificationForPackage(payload.new.id);
+              await this.dispatchArrivalNotification(payload.new.id);
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'packages' },
+          async (payload) => {
+            if (payload.new?.status === 'DELIVERED') {
+              console.log('⚡ [WhatsApp Worker] Encomenda retirada via Realtime:', payload.new?.id);
+              if (payload.new?.id) {
+                await this.dispatchDeliveryNotification(payload.new.id);
+              }
             }
           }
         )
@@ -70,8 +85,8 @@ export class WhatsAppQueueWorker {
     try {
       const client = supabaseService.getClient();
 
-      // Busca pacotes recebidos recentemente que ainda não tiveram notificação enviada
-      const { data: pendingPackages, error } = await client
+      // 1. Fila de Chegada (RECEIVED)
+      const { data: pendingArrivals } = await client
         .from('packages')
         .select(`
           id,
@@ -96,20 +111,47 @@ export class WhatsAppQueueWorker {
         .order('created_at', { ascending: false })
         .limit(10);
 
-      if (error) {
-        console.error('[WhatsApp Worker] Erro ao buscar fila:', error);
-        return;
+      for (const pkg of pendingArrivals || []) {
+        if (this.processedArrivalIds.has(pkg.id)) continue;
+        const pkgAge = Date.now() - new Date(pkg.created_at).getTime();
+        if (pkgAge < 15 * 60 * 1000) {
+          await this.dispatchArrivalNotification(pkg.id, pkg);
+        } else {
+          this.processedArrivalIds.add(pkg.id);
+        }
       }
 
-      for (const pkg of pendingPackages || []) {
-        if (this.processedPackageIds.has(pkg.id)) continue;
+      // 2. Fila de Retirada (DELIVERED)
+      const { data: recentDeliveries } = await client
+        .from('packages')
+        .select(`
+          id,
+          carrier,
+          status,
+          delivered_at,
+          delivered_to_name,
+          unit_id,
+          resident_id,
+          units (
+            block,
+            unit_number
+          ),
+          residents (
+            name,
+            phone
+          )
+        `)
+        .eq('status', 'DELIVERED')
+        .order('delivered_at', { ascending: false })
+        .limit(10);
 
-        // Se o pacote foi criado há menos de 10 minutos e ainda não foi notificado
-        const pkgAge = Date.now() - new Date(pkg.created_at).getTime();
-        if (pkgAge < 10 * 60 * 1000) {
-          await this.dispatchNotificationForPackage(pkg.id, pkg);
+      for (const pkg of recentDeliveries || []) {
+        if (this.processedDeliveryIds.has(pkg.id)) continue;
+        const deliveryAge = Date.now() - new Date(pkg.delivered_at || '').getTime();
+        if (deliveryAge < 15 * 60 * 1000) {
+          await this.dispatchDeliveryNotification(pkg.id, pkg);
         } else {
-          this.processedPackageIds.add(pkg.id);
+          this.processedDeliveryIds.add(pkg.id);
         }
       }
     } catch (err: any) {
@@ -119,15 +161,18 @@ export class WhatsAppQueueWorker {
     }
   }
 
-  private async dispatchNotificationForPackage(packageId: string, preloadedPkg?: any) {
-    if (this.processedPackageIds.has(packageId)) return;
+  /**
+   * Notificação de Chegada de Encomenda
+   */
+  private async dispatchArrivalNotification(packageId: string, preloadedPkg?: any) {
+    if (this.processedArrivalIds.has(packageId)) return;
 
     try {
       const client = supabaseService.getClient();
       let pkg = preloadedPkg;
 
       if (!pkg) {
-        const { data, error } = await client
+        const { data } = await client
           .from('packages')
           .select(`
             id,
@@ -150,20 +195,15 @@ export class WhatsAppQueueWorker {
           .eq('id', packageId)
           .single();
 
-        if (error || !data) {
-          console.warn('[WhatsApp Worker] Pacote não encontrado:', packageId);
-          return;
-        }
+        if (!data) return;
         pkg = data;
       }
 
-      // 1. Identificar telefone e nome do morador
       let phone = pkg.residents?.phone;
       let residentName = pkg.residents?.name || 'Morador(a)';
       const unit = pkg.units;
       const unitInfo = unit ? `${unit.block} - Apto ${unit.unit_number}` : 'Sua Unidade';
 
-      // Se não tiver morador específico selecionado, pega o morador principal da unidade
       if (!phone && pkg.unit_id) {
         const { data: unitResidents } = await client
           .from('residents')
@@ -179,14 +219,12 @@ export class WhatsAppQueueWorker {
       }
 
       if (!phone) {
-        console.log(`ℹ️ [WhatsApp Worker] Pacote ${pkg.id} não possui telefone de morador associado.`);
-        this.processedPackageIds.add(packageId);
+        this.processedArrivalIds.add(packageId);
         return;
       }
 
-      console.log(`📤 [WhatsApp Worker] Disparando WhatsApp para ${residentName} (${phone}) - Apto ${unitInfo}...`);
+      console.log(`📤 [WhatsApp Worker] Disparando Chegada para ${residentName} (${phone}) - ${unitInfo}...`);
 
-      // 2. Dispara pelo WhatsApp Service (Evolution API local)
       const res = await whatsappService.notifyPackageArrival({
         phone,
         residentName,
@@ -198,13 +236,110 @@ export class WhatsAppQueueWorker {
       });
 
       if (res.success) {
-        console.log(`✅ [WhatsApp Worker] WhatsApp enviado com sucesso para ${phone} (Pacote ${pkg.id})!`);
-        this.processedPackageIds.add(packageId);
-      } else {
-        console.warn(`⚠️ [WhatsApp Worker] Falha ao enviar WhatsApp: ${res.error}`);
+        console.log(`✅ [WhatsApp Worker] Notificação de Chegada enviada para ${phone}!`);
+        this.processedArrivalIds.add(packageId);
       }
     } catch (err: any) {
-      console.error(`❌ [WhatsApp Worker] Erro ao notificar pacote ${packageId}:`, err.message);
+      console.error(`❌ [WhatsApp Worker] Erro na notificação de chegada do pacote ${packageId}:`, err.message);
+    }
+  }
+
+  /**
+   * Notificação de Retirada de Encomenda (ENCOMENDA RETIRADA COM SUCESSO)
+   */
+  private async dispatchDeliveryNotification(packageId: string, preloadedPkg?: any) {
+    if (this.processedDeliveryIds.has(packageId)) return;
+
+    try {
+      const client = supabaseService.getClient();
+      let pkg = preloadedPkg;
+
+      if (!pkg) {
+        const { data } = await client
+          .from('packages')
+          .select(`
+            id,
+            carrier,
+            status,
+            delivered_at,
+            delivered_to_name,
+            unit_id,
+            resident_id,
+            units (
+              block,
+              unit_number
+            ),
+            residents (
+              name,
+              phone
+            )
+          `)
+          .eq('id', packageId)
+          .single();
+
+        if (!data) return;
+        pkg = data;
+      }
+
+      let phone = pkg.residents?.phone;
+      let residentName = pkg.residents?.name || 'Morador(a)';
+      const unit = pkg.units;
+      const unitInfo = unit ? `${unit.block} - Apto ${unit.unit_number}` : 'Sua Unidade';
+      const deliveredTo = pkg.delivered_to_name || residentName;
+      const deliveredAtFormatted = pkg.delivered_at
+        ? new Date(pkg.delivered_at).toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : new Date().toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+
+      if (!phone && pkg.unit_id) {
+        const { data: unitResidents } = await client
+          .from('residents')
+          .select('name, phone, is_primary')
+          .eq('unit_id', pkg.unit_id)
+          .eq('active', true);
+
+        if (unitResidents && unitResidents.length > 0) {
+          const primary = unitResidents.find(r => r.is_primary) || unitResidents[0];
+          phone = primary.phone;
+          residentName = primary.name;
+        }
+      }
+
+      if (!phone) {
+        this.processedDeliveryIds.add(packageId);
+        return;
+      }
+
+      console.log(`📤 [WhatsApp Worker] Disparando Confirmação de Retirada para ${residentName} (${phone})...`);
+
+      const res = await whatsappService.notifyPackageDelivered({
+        phone,
+        residentName,
+        unitInfo,
+        deliveredTo,
+        carrier: pkg.carrier || 'Encomenda',
+        deliveredAt: deliveredAtFormatted
+      });
+
+      if (res.success) {
+        console.log(`✅ [WhatsApp Worker] Confirmação de Retirada enviada com sucesso para ${phone}!`);
+        this.processedDeliveryIds.add(packageId);
+      } else {
+        console.warn(`⚠️ [WhatsApp Worker] Falha ao enviar confirmação de retirada: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error(`❌ [WhatsApp Worker] Erro ao enviar confirmação de retirada ${packageId}:`, err.message);
     }
   }
 }
