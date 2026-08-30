@@ -1,8 +1,47 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+
+function cleanOcrData(parsed: any) {
+  let cleanRecipient: string | null = (parsed.recipientName || '').trim();
+  const forbiddenWords = [
+    'MERCADO LIVRE', 'SHOPEE', 'AMAZON', 'CORREIOS', 'LOGGI', 'TOTAL EXPRESS',
+    'JADLOG', 'SHEIN', 'MAGALU', 'MAGAZINE LUIZA', 'FRAGIL', 'FRÁGIL',
+    'DESTINATARIO', 'DESTINATÁRIO', 'REMETENTE', 'DANFE', 'NOTA FISCAL',
+    'NF-E', 'ENCOMENDA', 'ENTREGA', 'CONDOMINIO', 'CONDOMÍNIO', 'PORTARIA',
+    'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO'
+  ];
+  if (
+    !cleanRecipient ||
+    cleanRecipient.length < 3 ||
+    forbiddenWords.some(fw => cleanRecipient!.toUpperCase() === fw || cleanRecipient!.toUpperCase().startsWith(fw))
+  ) {
+    cleanRecipient = null;
+  }
+
+  let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
+  let rawBlock = parsed.block ? String(parsed.block).trim() : null;
+
+  const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
+  if (matchLetterNum) {
+    if (!rawBlock || rawBlock === 'null') rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
+    rawUnit = matchLetterNum[2];
+  }
+
+  const hasUnit = Boolean(rawUnit && rawUnit.replace(/\D/g, '').length >= 1);
+  const confidence = hasUnit ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.95) : 0;
+
+  return {
+    recipientName: cleanRecipient,
+    block: rawBlock,
+    unitNumber: hasUnit ? rawUnit : null,
+    carrier: parsed.carrier || 'Outro',
+    trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
+    invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
+    confidence
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,9 +56,11 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes);
     const base64Image = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
 
-    // 1. OCR com Gemini Flash (suporta chave AI Studio X-goog-api-key)
-    const apiKey = process.env.GEMINI_API_KEY || '';
+    const geminiKey = process.env.GEMINI_API_KEY || '';
+    const nvidiaKey = process.env.NVIDIA_API_KEY || '';
+
     let ocrResult = {
       recipientName: null as string | null,
       block: null as string | null,
@@ -30,9 +71,8 @@ export async function POST(request: NextRequest) {
       confidence: 0.95
     };
 
-    if (apiKey) {
-      const prompt = `Você é um leitor de OCR especializado em etiquetas de encomendas.
-Analise a imagem da etiqueta e extraia APENAS dados REAIS e LEGÍVEIS impressos na imagem em JSON estrito:
+    const prompt = `Você é um leitor de OCR especializado em etiquetas de encomendas residenciais.
+Analise a imagem da etiqueta e extraia em JSON estrito:
 {
   "recipientName": string ou null,
   "block": string ou null,
@@ -41,45 +81,24 @@ Analise a imagem da etiqueta e extraia APENAS dados REAIS e LEGÍVEIS impressos 
   "trackingCode": string ou null,
   "invoiceNumber": string ou null,
   "confidence": number
-}
+}`;
 
-REGRAS CRÍTICAS ANTI-ALUCINAÇÃO:
-1. Se a imagem estiver preta, escura, borrada, sem texto legível ou não contiver uma etiqueta de encomenda, retorne OBRIGATORIAMENTE todos os campos como null (confidence: 0). NUNCA invente dados fictícios ou nomes de exemplo.
-2. "unitNumber": Número do apartamento/unidade residencial. Se não estiver claramente visível e legível, retorne null.
-3. "block": Identificação do bloco ou torre. Se não estiver visível, retorne null.
-4. "recipientName": Nome do morador/destinatário. NUNCA coloque nomes de empresas, transportadoras (ex: Mercado Livre, Shopee, Amazon, Correios), avisos ("FRAGIL", "DESTINATARIO", "DANFE") nem exemplos fictícios. Se ilegível, retorne null.
-5. "carrier": Transportadora identificada (Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro).`;
-
-      const modelsToTry = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+    // 1. Tentar Gemini Flash
+    if (geminiKey) {
+      const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
       for (const modelName of modelsToTry) {
         try {
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-goog-api-key': apiKey
+              'X-goog-api-key': geminiKey
             },
             body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    { text: prompt },
-                    {
-                      inlineData: {
-                        mimeType,
-                        data: base64Image
-                      }
-                    }
-                  ]
-                }
-              ],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0,
-                maxOutputTokens: 250
-              }
+              contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
+              generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 200 }
             }),
-            signal: AbortSignal.timeout(8000)
+            signal: AbortSignal.timeout(4500)
           });
 
           if (res.ok) {
@@ -88,51 +107,61 @@ REGRAS CRÍTICAS ANTI-ALUCINAÇÃO:
             if (text) {
               const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
               const parsed = JSON.parse(cleanJson);
-
-              // Sanitização do nome do destinatário
-              let cleanRecipient: string | null = (parsed.recipientName || '').trim();
-              const forbiddenWords = [
-                'MERCADO LIVRE', 'SHOPEE', 'AMAZON', 'CORREIOS', 'LOGGI', 'TOTAL EXPRESS',
-                'JADLOG', 'SHEIN', 'MAGALU', 'MAGAZINE LUIZA', 'FRAGIL', 'FRÁGIL',
-                'DESTINATARIO', 'DESTINATÁRIO', 'REMETENTE', 'DANFE', 'NOTA FISCAL',
-                'NF-E', 'ENCOMENDA', 'ENTREGA', 'CONDOMINIO', 'CONDOMÍNIO', 'PORTARIA',
-                'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO', 'MARIA LUIZA DE SOUZA'
-              ];
-              if (
-                !cleanRecipient ||
-                cleanRecipient.length < 3 ||
-                forbiddenWords.some(fw => cleanRecipient!.toUpperCase() === fw || cleanRecipient!.toUpperCase().startsWith(fw))
-              ) {
-                cleanRecipient = null;
+              ocrResult = cleanOcrData(parsed);
+              if (ocrResult.confidence > 0) {
+                console.log(`[OCR-UPLOAD] ✅ Gemini [${modelName}]:`, ocrResult);
+                break;
               }
-
-              // Se não identificou apartamento, reduz a confiança
-              const hasUnit = Boolean(parsed.unitNumber && String(parsed.unitNumber).replace(/\D/g, '').length >= 1);
-              const confidence = hasUnit ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.95) : 0;
-
-              ocrResult = {
-                recipientName: cleanRecipient,
-                block: parsed.block ? String(parsed.block).trim() : null,
-                unitNumber: hasUnit ? String(parsed.unitNumber).trim() : null,
-                carrier: parsed.carrier || 'Outro',
-                trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
-                invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
-                confidence
-              };
-              console.log(`[OCR] ✅ Extração com [${modelName}]:`, ocrResult);
-              break;
             }
-          } else {
-            const errData = await res.text();
-            console.warn(`[OCR] ⚠️ Modelo ${modelName} retornou status ${res.status}:`, errData.slice(0, 150));
           }
         } catch (e: any) {
-          console.warn(`[OCR] Modelo ${modelName} exceção:`, e.message?.slice(0, 80));
+          console.warn(`[OCR-UPLOAD] Gemini ${modelName} falhou:`, e.message?.slice(0, 80));
         }
       }
     }
 
-    // 2. Conexão com Supabase para encontrar Unidade e Morador correspondentes
+    // 2. Fallback: NVIDIA NIM (Llama 3.2 11B Vision)
+    if (!ocrResult.unitNumber && nvidiaKey) {
+      try {
+        const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${nvidiaKey}`,
+          },
+          body: JSON.stringify({
+            model: 'meta/llama-3.2-11b-vision-instruct',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  { type: 'image_url', image_url: { url: dataUrl } },
+                ],
+              },
+            ],
+            temperature: 0,
+            max_tokens: 150,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const content = data.choices?.[0]?.message?.content || '';
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            ocrResult = cleanOcrData(parsed);
+            console.log('[OCR-UPLOAD] ✅ NVIDIA NIM Vision:', ocrResult);
+          }
+        }
+      } catch (e: any) {
+        console.warn('[OCR-UPLOAD] NVIDIA NIM falhou:', e.message?.slice(0, 80));
+      }
+    }
+
+    // 3. Conexão com Supabase para encontrar Unidade e Morador correspondentes
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
@@ -174,7 +203,6 @@ REGRAS CRÍTICAS ANTI-ALUCINAÇÃO:
     // Gera ID único para o arquivo
     const filename = `label_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
     const imagePath = `labels/${filename}`;
-    const dataUrl = `data:${mimeType};base64,${base64Image}`;
 
     return NextResponse.json({
       success: true,

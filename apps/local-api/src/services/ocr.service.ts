@@ -141,75 +141,125 @@ REGRAS CRÍTICAS DE PRECISÃO:
 
   async extractLiveOCR(imageBuffer: Buffer, mimeType: string = 'image/jpeg') {
     this.initClient();
-    if (!env.GEMINI_API_KEY) {
-      return { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
+    const base64Image = imageBuffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
+    const prompt = 'Extraia o destinatario, apartamento e bloco desta etiqueta. Retorne APENAS um JSON: {"recipientName":"...","block":"...","unitNumber":"...","trackingCode":"...","confidence":0.95}';
+
+    // 1. Tentar Gemini
+    if (env.GEMINI_API_KEY) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': env.GEMINI_API_KEY,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
+            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 120 }
+          }),
+          signal: AbortSignal.timeout(4500)
+        });
+
+        if (res.ok) {
+          const data = await res.json() as any;
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+            let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
+            let rawBlock = parsed.block ? String(parsed.block).trim() : null;
+            const recipient = parsed.recipientName ? String(parsed.recipientName).trim() : null;
+            const tracking = parsed.trackingCode ? String(parsed.trackingCode).trim() : null;
+
+            const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
+            if (matchLetterNum) {
+              if (!rawBlock) rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
+              rawUnit = matchLetterNum[2];
+            }
+
+            const unitNumberDigits = rawUnit.replace(/\D/g, '');
+            const hasUnit = unitNumberDigits.length >= 1;
+            const hasRecipient = !!recipient && recipient.length >= 3;
+            const hasTracking = !!tracking && tracking.length >= 6;
+            const detected = hasUnit || hasRecipient || hasTracking;
+
+            if (detected) {
+              return {
+                recipientName: recipient,
+                block: rawBlock,
+                unitNumber: hasUnit ? rawUnit : null,
+                trackingCode: tracking,
+                confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95
+              };
+            }
+          }
+        }
+      } catch {}
     }
 
-    const base64Image = imageBuffer.toString('base64');
-    const prompt = `Analise esta etiqueta de encomenda e extraia:
-1. recipientName: Nome do destinatario (ex: Kleber venancio).
-2. unitNumber: Numero do apartamento ou lote (ex: em A805 -> 805, 404, 102).
-3. block: Bloco ou Torre (ex: em A805 -> Bloco A, CIVIT 1).
-4. trackingCode: Codigo de rastreio (ex: ON780589007BR).
-Retorne JSON: {"recipientName":"string ou null","block":"string ou null","unitNumber":"string ou null","trackingCode":"string ou null","confidence":0.95}`;
-
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-goog-api-key': env.GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                { inlineData: { mimeType, data: base64Image } }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseMimeType: 'application/json',
+    // 2. Fallback: NVIDIA NIM Vision
+    const nvidiaKey = process.env.NVIDIA_API_KEY;
+    if (nvidiaKey) {
+      try {
+        const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${nvidiaKey}`,
+          },
+          body: JSON.stringify({
+            model: 'meta/llama-3.2-11b-vision-instruct',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  { type: 'image_url', image_url: { url: dataUrl } },
+                ],
+              },
+            ],
             temperature: 0,
-            maxOutputTokens: 120
+            max_tokens: 150,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (res.ok) {
+          const data = await res.json() as any;
+          const content = data.choices?.[0]?.message?.content || '';
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
+            let rawBlock = parsed.block ? String(parsed.block).trim() : null;
+            const recipient = parsed.recipientName ? String(parsed.recipientName).trim() : null;
+            const tracking = parsed.trackingCode ? String(parsed.trackingCode).trim() : null;
+
+            const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
+            if (matchLetterNum) {
+              if (!rawBlock) rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
+              rawUnit = matchLetterNum[2];
+            }
+
+            const unitNumberDigits = rawUnit.replace(/\D/g, '');
+            const hasUnit = unitNumberDigits.length >= 1;
+            const hasRecipient = !!recipient && recipient.length >= 3;
+            const hasTracking = !!tracking && tracking.length >= 6;
+            const detected = hasUnit || hasRecipient || hasTracking;
+
+            if (detected) {
+              return {
+                recipientName: recipient,
+                block: rawBlock,
+                unitNumber: hasUnit ? rawUnit : null,
+                trackingCode: tracking,
+                confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95
+              };
+            }
           }
-        }),
-        signal: AbortSignal.timeout(8000)
-      });
-
-      if (res.ok) {
-        const data = await res.json() as any;
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-          const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
-          let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
-          let rawBlock = parsed.block ? String(parsed.block).trim() : null;
-          const recipient = parsed.recipientName ? String(parsed.recipientName).trim() : null;
-          const tracking = parsed.trackingCode ? String(parsed.trackingCode).trim() : null;
-
-          const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
-          if (matchLetterNum) {
-            if (!rawBlock) rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
-            rawUnit = matchLetterNum[2];
-          }
-
-          const unitNumberDigits = rawUnit.replace(/\D/g, '');
-          const hasUnit = unitNumberDigits.length >= 1;
-          const hasRecipient = !!recipient && recipient.length >= 3;
-          const hasTracking = !!tracking && tracking.length >= 6;
-          const detected = hasUnit || hasRecipient || hasTracking;
-
-          return {
-            recipientName: recipient,
-            block: rawBlock,
-            unitNumber: hasUnit ? rawUnit : null,
-            trackingCode: tracking,
-            confidence: detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.95) : 0
-          };
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     return { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
   }
