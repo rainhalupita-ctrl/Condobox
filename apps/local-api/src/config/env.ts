@@ -12,6 +12,8 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default('placeholder_key'),
   CONDO_ID: z.string().optional().default('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'),
   GEMINI_API_KEY: z.string().optional().default(''),
+  GROQ_API_KEY: z.string().optional().default(''),
+  NVIDIA_API_KEY: z.string().optional().default(''),
   EVOLUTION_API_URL: z.string().default('http://127.0.0.1:8080'),
   EVOLUTION_API_KEY: z.string().default('condo_evolution_super_secret_key_2026'),
   EVOLUTION_INSTANCE_NAME: z.string().default('portaria-principal'),
