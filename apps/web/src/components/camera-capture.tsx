@@ -107,13 +107,27 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     if (!videoRef.current) return;
 
     const video = videoRef.current;
+    const maxDim = 800;
+    let width = video.videoWidth || 800;
+    let height = video.videoHeight || 600;
+
+    if (width > maxDim || height > maxDim) {
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+    }
+
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, width, height);
 
     canvas.toBlob(blob => {
       if (blob) {
@@ -121,8 +135,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         setCapturedBlob(blob);
         setCapturedPreview(previewUrl);
         stopCamera(); // Desliga o sensor da câmera no celular imediatamente
+        onCapture(blob, previewUrl);
       }
-    }, 'image/jpeg', 0.92);
+    }, 'image/jpeg', 0.78);
   };
 
   const compressImage = (fileOrBlob: Blob | File): Promise<Blob> => {
@@ -131,7 +146,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       const url = URL.createObjectURL(fileOrBlob);
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const maxDim = 1280;
+        const maxDim = 800;
         let width = img.width;
         let height = img.height;
 
@@ -153,7 +168,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           ctx.drawImage(img, 0, 0, width, height);
           canvas.toBlob((b) => {
             resolve(b || fileOrBlob);
-          }, 'image/jpeg', 0.85);
+          }, 'image/jpeg', 0.78);
         } else {
           resolve(fileOrBlob);
         }

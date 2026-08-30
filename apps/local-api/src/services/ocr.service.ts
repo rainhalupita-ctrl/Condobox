@@ -36,27 +36,17 @@ export class OCRService {
     }
 
     const base64Image = imageBuffer.toString('base64');
-    const prompt = `
-Você é um especialista em OCR e visão computacional de alta precisão para recepção de encomendas em condomínios no Brasil.
-Analise a imagem da etiqueta de entrega (Correios, Mercado Livre, Shopee, Amazon, Dell, Total Express, Jadlog, Loggi, etc.) e extraia com a máxima precisão as seguintes informações:
-
-1. "recipientName": Nome completo do destinatário / morador (ex: se na etiqueta diz "DXM KLEBIN", extraia "DXM KLEBIN").
-2. "block": Identificação do bloco/torre, se houver (ex: se o endereço contiver "A805", "CIVIT I 1770 A805", "BL A", extraia "Bloco A").
-3. "unitNumber": Número do apartamento ou casa (ex: se o endereço contiver "A805", extraia "805").
-4. "carrier": Nome da transportadora, marketplace ou remetente (ex: "Dell", "Mercado Livre", "Shopee", "Amazon", "Correios", "Total Express", "Outro").
-5. "trackingCode": Código de rastreio, número da Nota Fiscal (NF) ou código do pacote (ex: "7958078", "CPQ 11028199").
-6. "confidence": Um número de 0.0 a 1.0 indicando o grau de certeza da leitura.
-
-Responda ESTRITAMENTE em formato JSON:
+    const apiKey = env.GEMINI_API_KEY;
+    const prompt = `Analise a etiqueta de encomenda e extraia em JSON estrito:
 {
-  "recipientName": string | null,
-  "block": string | null,
-  "unitNumber": string | null,
-  "carrier": string,
-  "trackingCode": string | null,
+  "recipientName": string ou null (nome impresso no pacote),
+  "block": string ou null (bloco ou torre),
+  "unitNumber": string ou null (número do apartamento),
+  "carrier": string (Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro),
+  "trackingCode": string ou null (código de rastreio),
+  "invoiceNumber": string ou null (número da NF ou DANFE se houver),
   "confidence": number
-}
-`;
+}`;
 
     const modelsToTry = [
       'gemini-3.6-flash',
@@ -71,7 +61,7 @@ Responda ESTRITAMENTE em formato JSON:
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-goog-api-key': env.GEMINI_API_KEY
+            'X-goog-api-key': apiKey
           },
           body: JSON.stringify({
             contents: [
@@ -90,10 +80,10 @@ Responda ESTRITAMENTE em formato JSON:
             generationConfig: {
               responseMimeType: 'application/json',
               temperature: 0,
-              maxOutputTokens: 300
+              maxOutputTokens: 250
             }
           }),
-          signal: AbortSignal.timeout(30000)
+          signal: AbortSignal.timeout(8000)
         });
 
         if (res.ok) {
@@ -109,11 +99,12 @@ Responda ESTRITAMENTE em formato JSON:
             unitNumber: parsed.unitNumber || null,
             carrier: parsed.carrier || 'Outro',
             trackingCode: parsed.trackingCode || null,
+            invoiceNumber: parsed.invoiceNumber || null,
             confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
           };
         }
       } catch (error: any) {
-        console.warn(`[OCRService] ⚠️ Modelo ${modelName} falhou: ${error?.message?.slice(0, 100)}`);
+        console.warn(`[OCRService] Tentativa com ${modelName} falhou:`, error.message?.slice(0, 100));
       }
     }
 

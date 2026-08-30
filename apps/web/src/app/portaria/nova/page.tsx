@@ -15,13 +15,16 @@ import {
   Send,
   ArrowLeft,
   RefreshCw,
-  Phone
+  Phone,
+  FileText,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function NovaEncomendaPage() {
   const router = useRouter();
-  const [step, setStep] = useState<'CAPTURE' | 'PROCESSING' | 'CONFIRM'>('CAPTURE');
+  const [step, setStep] = useState<'CAPTURE' | 'CONFIRM'>('CAPTURE');
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [ocrData, setOcrData] = useState<OCRResponse | null>(null);
@@ -33,6 +36,7 @@ export default function NovaEncomendaPage() {
   const [selectedResidentId, setSelectedResidentId] = useState<string>('');
   const [carrier, setCarrier] = useState<string>('Mercado Livre');
   const [trackingCode, setTrackingCode] = useState<string>('');
+  const [invoiceNumber, setInvoiceNumber] = useState<string>('');
   const [recipientNameOcr, setRecipientNameOcr] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [sendWhatsApp, setSendWhatsApp] = useState<boolean>(true);
@@ -41,6 +45,9 @@ export default function NovaEncomendaPage() {
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState<any | null>(null);
+
+  // Modal de Aviso de Duplicidade
+  const [duplicateWarning, setDuplicateWarning] = useState<any | null>(null);
 
   useEffect(() => {
     loadUnitsAndResidents();
@@ -61,12 +68,11 @@ export default function NovaEncomendaPage() {
   const handleCapturePhoto = async (blob: Blob, previewUrl: string) => {
     setCapturedBlob(blob);
     setCapturedPreview(previewUrl);
-    // Transição INSTANTÂNEA para o formulário (0s de espera)
     setStep('CONFIRM');
     setIsOcrProcessing(true);
 
     try {
-      // Processa OCR com Gemini em segundo plano
+      // Processa OCR com Gemini em alta velocidade
       const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
       setOcrData(ocrResult);
 
@@ -81,12 +87,13 @@ export default function NovaEncomendaPage() {
         if (rData) { currentResidents = rData; setResidents(rData); }
       }
 
-      // Preenche os campos automaticamente com a extração da IA (se o usuário não tiver alterado)
+      // Preenche os campos da encomenda sem alterar os dados cadastrais do morador
       if (ocrResult.ocr.carrier) setCarrier(ocrResult.ocr.carrier);
       if (ocrResult.ocr.trackingCode) setTrackingCode(ocrResult.ocr.trackingCode);
+      if ((ocrResult.ocr as any).invoiceNumber) setInvoiceNumber((ocrResult.ocr as any).invoiceNumber);
       if (ocrResult.ocr.recipientName) setRecipientNameOcr(ocrResult.ocr.recipientName);
 
-      // Se encontrou a unidade correspondente
+      // Match inteligente da unidade
       let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
       if (!targetUnitId && ocrResult.ocr.unitNumber) {
         const cleanNum = ocrResult.ocr.unitNumber.replace(/\D/g, '');
@@ -103,7 +110,6 @@ export default function NovaEncomendaPage() {
 
       if (targetUnitId) {
         setSelectedUnitId(targetUnitId);
-        // Moradores da unidade
         const unitRes = currentResidents.filter(r => r.unit_id === targetUnitId);
         if (ocrResult.suggestedMatch?.resident) {
           setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
@@ -147,6 +153,34 @@ export default function NovaEncomendaPage() {
     }
   };
 
+  // Verificação de Duplicidade de Cadastro
+  const checkDuplicatePackage = async (unitId: string, code?: string, nf?: string) => {
+    if (!code && !nf) return null;
+    const supabase = createClient();
+    try {
+      let query = supabase
+        .from('packages')
+        .select('id, tracking_code, notes, created_at, status, unit:units(block, unit_number), carrier')
+        .eq('status', 'RECEIVED');
+
+      if (code && code.trim().length >= 4) {
+        query = query.eq('tracking_code', code.trim());
+      } else if (nf && nf.trim().length >= 3) {
+        query = query.ilike('notes', `%${nf.trim()}%`);
+      } else {
+        return null;
+      }
+
+      const { data } = await query.limit(1);
+      if (data && data.length > 0) {
+        return data[0];
+      }
+    } catch (err) {
+      console.warn('Erro ao checar duplicidade:', err);
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUnitId) {
@@ -154,22 +188,40 @@ export default function NovaEncomendaPage() {
       return;
     }
 
+    // Checagem de duplicidade antes de salvar
+    const duplicate = await checkDuplicatePackage(selectedUnitId, trackingCode, invoiceNumber);
+    if (duplicate) {
+      setDuplicateWarning(duplicate);
+      return;
+    }
+
+    await executeSavePackage();
+  };
+
+  const executeSavePackage = async () => {
     setIsSaving(true);
+    setDuplicateWarning(null);
+
     try {
       const selectedUnit = units.find(u => u.id === selectedUnitId);
       const selectedRes = residents.find(r => r.id === selectedResidentId);
+
+      // Concatena nota fiscal nas notas caso preenchida
+      const finalNotes = invoiceNumber
+        ? `NF: ${invoiceNumber}${notes ? ` | ${notes}` : ''}`
+        : (notes || null);
 
       const res = await LocalApiClient.createPackage({
         unitId: selectedUnitId,
         residentId: selectedResidentId || null,
         carrier: carrier,
         trackingCode: trackingCode || null,
-        recipientNameOcr: recipientNameOcr || selectedRes?.name || null,
+        recipientNameOcr: recipientNameOcr || null,
         labelImagePath: ocrData?.image?.path || null,
-        notes: notes || null,
+        notes: finalNotes,
         sendWhatsApp: sendWhatsApp,
         residentPhone: customPhone || selectedRes?.phone || null,
-        residentName: selectedRes?.name || recipientNameOcr || 'Morador',
+        residentName: selectedRes?.name || 'Morador(a)',
         unitInfo: selectedUnit ? `Apto ${selectedUnit.unit_number} - ${selectedUnit.block}` : undefined
       });
 
@@ -178,56 +230,6 @@ export default function NovaEncomendaPage() {
       alert(`Erro ao registrar encomenda: ${err.message}`);
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const compressImage = (fileOrBlob: Blob | File): Promise<Blob> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(fileOrBlob);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const maxDim = 1280;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob((b) => {
-            resolve(b || fileOrBlob);
-          }, 'image/jpeg', 0.85);
-        } else {
-          resolve(fileOrBlob);
-        }
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(fileOrBlob);
-      };
-      img.src = url;
-    });
-  };
-
-  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const compressed = await compressImage(file);
-      const previewUrl = URL.createObjectURL(compressed);
-      handleCapturePhoto(compressed, previewUrl);
     }
   };
 
@@ -240,14 +242,105 @@ export default function NovaEncomendaPage() {
     setSelectedResidentId('');
     setCarrier('Mercado Livre');
     setTrackingCode('');
+    setInvoiceNumber('');
     setRecipientNameOcr('');
     setNotes('');
     setCustomPhone('');
     setSavedSuccess(null);
+    setDuplicateWarning(null);
   };
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
+      {/* Pop-up de Leitura em Andamento */}
+      {isOcrProcessing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-8 max-w-sm w-full text-center space-y-5 shadow-2xl">
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" />
+              <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin relative" />
+              <Sparkles className="w-5 h-5 text-amber-400 absolute" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-bold text-white">Realizando leitura, aguarde...</h3>
+              <p className="text-xs text-slate-400">
+                A IA está identificando o morador, unidade, NF e transportadora na etiqueta.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsOcrProcessing(false)}
+              className="text-xs text-slate-400 hover:text-slate-200 underline pt-2 block mx-auto transition"
+            >
+              Preencher manualmente agora
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Aviso de Duplicidade */}
+      {duplicateWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-amber-500/50 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="p-3 bg-amber-500/10 rounded-2xl border border-amber-500/20">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Atenção: Possível Duplicidade!</h3>
+                <span className="text-xs text-amber-400/80">Esta encomenda já foi registrada no sistema.</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Unidade:</span>
+                <span className="font-bold text-slate-200">
+                  {duplicateWarning.unit?.block} - Apto {duplicateWarning.unit?.unit_number}
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Código / Rastreio:</span>
+                <span className="font-mono font-bold text-emerald-400">
+                  {duplicateWarning.tracking_code || 'Não informado'}
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Transportadora:</span>
+                <span className="font-semibold text-slate-200">{duplicateWarning.carrier}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Cadastrado em:</span>
+                <span className="text-slate-400">
+                  {new Date(duplicateWarning.created_at).toLocaleString('pt-BR')}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400 text-center">
+              Deseja registrar essa encomenda novamente ou cancelar?
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDuplicateWarning(null)}
+                className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={executeSavePackage}
+                className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-amber-950"
+              >
+                Cadastrar Mesmo Assim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header com voltar */}
       <div className="flex items-center justify-between">
         <Link
@@ -333,40 +426,17 @@ export default function NovaEncomendaPage() {
       ) : step === 'CAPTURE' ? (
         /* Passo 1: Captura da Foto Imediata */
         <CameraCapture onCapture={handleCapturePhoto} onCancel={() => router.push('/portaria')} />
-      ) : step === 'PROCESSING' ? (
-        /* Passo 2: Processamento OCR com Gemini */
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-6 shadow-2xl">
-          <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
-            <RefreshCw className="w-12 h-12 text-emerald-400 animate-spin" />
-            <Sparkles className="w-6 h-6 text-amber-400 absolute" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-slate-100">Analisando Etiqueta com IA Gemini...</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              Identificando destinatário, número da unidade, código de rastreio e transportadora automaticamente.
-            </p>
-          </div>
-        </div>
       ) : (
-        /* Passo 3: Confirmação e Ajuste dos Dados Extraídos */
+        /* Passo 2: Confirmação e Ajuste dos Dados */
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
           <div className="flex items-start justify-between pb-4 border-b border-slate-800">
             <div>
-              {isOcrProcessing ? (
-                <div className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/30 px-3 py-1 rounded-full w-fit animate-pulse mb-1">
-                  <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                  <span className="text-xs font-bold text-amber-300">
-                    Lendo etiqueta com IA em 2º plano...
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1 rounded-full w-fit mb-1">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                    Dados Reconhecidos por IA
-                  </span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1 rounded-full w-fit mb-1">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                  Dados Reconhecidos por IA
+                </span>
+              </div>
               <h2 className="text-xl font-bold text-slate-100">Confirmar Dados da Encomenda</h2>
             </div>
             {capturedPreview && (
@@ -426,17 +496,17 @@ export default function NovaEncomendaPage() {
               </div>
             </div>
 
-            {/* Nome da Etiqueta e Transportadora */}
+            {/* Nome na Etiqueta (Informativo, não altera o morador) e Transportadora */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Nome no Pacote (OCR):
+                  Nome na Etiqueta (Lido no Pacote):
                 </label>
                 <input
                   type="text"
                   value={recipientNameOcr}
                   onChange={(e) => setRecipientNameOcr(e.target.value)}
-                  placeholder="Nome lido na etiqueta"
+                  placeholder="Nome impresso no pacote"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -468,7 +538,7 @@ export default function NovaEncomendaPage() {
               </div>
             </div>
 
-            {/* Código de Rastreio e Telefone WhatsApp */}
+            {/* Código de Rastreio e Nota Fiscal (NF) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
@@ -485,16 +555,30 @@ export default function NovaEncomendaPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  WhatsApp para Notificação:
+                  Nota Fiscal (NF):
                 </label>
                 <input
                   type="text"
-                  value={customPhone}
-                  onChange={(e) => setCustomPhone(e.target.value)}
-                  placeholder="Ex: 5511999999999"
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  placeholder="Ex: 001.234.567 ou Danfe"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
+            </div>
+
+            {/* WhatsApp para Notificação */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                WhatsApp para Notificação:
+              </label>
+              <input
+                type="text"
+                value={customPhone}
+                onChange={(e) => setCustomPhone(e.target.value)}
+                placeholder="Ex: 5511999999999"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-mono"
+              />
             </div>
 
             {/* Notificação WhatsApp Toggle */}
