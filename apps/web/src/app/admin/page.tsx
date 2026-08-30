@@ -84,7 +84,8 @@ export default function AdminPage() {
   const [newResName, setNewResName] = useState('');
   const [newResPhone, setNewResPhone] = useState('');
   const [newResEmail, setNewResEmail] = useState('');
-  const [newResUnitId, setNewResUnitId] = useState('');
+  const [newResBlock, setNewResBlock] = useState('Bloco A');
+  const [newResUnitNumber, setNewResUnitNumber] = useState('');
 
   useEffect(() => {
     loadData();
@@ -119,7 +120,17 @@ export default function AdminPage() {
       const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
       const { data: rData } = await supabase.from('residents').select('*, unit:units(*)').order('name');
       const { data: pData } = await supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
-      if (uData) setUnits(uData);
+      if (uData) {
+        // Deduplica unidades caso existam registros repetidos
+        const uniqueMap = new Map<string, Unit>();
+        uData.forEach(u => {
+          const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, u);
+          }
+        });
+        setUnits(Array.from(uniqueMap.values()));
+      }
       if (rData) setResidents(rData);
       if (pData) setPackages(pData);
     } catch (err) {
@@ -301,47 +312,76 @@ export default function AdminPage() {
 
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newResName || !newResPhone || !newResUnitId) {
-      alert('Preencha os campos obrigatórios.');
+    if (!newResName.trim() || !newResPhone.trim() || !newResUnitNumber.trim()) {
+      alert('Preencha os campos obrigatórios (Nome, Bloco, Apartamento e WhatsApp).');
       return;
     }
 
     const supabase = createClient();
-    if (supabase) {
-      const { data, error } = await supabase.from('residents').insert({
-        name: newResName,
-        phone: newResPhone,
-        email: newResEmail || null,
-        unit_id: newResUnitId,
-        is_authorized_receiver: true,
-        is_primary: true,
-        active: true
-      }).select('*, unit:units(*)').single();
+    try {
+      const block = (newResBlock || 'Bloco A').trim();
+      const unitNum = newResUnitNumber.trim();
 
-      if (!error && data) {
-        setResidents(prev => [...prev, data as Resident]);
+      // 1. Procura unidade existente
+      let unit = units.find(
+        (u) => (u.block || 'Bloco A').trim().toUpperCase() === block.toUpperCase() && u.unit_number.trim() === unitNum
+      );
+
+      // 2. Se não existir, cria a unidade automaticamente no banco
+      if (!unit && supabase) {
+        const { data: newUnit, error: uErr } = await supabase
+          .from('units')
+          .insert({ block, unit_number: unitNum })
+          .select()
+          .single();
+
+        if (uErr) {
+          alert(`Erro ao criar unidade: ${uErr.message}`);
+          return;
+        }
+        unit = newUnit;
       }
-    } else {
-      const selectedUnit = units.find(u => u.id === newResUnitId);
-      const newRes: Resident = {
-        id: `r-${Date.now()}`,
-        unit_id: newResUnitId,
-        name: newResName,
-        phone: newResPhone,
-        email: newResEmail,
-        is_authorized_receiver: true,
-        is_primary: true,
-        active: true,
-        unit: selectedUnit
-      };
-      setResidents(prev => [...prev, newRes]);
-    }
 
-    setIsAddResidentModalOpen(false);
-    setNewResName('');
-    setNewResPhone('');
-    setNewResEmail('');
-    setNewResUnitId('');
+      if (!unit) {
+        alert('Falha ao vincular unidade.');
+        return;
+      }
+
+      // 3. Cadastra o morador
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('residents')
+          .insert({
+            name: newResName.trim(),
+            phone: newResPhone.trim(),
+            email: newResEmail.trim() || null,
+            unit_id: unit.id,
+            is_authorized_receiver: true,
+            is_primary: true,
+            active: true
+          })
+          .select('*, unit:units(*)')
+          .single();
+
+        if (error) {
+          alert(`Erro ao cadastrar morador: ${error.message}`);
+          return;
+        }
+
+        if (data) {
+          setResidents((prev) => [...prev, data as Resident]);
+        }
+      }
+
+      setIsAddResidentModalOpen(false);
+      setNewResName('');
+      setNewResPhone('');
+      setNewResEmail('');
+      setNewResUnitNumber('');
+      loadData();
+    } catch (err: any) {
+      alert(`Erro: ${err.message}`);
+    }
   };
 
   const pendingCount = packages.filter(p => p.status !== 'DELIVERED').length;
@@ -1006,93 +1046,6 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Modal Adicionar Morador */}
-      {isAddResidentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h3 className="text-base font-bold text-slate-100">Cadastrar Novo Morador</h3>
-              <button
-                onClick={() => setIsAddResidentModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleAddResident} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome Completo: *</label>
-                <input
-                  type="text"
-                  required
-                  value={newResName}
-                  onChange={(e) => setNewResName(e.target.value)}
-                  placeholder="Ex: João da Silva"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Unidade (Bloco/Apto): *</label>
-                <select
-                  required
-                  value={newResUnitId}
-                  onChange={(e) => setNewResUnitId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">Selecione a Unidade...</option>
-                  {units.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.block} - Apto {u.unit_number}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">WhatsApp com DDD (para alertas): *</label>
-                <input
-                  type="text"
-                  required
-                  value={newResPhone}
-                  onChange={(e) => setNewResPhone(e.target.value)}
-                  placeholder="Ex: 5511999998888"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">E-mail (Opcional):</label>
-                <input
-                  type="email"
-                  value={newResEmail}
-                  onChange={(e) => setNewResEmail(e.target.value)}
-                  placeholder="morador@email.com"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddResidentModalOpen(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-md transition"
-                >
-                  Cadastrar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* ===== ABA EQUIPE ===== */}
       {activeTab === 'STAFF' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1286,28 +1239,59 @@ export default function AdminPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Unidade / Apartamento *</label>
-                <select
-                  required
-                  value={newResUnitId}
-                  onChange={(e) => setNewResUnitId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">Selecione o apartamento...</option>
-                  {Array.from(new Set(units.map((u) => u.block))).sort().map((blockName) => (
-                    <optgroup key={blockName} label={blockName} className="bg-slate-900 text-indigo-400 font-bold">
-                      {units
-                        .filter((u) => u.block === blockName)
-                        .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
-                        .map((u) => (
-                          <option key={u.id} value={u.id} className="text-white font-normal">
-                            {u.block} — Apto {u.unit_number}
+              {/* Bloco e Apartamento Separados */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Bloco / Torre *</label>
+                  <select
+                    required
+                    value={newResBlock}
+                    onChange={(e) => {
+                      setNewResBlock(e.target.value);
+                      setNewResUnitNumber('');
+                    }}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                  >
+                    {Array.from(new Set(units.map((u) => u.block || 'Bloco A'))).sort().map((blockName) => (
+                      <option key={blockName} value={blockName}>
+                        {blockName}
+                      </option>
+                    ))}
+                    {newResBlock && !units.some((u) => u.block === newResBlock) && (
+                      <option value={newResBlock}>{newResBlock}</option>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Apartamento *</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      list="admin-modal-units-list"
+                      value={newResUnitNumber}
+                      onChange={(e) => setNewResUnitNumber(e.target.value)}
+                      placeholder="Ex: 101, 805"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold"
+                    />
+                    <datalist id="admin-modal-units-list">
+                      {Array.from(
+                        new Set(
+                          units
+                            .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
+                            .map((u) => u.unit_number)
+                        )
+                      )
+                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                        .map((num) => (
+                          <option key={num} value={num}>
+                            Apto {num}
                           </option>
                         ))}
-                    </optgroup>
-                  ))}
-                </select>
+                    </datalist>
+                  </div>
+                </div>
               </div>
 
               <div>

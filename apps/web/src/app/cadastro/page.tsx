@@ -23,6 +23,8 @@ export default function CadastroPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingUnits, setLoadingUnits] = useState(true);
+  const [selectedBlock, setSelectedBlock] = useState('Bloco A');
+  const [selectedUnitNumber, setSelectedUnitNumber] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -37,7 +39,20 @@ export default function CadastroPage() {
       .order('block')
       .order('unit_number')
       .then(({ data }) => {
-        setUnits((data as Unit[]) || []);
+        if (data) {
+          const uniqueMap = new Map<string, Unit>();
+          (data as Unit[]).forEach((u) => {
+            const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
+            if (!uniqueMap.has(key)) {
+              uniqueMap.set(key, u);
+            }
+          });
+          const deduped = Array.from(uniqueMap.values());
+          setUnits(deduped);
+          if (deduped.length > 0) {
+            setSelectedBlock(deduped[0].block || 'Bloco A');
+          }
+        }
         setLoadingUnits(false);
       });
   }, []);
@@ -202,35 +217,59 @@ export default function CadastroPage() {
             </div>
           </div>
 
-          {/* Unidade */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Seu Apartamento / Unidade</label>
-            <div className="relative">
-              <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <select
-                required
-                value={unitId}
-                onChange={e => setUnitId(e.target.value)}
-                disabled={loadingUnits}
-                className="w-full pl-9 pr-8 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm appearance-none focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition disabled:opacity-50"
-              >
-                <option value="">
-                  {loadingUnits ? 'Carregando unidades...' : 'Selecione seu apartamento'}
-                </option>
-                {Array.from(new Set(units.map(u => u.block))).sort().map(blockName => (
-                  <optgroup key={blockName} label={blockName} className="bg-slate-900 text-green-400 font-bold">
-                    {units
-                      .filter(u => u.block === blockName)
-                      .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
-                      .map(u => (
-                        <option key={u.id} value={u.id} className="text-white font-normal">
-                          {u.block} — Apto {u.unit_number}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
-              <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+          {/* Bloco e Apartamento Separados */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Bloco / Torre</label>
+              <div className="relative">
+                <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <select
+                  required
+                  value={selectedBlock}
+                  onChange={e => {
+                    setSelectedBlock(e.target.value);
+                    setSelectedUnitNumber('');
+                    setUnitId('');
+                  }}
+                  disabled={loadingUnits}
+                  className="w-full pl-9 pr-8 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm appearance-none focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition disabled:opacity-50"
+                >
+                  {Array.from(new Set(units.map(u => u.block || 'Bloco A'))).sort().map(blockName => (
+                    <option key={blockName} value={blockName}>
+                      {blockName}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Apartamento</label>
+              <div className="relative">
+                <select
+                  required
+                  value={unitId}
+                  onChange={e => {
+                    setUnitId(e.target.value);
+                    const found = units.find(u => u.id === e.target.value);
+                    if (found) setSelectedUnitNumber(found.unit_number);
+                  }}
+                  disabled={loadingUnits}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm appearance-none focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition disabled:opacity-50 font-bold"
+                >
+                  <option value="">Selecione o apto...</option>
+                  {units
+                    .filter(u => (u.block || 'Bloco A').toUpperCase() === (selectedBlock || 'Bloco A').toUpperCase())
+                    .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
+                    .map(u => (
+                      <option key={u.id} value={u.id}>
+                        Apto {u.unit_number}
+                      </option>
+                    ))}
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+              </div>
             </div>
           </div>
 

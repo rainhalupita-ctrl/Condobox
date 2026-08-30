@@ -32,6 +32,8 @@ export default function NovaEncomendaPage() {
   // Dados do formulário
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
+  const [selectedBlock, setSelectedBlock] = useState<string>('Bloco A');
+  const [selectedUnitNumber, setSelectedUnitNumber] = useState<string>('');
   const [selectedUnitId, setSelectedUnitId] = useState<string>('');
   const [selectedResidentId, setSelectedResidentId] = useState<string>('');
   const [carrier, setCarrier] = useState<string>('Mercado Livre');
@@ -58,7 +60,20 @@ export default function NovaEncomendaPage() {
     try {
       const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
       const { data: rData } = await supabase.from('residents').select('*').eq('active', true);
-      if (uData) setUnits(uData);
+      if (uData) {
+        const uniqueMap = new Map<string, Unit>();
+        uData.forEach((u) => {
+          const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, u);
+          }
+        });
+        const dedupedUnits = Array.from(uniqueMap.values());
+        setUnits(dedupedUnits);
+        if (dedupedUnits.length > 0 && !selectedBlock) {
+          setSelectedBlock(dedupedUnits[0].block || 'Bloco A');
+        }
+      }
       if (rData) setResidents(rData);
     } catch (err) {
       console.error('Erro ao carregar unidades e moradores:', err);
@@ -92,6 +107,11 @@ export default function NovaEncomendaPage() {
     }
 
     if (targetUnitId) {
+      const matchedUnit = currentUnits.find(u => u.id === targetUnitId);
+      if (matchedUnit) {
+        setSelectedBlock(matchedUnit.block || 'Bloco A');
+        setSelectedUnitNumber(matchedUnit.unit_number);
+      }
       setSelectedUnitId(targetUnitId);
       const unitRes = currentResidents.filter(r => r.unit_id === targetUnitId);
       if (ocrResult.suggestedMatch?.resident) {
@@ -133,6 +153,29 @@ export default function NovaEncomendaPage() {
 
   // Filtra os moradores da unidade selecionada
   const filteredResidents = residents.filter(r => r.unit_id === selectedUnitId);
+
+  const handleBlockChange = (block: string) => {
+    setSelectedBlock(block);
+    setSelectedUnitNumber('');
+    setSelectedUnitId('');
+    setSelectedResidentId('');
+    setCustomPhone('');
+  };
+
+  const handleUnitNumberChange = (unitNum: string) => {
+    setSelectedUnitNumber(unitNum);
+    const found = units.find(
+      (u) => (u.block || 'Bloco A').trim().toUpperCase() === (selectedBlock || 'Bloco A').trim().toUpperCase() &&
+             u.unit_number.trim() === unitNum.trim()
+    );
+    if (found) {
+      handleUnitChange(found.id);
+    } else {
+      setSelectedUnitId('');
+      setSelectedResidentId('');
+      setCustomPhone('');
+    }
+  };
 
   const handleUnitChange = (unitId: string) => {
     setSelectedUnitId(unitId);
@@ -450,31 +493,52 @@ export default function NovaEncomendaPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Unidade & Morador */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Bloco, Apartamento e Morador */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Apartamento / Unidade <span className="text-rose-400">*</span>
+                  Bloco / Torre <span className="text-rose-400">*</span>
                 </label>
                 <select
-                  value={selectedUnitId}
-                  onChange={(e) => handleUnitChange(e.target.value)}
-                  required
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
+                  value={selectedBlock}
+                  onChange={(e) => handleBlockChange(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-medium"
                 >
-                  <option value="">Selecione a Unidade...</option>
-                  {Array.from(new Set(units.map((u) => u.block))).sort().map((blockName) => (
-                    <optgroup key={blockName} label={blockName} className="bg-slate-900 text-emerald-400 font-bold">
-                      {units
-                        .filter((u) => u.block === blockName)
-                        .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
-                        .map((u) => (
-                          <option key={u.id} value={u.id} className="text-white font-normal">
-                            {u.block} — Apto {u.unit_number}
-                          </option>
-                        ))}
-                    </optgroup>
+                  {Array.from(new Set(units.map((u) => u.block || 'Bloco A'))).sort().map((blockName) => (
+                    <option key={blockName} value={blockName}>
+                      {blockName}
+                    </option>
                   ))}
+                  {selectedBlock && !units.some((u) => u.block === selectedBlock) && (
+                    <option value={selectedBlock}>{selectedBlock}</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Apartamento <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={selectedUnitNumber}
+                  onChange={(e) => handleUnitNumberChange(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-bold"
+                >
+                  <option value="">Selecione o apto...</option>
+                  {Array.from(
+                    new Set(
+                      units
+                        .filter((u) => (u.block || 'Bloco A').toUpperCase() === (selectedBlock || 'Bloco A').toUpperCase())
+                        .map((u) => u.unit_number)
+                    )
+                  )
+                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                    .map((num) => (
+                      <option key={num} value={num}>
+                        Apto {num}
+                      </option>
+                    ))}
                 </select>
               </div>
 
@@ -487,10 +551,12 @@ export default function NovaEncomendaPage() {
                   onChange={(e) => handleResidentChange(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                 >
-                  <option value="">Selecione o morador...</option>
+                  <option value="">
+                    {filteredResidents.length === 0 ? 'Sem morador cadastrado' : 'Selecione o morador...'}
+                  </option>
                   {filteredResidents.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.name} {r.is_primary ? '(Principal)' : ''}
+                      {r.name} {r.is_primary ? '(Titular)' : ''}
                     </option>
                   ))}
                 </select>
