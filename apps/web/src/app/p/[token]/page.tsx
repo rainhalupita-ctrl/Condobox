@@ -67,6 +67,10 @@ export default function PublicPackagePage() {
       const data = await res.json();
       if (res.ok && data.package) {
         setPkg(data.package);
+        // Verifica se o usuário já desbloqueou este QR code localmente
+        if (typeof window !== 'undefined' && localStorage.getItem(`unlocked_${data.package.pickup_code}`) === 'true') {
+          setIsUnlocked(true);
+        }
       } else {
         setError(data.error || 'Encomenda não encontrada.');
       }
@@ -239,17 +243,20 @@ export default function PublicPackagePage() {
                       type="button"
                       onClick={() => {
                         setIsUnlocked(true);
+                        localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
                         const whatsappUrl = `https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
-                        window.open(whatsappUrl, '_blank');
+                        // Navega na mesma aba para evitar abas "órfãs" do WhatsApp Web.
+                        // Quando o usuário voltar (botão Voltar do celular), o localStorage garantirá que a página esteja desbloqueada.
+                        window.location.href = whatsappUrl;
                       }}
                       className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50"
                     >
                       <div className="flex items-center gap-2">
                         <MessageSquare className="w-5 h-5 text-emerald-100" />
-                        <span>Abrir WhatsApp e Confirmar</span>
+                        <span>Confirmar e Liberar QR Code</span>
                       </div>
                       <span className="text-[10px] font-normal text-emerald-100/80">
-                        O QR Code será liberado imediatamente
+                        Abre o WhatsApp e libera a etiqueta na volta
                       </span>
                     </button>
                   </div>
