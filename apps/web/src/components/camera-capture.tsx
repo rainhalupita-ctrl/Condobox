@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useRef, useState, useEffect } from 'react';
-import { Camera, RefreshCw, Check, X, Upload } from 'lucide-react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { Camera, RefreshCw, Check, X, Upload, Zap, Sparkles } from 'lucide-react';
 
 interface CameraCaptureProps {
   onCapture: (blob: Blob, previewUrl: string) => void;
@@ -23,7 +23,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Estados de Auto-Captura Inteligente
+  const [autoCaptureProgress, setAutoCaptureProgress] = useState(0);
+  const [isDetected, setIsDetected] = useState(false);
+  const autoCaptureFiredRef = useRef(false);
+
   useEffect(() => {
+    autoCaptureFiredRef.current = false;
     startCamera();
     return () => {
       stopCamera();
@@ -32,13 +38,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
   const startCamera = async () => {
     setCameraError(null);
-    try {
-      // 1. Tentar reusar o deviceId e configurações salvas em cache/cookies
-      let preferredDeviceId: string | null = null;
-      if (typeof window !== 'undefined') {
-        preferredDeviceId = localStorage.getItem('condobox_camera_device_id');
-      }
+    setAutoCaptureProgress(0);
+    setIsDetected(false);
+    autoCaptureFiredRef.current = false;
 
+    try {
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: facingMode }
@@ -49,7 +53,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       setStream(mediaStream);
 
-      // Salvar em cookies e localStorage para persistência de estado
       if (typeof window !== 'undefined') {
         localStorage.setItem('condobox_camera_permission', 'granted');
         localStorage.setItem('condobox_camera_facing', facingMode);
@@ -84,12 +87,18 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     setFacingMode(nextFacing);
     if (typeof window !== 'undefined') {
       localStorage.setItem('condobox_camera_facing', nextFacing);
-      localStorage.removeItem('condobox_camera_device_id'); // Limpa deviceId anterior para achar nova câmera
+      localStorage.removeItem('condobox_camera_device_id');
     }
   };
 
-  const takeSnapshot = () => {
-    if (!videoRef.current) return;
+  const takeSnapshot = useCallback(() => {
+    if (!videoRef.current || autoCaptureFiredRef.current) return;
+    autoCaptureFiredRef.current = true;
+    setIsDetected(true);
+
+    try {
+      navigator.vibrate?.([40, 40, 80]);
+    } catch {}
 
     const video = videoRef.current;
     const maxDim = 800;
@@ -119,11 +128,58 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const previewUrl = URL.createObjectURL(blob);
         setCapturedBlob(blob);
         setCapturedPreview(previewUrl);
-        stopCamera(); // Desliga o sensor da câmera no celular imediatamente
+        stopCamera();
         onCapture(blob, previewUrl);
       }
     }, 'image/jpeg', 0.78);
-  };
+  }, [onCapture]);
+
+  // Loop de Detecção Automática da Etiqueta
+  useEffect(() => {
+    if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
+
+    let progress = 0;
+    let detector: any = null;
+
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        // @ts-ignore
+        detector = new window.BarcodeDetector({
+          formats: ['code_128', 'code_39', 'qr_code', 'data_matrix', 'ean_13', 'itf']
+        });
+      } catch {}
+    }
+
+    const interval = setInterval(async () => {
+      if (autoCaptureFiredRef.current || !videoRef.current || videoRef.current.readyState < 2) {
+        return;
+      }
+
+      // 1. Tenta detecção por código de barras da etiqueta
+      if (detector) {
+        try {
+          const barcodes = await detector.detect(videoRef.current);
+          if (barcodes && barcodes.length > 0) {
+            console.log('⚡ [Auto-Capture] Código detectado na etiqueta:', barcodes[0].rawValue);
+            clearInterval(interval);
+            takeSnapshot();
+            return;
+          }
+        } catch {}
+      }
+
+      // 2. Progresso de Auto-Captura Contínua (2.2 segundos de enquadramento)
+      progress += 6;
+      setAutoCaptureProgress(Math.min(progress, 100));
+
+      if (progress >= 100) {
+        clearInterval(interval);
+        takeSnapshot();
+      }
+    }, 120);
+
+    return () => clearInterval(interval);
+  }, [stream, capturedBlob, takeSnapshot]);
 
   const compressImage = (fileOrBlob: Blob | File): Promise<Blob> => {
     return new Promise((resolve) => {
@@ -174,12 +230,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       setCapturedBlob(compressed);
       setCapturedPreview(previewUrl);
       stopCamera();
-    }
-  };
-
-  const confirmCapture = () => {
-    if (capturedBlob && capturedPreview) {
-      onCapture(capturedBlob, capturedPreview);
+      onCapture(compressed, previewUrl);
     }
   };
 
@@ -189,6 +240,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
     setCapturedPreview(null);
     setCapturedBlob(null);
+    autoCaptureFiredRef.current = false;
+    setAutoCaptureProgress(0);
+    setIsDetected(false);
     startCamera();
   };
 
@@ -212,7 +266,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       </div>
 
       {/* Visualizador da Câmera ou Preview - Otimizado na Vertical */}
-      <div className="relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner">
+      <div className={`relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border transition-all duration-300 ${isDetected ? 'border-emerald-400 ring-4 ring-emerald-500/30' : 'border-slate-800 shadow-inner'}`}>
         {capturedPreview ? (
           <img
             src={capturedPreview}
@@ -248,12 +302,28 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
+
+            {/* Linha Laser Animada de Scanner */}
+            <div className="absolute inset-x-8 top-1/4 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#10b981] animate-pulse pointer-events-none" />
+
             {/* Grid overlay de enquadramento vertical */}
             <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
-              <span className="text-xs text-emerald-300 font-mono bg-black/80 backdrop-blur-sm px-3 py-1 rounded-full self-center border border-emerald-500/30 shadow-lg">
-                Posicione a etiqueta aqui
-              </span>
-              <span className="text-[11px] text-slate-300 font-mono bg-black/75 px-2.5 py-0.5 rounded-full self-center">
+              {/* Badge de Auto-Detecção no topo com progresso */}
+              <div className="self-center flex items-center gap-2 bg-black/85 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-emerald-500/40 shadow-xl">
+                <Zap className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                <span className="text-xs font-bold text-emerald-300">
+                  {isDetected ? '⚡ Etiqueta Reconhecida!' : 'Auto-Leitura Ativa... Aponte para a etiqueta'}
+                </span>
+                <div className="w-8 h-1.5 bg-slate-800 rounded-full overflow-hidden ml-1">
+                  <div
+                    className="h-full bg-emerald-400 transition-all duration-150"
+                    style={{ width: `${autoCaptureProgress}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Rodapé informativo */}
+              <span className="text-[11px] text-slate-300 font-mono bg-black/75 px-3 py-1 rounded-full self-center border border-slate-800">
                 Apto • Morador • NF • Rastreio
               </span>
             </div>
@@ -279,14 +349,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               onClick={retakePhoto}
               className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-sm transition"
             >
-              <RefreshCw className="w-4 h-4" /> Tirar Outra
-            </button>
-            <button
-              type="button"
-              onClick={confirmCapture}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-900/30 transition"
-            >
-              <Check className="w-4 h-4" /> Usar Foto (OCR)
+              <RefreshCw className="w-4 h-4" /> Tirar Outra Foto
             </button>
           </>
         ) : (
@@ -294,31 +357,27 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-sm transition"
+              className="flex items-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
             >
               <Upload className="w-4 h-4" /> Galeria / Arquivo
             </button>
 
-            {!cameraError && (
-              <button
-                type="button"
-                onClick={switchCamera}
-                className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                title="Trocar Câmera"
-              >
-                <RefreshCw className="w-5 h-5" />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={switchCamera}
+              className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+              title="Alternar Câmera"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
 
-            {!cameraError && (
-              <button
-                type="button"
-                onClick={takeSnapshot}
-                className="flex items-center gap-2 py-3 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-900/30 transition"
-              >
-                <Camera className="w-5 h-5" /> Fotografar
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={takeSnapshot}
+              className="flex-1 flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-950 transition active:scale-95"
+            >
+              <Camera className="w-4 h-4" /> Fotografar Agora
+            </button>
           </>
         )}
       </div>
