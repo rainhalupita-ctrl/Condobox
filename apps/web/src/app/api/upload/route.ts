@@ -42,6 +42,73 @@ function sanitizeTrackingCode(rawTracking: any): string | null {
   return clean;
 }
 
+// ─── Extração de Unidade e Bloco Brasileira ──────────────────────────────────
+function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: string) {
+  let unit = rawUnit ? String(rawUnit).trim() : '';
+  let block = rawBlock ? String(rawBlock).trim() : null;
+  const full = `${rawAddress || ''} ${unit} ${block || ''}`.trim();
+
+  // Se o bloco capturado for nome de logradouro (ex: "CIVIT I", "RUA"), anula
+  if (block && /civit|avenida|rua|alameda|estrada|rodovia|bairro/i.test(block)) {
+    block = null;
+  }
+
+  // 1. Procura padrão explícito: "Bloco A Apto 805", "Bl. B Ap. 102", "Torre 1 Ap 204"
+  const explicitMatch = full.match(/(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})[^\d]*(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})/i);
+  if (explicitMatch) {
+    block = `Bloco ${explicitMatch[1].toUpperCase()}`;
+    unit = explicitMatch[2];
+    return { unit, block };
+  }
+
+  // 2. Procura padrão inverso: "Apto 805 Bloco A", "Ap 102 Bl B"
+  const reverseExplicit = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})[^\w]*(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})/i);
+  if (reverseExplicit) {
+    unit = reverseExplicit[1];
+    block = `Bloco ${reverseExplicit[2].toUpperCase()}`;
+    return { unit, block };
+  }
+
+  // 3. Procura padrão com hífen / traço pós-número predial: "nº 1770 - A805", "1770 - B102", "1770 - 805"
+  const streetDashUnit = full.match(/(?:n[ºo°]?\s*\d{1,6}\s*[-–—/]\s*)([A-Za-z])?(\d{1,5})([A-Za-z])?/i);
+  if (streetDashUnit) {
+    const letter = streetDashUnit[1] || streetDashUnit[3];
+    if (letter && (!block || block === 'null')) {
+      block = `Bloco ${letter.toUpperCase()}`;
+    }
+    unit = streetDashUnit[2];
+    return { unit, block };
+  }
+
+  // 4. Procura padrão "A805", "B102", "C304"
+  const letterNumberMatch = unit.match(/^([A-Za-z])\s*(\d{1,5})$/) || full.match(/\b([A-Za-z])(\d{2,5})\b/);
+  if (letterNumberMatch) {
+    if (!block || block === 'null') {
+      block = `Bloco ${letterNumberMatch[1].toUpperCase()}`;
+    }
+    unit = letterNumberMatch[2];
+    return { unit, block };
+  }
+
+  // 5. Procura apenas "Apto 805", "Ap 805", "Apt 805"
+  const aptMatch = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?)\s*[:\-]?\s*(\d{1,5})/i);
+  if (aptMatch) {
+    unit = aptMatch[1];
+    return { unit, block };
+  }
+
+  // 6. Se unit contém múltiplos números (ex: "1770 805"), pega o último número como apartamento
+  const allNums = unit.match(/\b\d{1,5}\b/g);
+  if (allNums && allNums.length > 1) {
+    unit = allNums[allNums.length - 1];
+  } else if (allNums && allNums.length === 1) {
+    unit = allNums[0];
+  }
+
+  const cleanDigits = unit.replace(/\D/g, '');
+  return { unit: cleanDigits || null, block };
+}
+
 function cleanOcrData(parsed: any) {
   let cleanRecipient: string | null = (parsed.recipientName || '').trim();
   if (
@@ -52,27 +119,19 @@ function cleanOcrData(parsed: any) {
     cleanRecipient = null;
   }
 
-  let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
-  let rawBlock = parsed.block ? String(parsed.block).trim() : null;
-
-  const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
-  if (matchLetterNum) {
-    if (!rawBlock || rawBlock === 'null') rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
-    rawUnit = matchLetterNum[2];
-  }
-
+  const { unit: cleanUnit, block: cleanBlock } = parseBrazilianUnitAndBlock(parsed.unitNumber, parsed.block, parsed.address);
   const cleanTracking = sanitizeTrackingCode(parsed.trackingCode);
   const sender = parsed.carrier || parsed.sender ? String(parsed.carrier || parsed.sender).trim() : null;
 
-  const hasUnit = Boolean(rawUnit && rawUnit.replace(/\D/g, '').length >= 1);
+  const hasUnit = Boolean(cleanUnit && cleanUnit.length >= 1);
   const hasTracking = !!cleanTracking;
   const detected = hasUnit || !!cleanRecipient || hasTracking;
   const confidence = detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.92) : 0;
 
   return {
     recipientName: cleanRecipient,
-    block: rawBlock,
-    unitNumber: hasUnit ? rawUnit : null,
+    block: cleanBlock,
+    unitNumber: cleanUnit,
     carrier: sender || 'Outro',
     trackingCode: cleanTracking,
     invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
@@ -85,11 +144,7 @@ function parseRawText(text: string) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const fullText = lines.join(' ');
 
-  const aptoMatch = fullText.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*[:\-]?\s*(\d{1,5})/i);
-  const unitNumber = aptoMatch ? aptoMatch[1] : null;
-
-  const blocoMatch = fullText.match(/(?:BLOCO?|BL\.?|TORRE?)\s*[:\-]?\s*([A-Z0-9]{1,3})/i);
-  const block = blocoMatch ? `Bloco ${blocoMatch[1].toUpperCase()}` : null;
+  const { unit: unitNumber, block } = parseBrazilianUnitAndBlock(null, null, fullText);
 
   const trackMatch = text.match(/\b([A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{2,4}\s*\d{6,14}|\d{12,20})\b/);
   const trackingCode = sanitizeTrackingCode(trackMatch ? trackMatch[1] : null);
@@ -120,8 +175,8 @@ Analise a imagem e extraia em JSON estrito:
 }
 REGRAS CRÍTICAS:
 1. recipientName = APENAS nome da pessoa física destinatária (morador). NUNCA empresa, loja, remetente ou aviso.
-2. unitNumber = número do apartamento/unidade (ex: "101", "805").
-3. block = bloco ou torre se presente na etiqueta.
+2. unitNumber = número do apartamento/unidade (ex: "805", "101"). AVISO: Em "Avenida Civit I, nº 1770 - A805", 1770 é o número do condomínio na rua e o apartamento é "805" com bloco "Bloco A". NUNCA coloque o número da rua como unitNumber!
+3. block = bloco ou torre se presente na etiqueta (ex: "Bloco A", "Bloco B").
 4. carrier = Remetente, loja ou transportadora de onde veio (ex: "Mercado Livre", "Shopee", "Amazon", "Nike", "Drogasil", "Correios", "Shein", "Magalu", "Zara", "Loggi", etc.).
 5. trackingCode = código de rastreio ou código de barras. AVISO CRÍTICO: NUNCA coloque CEP (8 dígitos como 29168-074 ou 29168074) como trackingCode. Se não houver código de rastreio específico, retorne null.
 6. invoiceNumber = número da NF/DANFE se visível.`;

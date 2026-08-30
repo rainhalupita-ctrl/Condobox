@@ -227,6 +227,66 @@ export default function NovaEncomendaPage() {
     }
   };
 
+// ─── Extração de Unidade e Bloco Brasileira ──────────────────────────────────
+function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: string) {
+  let unit = rawUnit ? String(rawUnit).trim() : '';
+  let block = rawBlock ? String(rawBlock).trim() : null;
+  const full = `${rawAddress || ''} ${unit} ${block || ''}`.trim();
+
+  if (block && /civit|avenida|rua|alameda|estrada|rodovia|bairro/i.test(block)) {
+    block = null;
+  }
+
+  const explicitMatch = full.match(/(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})[^\d]*(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})/i);
+  if (explicitMatch) {
+    block = `Bloco ${explicitMatch[1].toUpperCase()}`;
+    unit = explicitMatch[2];
+    return { unit, block };
+  }
+
+  const reverseExplicit = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})[^\w]*(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})/i);
+  if (reverseExplicit) {
+    unit = reverseExplicit[1];
+    block = `Bloco ${reverseExplicit[2].toUpperCase()}`;
+    return { unit, block };
+  }
+
+  const streetDashUnit = full.match(/(?:n[ºo°]?\s*\d{1,6}\s*[-–—/]\s*)([A-Za-z])?(\d{1,5})([A-Za-z])?/i);
+  if (streetDashUnit) {
+    const letter = streetDashUnit[1] || streetDashUnit[3];
+    if (letter && (!block || block === 'null')) {
+      block = `Bloco ${letter.toUpperCase()}`;
+    }
+    unit = streetDashUnit[2];
+    return { unit, block };
+  }
+
+  const letterNumberMatch = unit.match(/^([A-Za-z])\s*(\d{1,5})$/) || full.match(/\b([A-Za-z])(\d{2,5})\b/);
+  if (letterNumberMatch) {
+    if (!block || block === 'null') {
+      block = `Bloco ${letterNumberMatch[1].toUpperCase()}`;
+    }
+    unit = letterNumberMatch[2];
+    return { unit, block };
+  }
+
+  const aptMatch = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?)\s*[:\-]?\s*(\d{1,5})/i);
+  if (aptMatch) {
+    unit = aptMatch[1];
+    return { unit, block };
+  }
+
+  const allNums = unit.match(/\b\d{1,5}\b/g);
+  if (allNums && allNums.length > 1) {
+    unit = allNums[allNums.length - 1];
+  } else if (allNums && allNums.length === 1) {
+    unit = allNums[0];
+  }
+
+  const cleanDigits = unit.replace(/\D/g, '');
+  return { unit: cleanDigits || null, block };
+}
+
   const applyOcrData = (ocrResult: OCRResponse) => {
     setOcrData(ocrResult);
 
@@ -245,10 +305,10 @@ export default function NovaEncomendaPage() {
 
     // Match inteligente e instantâneo da unidade e bloco
     let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
-    const rawUnitStr = String(ocrResult.ocr.unitNumber || '');
-    const cleanNum = rawUnitStr.replace(/\D/g, '');
-    const blockLetterMatch = rawUnitStr.match(/([A-Za-z])/);
-    const suggestedBlock = ocrResult.ocr.block || (blockLetterMatch ? `Bloco ${blockLetterMatch[1].toUpperCase()}` : null);
+    const { unit: cleanNum, block: suggestedBlock } = parseBrazilianUnitAndBlock(
+      ocrResult.ocr.unitNumber,
+      ocrResult.ocr.block
+    );
 
     if (!targetUnitId && cleanNum) {
       // 1. Tenta match exato por número e bloco

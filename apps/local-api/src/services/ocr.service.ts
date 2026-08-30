@@ -84,6 +84,65 @@ export class OCRService {
     return clean;
   }
 
+  private parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: string) {
+    let unit = rawUnit ? String(rawUnit).trim() : '';
+    let block = rawBlock ? String(rawBlock).trim() : null;
+    const full = `${rawAddress || ''} ${unit} ${block || ''}`.trim();
+
+    if (block && /civit|avenida|rua|alameda|estrada|rodovia|bairro/i.test(block)) {
+      block = null;
+    }
+
+    const explicitMatch = full.match(/(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})[^\d]*(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})/i);
+    if (explicitMatch) {
+      block = `Bloco ${explicitMatch[1].toUpperCase()}`;
+      unit = explicitMatch[2];
+      return { unit, block };
+    }
+
+    const reverseExplicit = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})[^\w]*(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})/i);
+    if (reverseExplicit) {
+      unit = reverseExplicit[1];
+      block = `Bloco ${reverseExplicit[2].toUpperCase()}`;
+      return { unit, block };
+    }
+
+    const streetDashUnit = full.match(/(?:n[ºo°]?\s*\d{1,6}\s*[-–—/]\s*)([A-Za-z])?(\d{1,5})([A-Za-z])?/i);
+    if (streetDashUnit) {
+      const letter = streetDashUnit[1] || streetDashUnit[3];
+      if (letter && (!block || block === 'null')) {
+        block = `Bloco ${letter.toUpperCase()}`;
+      }
+      unit = streetDashUnit[2];
+      return { unit, block };
+    }
+
+    const letterNumberMatch = unit.match(/^([A-Za-z])\s*(\d{1,5})$/) || full.match(/\b([A-Za-z])(\d{2,5})\b/);
+    if (letterNumberMatch) {
+      if (!block || block === 'null') {
+        block = `Bloco ${letterNumberMatch[1].toUpperCase()}`;
+      }
+      unit = letterNumberMatch[2];
+      return { unit, block };
+    }
+
+    const aptMatch = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?)\s*[:\-]?\s*(\d{1,5})/i);
+    if (aptMatch) {
+      unit = aptMatch[1];
+      return { unit, block };
+    }
+
+    const allNums = unit.match(/\b\d{1,5}\b/g);
+    if (allNums && allNums.length > 1) {
+      unit = allNums[allNums.length - 1];
+    } else if (allNums && allNums.length === 1) {
+      unit = allNums[0];
+    }
+
+    const cleanDigits = unit.replace(/\D/g, '');
+    return { unit: cleanDigits || null, block };
+  }
+
   private sanitize(parsed: any): OCRExtractionResult {
     let cleanRecipient: string | null = (parsed.recipientName || '').trim();
     if (
@@ -94,26 +153,18 @@ export class OCRService {
       cleanRecipient = null;
     }
 
-    let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
-    let rawBlock = parsed.block ? String(parsed.block).trim() : null;
-
-    const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
-    if (matchLetterNum) {
-      if (!rawBlock) rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
-      rawUnit = matchLetterNum[2];
-    }
-
+    const { unit: cleanUnit, block: cleanBlock } = this.parseBrazilianUnitAndBlock(parsed.unitNumber, parsed.block, parsed.address);
     const cleanTracking = this.sanitizeTrackingCode(parsed.trackingCode);
     const sender = parsed.carrier || parsed.sender ? String(parsed.carrier || parsed.sender).trim() : null;
 
-    const hasUnit = Boolean(rawUnit && rawUnit.replace(/\D/g, '').length >= 1);
+    const hasUnit = Boolean(cleanUnit && cleanUnit.length >= 1);
     const hasTracking = !!cleanTracking;
     const detected = hasUnit || !!cleanRecipient || hasTracking;
 
     return {
       recipientName: cleanRecipient,
-      block: rawBlock,
-      unitNumber: hasUnit ? rawUnit : null,
+      block: cleanBlock,
+      unitNumber: cleanUnit,
       carrier: sender || 'Outro',
       trackingCode: cleanTracking,
       invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
@@ -125,11 +176,7 @@ export class OCRService {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     const fullText = lines.join(' ');
 
-    const aptoMatch = fullText.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*[:\-]?\s*(\d{1,5})/i);
-    const unitNumber = aptoMatch ? aptoMatch[1] : null;
-
-    const blocoMatch = fullText.match(/(?:BLOCO?|BL\.?|TORRE?)\s*[:\-]?\s*([A-Z0-9]{1,3})/i);
-    const block = blocoMatch ? `Bloco ${blocoMatch[1].toUpperCase()}` : null;
+    const { unit: unitNumber, block } = this.parseBrazilianUnitAndBlock(null, null, fullText);
 
     const trackMatch = text.match(/\b([A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{2,4}\s*\d{6,14}|\d{12,20})\b/);
     const trackingCode = this.sanitizeTrackingCode(trackMatch ? trackMatch[1] : null);
