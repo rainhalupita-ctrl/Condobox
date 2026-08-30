@@ -47,32 +47,14 @@ export default function NovaEncomendaPage() {
 
   const loadUnitsAndResidents = async () => {
     const supabase = createClient();
-    if (supabase) {
+    try {
       const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
       const { data: rData } = await supabase.from('residents').select('*').eq('active', true);
       if (uData) setUnits(uData);
       if (rData) setResidents(rData);
-      return;
+    } catch (err) {
+      console.error('Erro ao carregar unidades e moradores:', err);
     }
-
-    // Unidades de demonstração locais
-    const mockUnits: Unit[] = [
-      { id: 'u-1', block: 'Bloco A', unit_number: '101' },
-      { id: 'u-2', block: 'Bloco A', unit_number: '102' },
-      { id: 'u-3', block: 'Bloco A', unit_number: '201' },
-      { id: 'u-4', block: 'Bloco A', unit_number: '202' },
-      { id: 'u-5', block: 'Bloco B', unit_number: '101' },
-      { id: 'u-6', block: 'Bloco B', unit_number: '102' },
-    ];
-    const mockResidents: Resident[] = [
-      { id: 'r-1', unit_id: 'u-1', name: 'Carlos Silva', phone: '5511999990001', is_authorized_receiver: true, is_primary: true, active: true },
-      { id: 'r-2', unit_id: 'u-1', name: 'Mariana Silva', phone: '5511999990002', is_authorized_receiver: true, is_primary: false, active: true },
-      { id: 'r-3', unit_id: 'u-2', name: 'Roberto Oliveira', phone: '5511999990003', is_authorized_receiver: true, is_primary: true, active: true },
-      { id: 'r-4', unit_id: 'u-5', name: 'Fernanda Souza', phone: '5511999990004', is_authorized_receiver: true, is_primary: true, active: true },
-      { id: 'r-5', unit_id: 'u-6', name: 'Lucas Pereira', phone: '5511999990005', is_authorized_receiver: true, is_primary: true, active: true },
-    ];
-    setUnits(mockUnits);
-    setResidents(mockResidents);
   };
 
   const handleCapturePhoto = async (blob: Blob, previewUrl: string) => {
@@ -91,12 +73,35 @@ export default function NovaEncomendaPage() {
       if (ocrResult.ocr.recipientName) setRecipientNameOcr(ocrResult.ocr.recipientName);
 
       // Se encontrou a unidade correspondente
-      if (ocrResult.suggestedMatch.unit) {
-        setSelectedUnitId(ocrResult.suggestedMatch.unit.id);
+      let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
+      if (!targetUnitId && ocrResult.ocr.unitNumber) {
+        const cleanNum = ocrResult.ocr.unitNumber.replace(/\D/g, '');
+        const found = units.find(u => {
+          const uNum = u.unit_number.replace(/\D/g, '');
+          const matchNum = uNum === cleanNum;
+          if (ocrResult.ocr.block) {
+            return matchNum && u.block.toLowerCase().includes(ocrResult.ocr.block.toLowerCase());
+          }
+          return matchNum;
+        }) || units.find(u => u.unit_number.replace(/\D/g, '') === cleanNum);
+        if (found) targetUnitId = found.id;
       }
-      if (ocrResult.suggestedMatch.resident) {
-        setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
-        setCustomPhone(ocrResult.suggestedMatch.resident.phone);
+
+      if (targetUnitId) {
+        setSelectedUnitId(targetUnitId);
+        // Moradores da unidade
+        const unitRes = residents.filter(r => r.unit_id === targetUnitId);
+        if (ocrResult.suggestedMatch?.resident) {
+          setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
+          setCustomPhone(ocrResult.suggestedMatch.resident.phone);
+        } else if (unitRes.length > 0) {
+          const matchByName = unitRes.find(r => 
+            ocrResult.ocr.recipientName && 
+            r.name.toLowerCase().includes(ocrResult.ocr.recipientName.toLowerCase().split(' ')[0])
+          ) || unitRes[0];
+          setSelectedResidentId(matchByName.id);
+          setCustomPhone(matchByName.phone);
+        }
       }
 
       setStep('CONFIRM');
@@ -218,10 +223,33 @@ export default function NovaEncomendaPage() {
             </span>
           </div>
 
-          {savedSuccess.whatsapp?.sent && (
-            <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 font-medium">
-              <Phone className="w-4 h-4" />
-              <span>Mensagem com código enviada com sucesso no WhatsApp do morador!</span>
+          {savedSuccess.whatsapp?.sent ? (
+            <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 font-medium bg-emerald-950/40 border border-emerald-800/40 p-3 rounded-2xl max-w-md mx-auto">
+              <Phone className="w-4 h-4 text-emerald-400" />
+              <span>Mensagem com foto e código enviada com sucesso no WhatsApp do morador!</span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-2 text-xs text-amber-300 font-medium bg-amber-950/30 border border-amber-800/40 p-3.5 rounded-2xl max-w-md mx-auto">
+              <div className="flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-400" />
+                <span>WhatsApp ainda não foi disparado para esta encomenda.</span>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (savedSuccess.package?.id) {
+                    const res = await LocalApiClient.notifyPackage(savedSuccess.package.id, true);
+                    if (res.success) {
+                      setSavedSuccess({ ...savedSuccess, whatsapp: { sent: true } });
+                    } else {
+                      alert(`Erro: ${res.error || 'Falha ao enviar mensagem.'}`);
+                    }
+                  }
+                }}
+                className="mt-1 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-950"
+              >
+                <Send className="w-3.5 h-3.5" /> Enviar WhatsApp Agora
+              </button>
             </div>
           )}
 
@@ -293,10 +321,17 @@ export default function NovaEncomendaPage() {
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                 >
                   <option value="">Selecione a Unidade...</option>
-                  {units.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.block} - Apto {u.unit_number}
-                    </option>
+                  {Array.from(new Set(units.map((u) => u.block))).sort().map((blockName) => (
+                    <optgroup key={blockName} label={blockName} className="bg-slate-900 text-emerald-400 font-bold">
+                      {units
+                        .filter((u) => u.block === blockName)
+                        .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
+                        .map((u) => (
+                          <option key={u.id} value={u.id} className="text-white font-normal">
+                            {u.block} — Apto {u.unit_number}
+                          </option>
+                        ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>
@@ -344,6 +379,7 @@ export default function NovaEncomendaPage() {
                   onChange={(e) => setCarrier(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                 >
+                  <option value="Dell">Dell</option>
                   <option value="Mercado Livre">Mercado Livre</option>
                   <option value="Shopee">Shopee</option>
                   <option value="Amazon">Amazon</option>
@@ -352,6 +388,10 @@ export default function NovaEncomendaPage() {
                   <option value="Magalu">Magalu</option>
                   <option value="Total Express">Total Express</option>
                   <option value="Loggi">Loggi</option>
+                  <option value="Jadlog">Jadlog</option>
+                  {carrier && !['Dell', 'Mercado Livre', 'Shopee', 'Amazon', 'Correios', 'Shein', 'Magalu', 'Total Express', 'Loggi', 'Jadlog', 'Outro'].includes(carrier) && (
+                    <option value={carrier}>{carrier}</option>
+                  )}
                   <option value="Outro">Outro</option>
                 </select>
               </div>

@@ -17,7 +17,10 @@ import {
   CheckCircle,
   AlertCircle,
   Filter,
-  X
+  X,
+  MessageSquare,
+  Send,
+  Loader2
 } from 'lucide-react';
 
 export default function PortariaDashboardPage() {
@@ -28,17 +31,13 @@ export default function PortariaDashboardPage() {
   const [selectedForDelivery, setSelectedForDelivery] = useState<PackageType | null>(null);
   const [deliveredToName, setDeliveredToName] = useState('');
   const [isSubmittingDelivery, setIsSubmittingDelivery] = useState(false);
+  const [isNotifyingPending, setIsNotifyingPending] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadPackages();
-    setupRealtimeSubscription();
-  }, []);
 
   const loadPackages = async () => {
     setLoading(true);
     const supabase = createClient();
-    if (supabase) {
+    try {
       const { data, error } = await supabase
         .from('packages')
         .select('*, unit:units(*), resident:residents(*)')
@@ -46,80 +45,23 @@ export default function PortariaDashboardPage() {
 
       if (!error && data) {
         setPackages(data as PackageType[]);
-        setLoading(false);
-        return;
+      } else {
+        setPackages([]);
       }
+    } catch (err) {
+      console.error('Erro ao buscar encomendas:', err);
+      setPackages([]);
+    } finally {
+      setLoading(false);
     }
-
-    // Fallback: busca da API local ou dados de demonstração
-    try {
-      const res = await fetch(`${LocalApiClient.getCurrentImageBaseUrl()}/api/packages/search`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.packages && json.packages.length > 0) {
-          setPackages(json.packages);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {}
-
-    // Mock inicial caso o banco ainda esteja sendo configurado
-    setPackages([
-      {
-        id: 'pkg-1',
-        unit_id: 'u-1',
-        carrier: 'Mercado Livre',
-        tracking_code: 'ML998822BR',
-        recipient_name_ocr: 'Carlos Silva',
-        status: 'RECEIVED',
-        pickup_code: '4821',
-        qr_token: 'pkg_token_1',
-        label_image_path: null,
-        received_at: new Date(Date.now() - 3600000).toISOString(),
-        unit: { id: 'u-1', block: 'Bloco A', unit_number: '101' },
-        resident: {
-          id: 'r-1',
-          unit_id: 'u-1',
-          name: 'Carlos Silva',
-          phone: '5511999990001',
-          is_authorized_receiver: true,
-          is_primary: true,
-          active: true
-        }
-      },
-      {
-        id: 'pkg-2',
-        unit_id: 'u-2',
-        carrier: 'Amazon',
-        tracking_code: 'AMZ883311',
-        recipient_name_ocr: 'Fernanda Souza',
-        status: 'RECEIVED',
-        pickup_code: '9304',
-        qr_token: 'pkg_token_2',
-        label_image_path: null,
-        received_at: new Date(Date.now() - 7200000).toISOString(),
-        unit: { id: 'u-2', block: 'Bloco B', unit_number: '101' },
-        resident: {
-          id: 'r-2',
-          unit_id: 'u-2',
-          name: 'Fernanda Souza',
-          phone: '5511999990004',
-          is_authorized_receiver: true,
-          is_primary: true,
-          active: true
-        }
-      }
-    ]);
-    setLoading(false);
   };
 
-  const setupRealtimeSubscription = () => {
-    const supabase = createClient();
-    if (!supabase) return;
+  useEffect(() => {
+    loadPackages();
 
+    const supabase = createClient();
     const channel = supabase
-      .channel('packages-realtime')
+      .channel('packages-portaria-live')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'packages' },
@@ -132,7 +74,7 @@ export default function PortariaDashboardPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  };
+  }, []);
 
   const handleStartDelivery = (pkg: PackageType) => {
     setSelectedForDelivery(pkg);
@@ -161,6 +103,29 @@ export default function PortariaDashboardPage() {
     }
   };
 
+  const handleNotifyPending = async () => {
+    setIsNotifyingPending(true);
+    try {
+      const res = await LocalApiClient.notifyPendingPackages();
+      if (res.success) {
+        if (res.sentCount > 0) {
+          setSuccessToast(`✅ ${res.sentCount} notificação(ões) de WhatsApp enviada(s) com sucesso!`);
+        } else if (res.alreadySentCount > 0) {
+          setSuccessToast(`ℹ️ Todas as encomendas pendentes já haviam sido notificadas.`);
+        } else {
+          setSuccessToast(`⚠️ Nenhuma mensagem nova enviada. Verifique os telefones cadastrados dos moradores.`);
+        }
+        loadPackages();
+      } else {
+        alert(`Erro ao disparar notificações: ${res.error || 'Falha na comunicação.'}`);
+      }
+    } catch (err: any) {
+      alert(`Erro ao comunicar com a portaria: ${err.message}`);
+    } finally {
+      setIsNotifyingPending(false);
+    }
+  };
+
   const filteredPackages = packages.filter(pkg => {
     // Filtro de status
     if (statusFilter === 'PENDING' && pkg.status === 'DELIVERED') return false;
@@ -178,6 +143,7 @@ export default function PortariaDashboardPage() {
   });
 
   const pendingCount = packages.filter(p => p.status !== 'DELIVERED').length;
+  const unnotifiedCount = packages.filter(p => p.status === 'RECEIVED').length;
   const deliveredTodayCount = packages.filter(p => p.status === 'DELIVERED').length;
 
   return (
@@ -230,10 +196,10 @@ export default function PortariaDashboardPage() {
         </Link>
       </div>
 
-      {/* Barra de Filtros e Busca */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      {/* Barra de Filtros, Busca e Disparo de WhatsApp */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row items-center justify-between gap-4">
         {/* Input de Busca */}
-        <div className="relative w-full sm:w-96">
+        <div className="relative w-full lg:w-96">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -244,8 +210,26 @@ export default function PortariaDashboardPage() {
           />
         </div>
 
-        {/* Filtro por Status */}
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+        {/* Ações e Filtros */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
+          {/* Botão de Disparo em Lote para Pendentes */}
+          <button
+            type="button"
+            onClick={handleNotifyPending}
+            disabled={isNotifyingPending}
+            title="Verifica encomendas pendentes e dispara no WhatsApp para quem ainda não recebeu"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition disabled:opacity-50 shadow-sm"
+          >
+            {isNotifyingPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />}
+            <span>{isNotifyingPending ? 'Disparando...' : 'Disparar WhatsApp Pendentes'}</span>
+            {unnotifiedCount > 0 && (
+              <span className="px-1.5 py-0.5 bg-amber-500 text-slate-950 font-black rounded-full text-[10px]">
+                {unnotifiedCount}
+              </span>
+            )}
+          </button>
+
+          {/* Filtro por Status */}
           <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             <button
               onClick={() => setStatusFilter('PENDING')}
@@ -310,6 +294,7 @@ export default function PortariaDashboardPage() {
               key={pkg.id}
               pkg={pkg}
               onSelectDeliver={handleStartDelivery}
+              onPackageUpdated={loadPackages}
             />
           ))}
         </div>

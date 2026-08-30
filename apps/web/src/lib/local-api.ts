@@ -134,4 +134,72 @@ export class LocalApiClient {
       return { status: 'OFFLINE', services: { connected: false } };
     }
   }
+
+  /**
+   * Status de conexão da Evolution API
+   */
+  static async getWhatsAppStatus() {
+    try {
+      const baseUrl = this.getBaseUrl();
+      const res = await fetch(`${baseUrl}/api/whatsapp/status`, {
+        signal: AbortSignal.timeout(4000)
+      });
+      return await res.json();
+    } catch {
+      return { state: 'OFFLINE', connected: false };
+    }
+  }
+
+  /**
+   * Solicita criação de instância e QR Code para pareamento
+   */
+  static async connectWhatsApp() {
+    const baseUrl = this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/api/whatsapp/connect`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000)
+    });
+    return await res.json();
+  }
+
+  /**
+   * Envia mensagem de teste para validar o canal
+   */
+  static async sendTestWhatsApp(phone: string) {
+    const baseUrl = this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/api/whatsapp/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone }),
+      signal: AbortSignal.timeout(12000)
+    });
+    return await res.json();
+  }
+
+  /**
+   * Verifica se a notificação da encomenda já foi enviada e envia no WhatsApp
+   */
+  static async notifyPackage(packageId: string, force = false) {
+    const baseUrl = this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/api/packages/${packageId}/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force }),
+      signal: AbortSignal.timeout(15000)
+    });
+    return await res.json();
+  }
+
+  /**
+   * Dispara notificações para todas as encomendas pendentes que ainda não foram enviadas
+   */
+  static async notifyPendingPackages() {
+    const baseUrl = this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/api/packages/notify-pending`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(30000)
+    });
+    return await res.json();
+  }
 }

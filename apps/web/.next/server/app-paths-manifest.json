@@ -1,4 +1,8 @@
 {
-  "/cadastro/page": "app/cadastro/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/portaria/page": "app/portaria/page.js",
+  "/morador/page": "app/morador/page.js",
+  "/p/[token]/page": "app/p/[token]/page.js",
+  "/admin/page": "app/admin/page.js",
   "/login/page": "app/login/page.js"
 }

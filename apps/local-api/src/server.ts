@@ -8,6 +8,7 @@ import { uploadRoutes } from './routes/upload.routes.js';
 import { packageRoutes } from './routes/package.routes.js';
 import { signatureRoutes } from './routes/signature.routes.js';
 import { healthRoutes } from './routes/health.routes.js';
+import { whatsappRoutes } from './routes/whatsapp.routes.js';
 import { setupCleanupCron } from './services/cleanup.cron.js';
 
 const fastify = Fastify({
@@ -45,6 +46,7 @@ async function main() {
 
   // 3. Rotas da API
   await fastify.register(healthRoutes);
+  await fastify.register(whatsappRoutes);
   await fastify.register(uploadRoutes);
   await fastify.register(packageRoutes);
   await fastify.register(signatureRoutes);

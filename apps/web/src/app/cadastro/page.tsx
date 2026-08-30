@@ -68,56 +68,52 @@ export default function CadastroPage() {
 
     setLoading(true);
 
-    // 1. Criar usuário no Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { name, phone: phone.replace(/\D/g, '') },
-      },
-    });
+    const cleanPhone = phone.replace(/\D/g, '');
 
-    if (authError || !authData.user) {
-      setError(authError?.message === 'User already registered'
-        ? 'Este e-mail já está cadastrado. Faça login.'
-        : 'Erro ao criar conta. Tente novamente.');
+    try {
+      // 1. Enviar para a API de Registro (Server-Side com confirmação imediata e zero trava de SMTP)
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          email,
+          phone: cleanPhone,
+          password,
+          unitId,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Erro ao realizar o cadastro. Tente novamente.');
+        setLoading(false);
+        return;
+      }
+
+      // 2. Fazer login automático com a senha cadastrada
+      const { error: loginError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (loginError) {
+        console.warn('Login pós cadastro:', loginError);
+      }
+
+      setSuccess(true);
       setLoading(false);
-      return;
-    }
 
-    const userId = authData.user.id;
-
-    // 2. Criar perfil com role RESIDENT
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: userId,
-      name,
-      phone: phone.replace(/\D/g, ''),
-      role: 'RESIDENT',
-    });
-
-    if (profileError) {
-      setError('Erro ao salvar perfil. Contate o suporte.');
+      // Redirecionar para o painel do morador
+      setTimeout(() => {
+        window.location.href = '/morador';
+      }, 1500);
+    } catch (err: any) {
+      console.error('Erro inesperado no cadastro:', err);
+      setError(err?.message || 'Erro de conexão ao processar o cadastro.');
       setLoading(false);
-      return;
     }
-
-    // 3. Vincular como residente na unidade selecionada
-    await supabase.from('residents').insert({
-      unit_id: unitId,
-      user_id: userId,
-      name,
-      phone: phone.replace(/\D/g, ''),
-      email,
-      is_primary: true,
-      is_authorized_receiver: true,
-      active: true,
-    });
-
-    setSuccess(true);
-    setLoading(false);
-
-    // Redirecionar após 2s
-    setTimeout(() => router.push('/morador'), 2000);
   };
 
   if (success) {
@@ -221,10 +217,17 @@ export default function CadastroPage() {
                 <option value="">
                   {loadingUnits ? 'Carregando unidades...' : 'Selecione seu apartamento'}
                 </option>
-                {units.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.block} — Apto {u.unit_number}
-                  </option>
+                {Array.from(new Set(units.map(u => u.block))).sort().map(blockName => (
+                  <optgroup key={blockName} label={blockName} className="bg-slate-900 text-green-400 font-bold">
+                    {units
+                      .filter(u => u.block === blockName)
+                      .sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }))
+                      .map(u => (
+                        <option key={u.id} value={u.id} className="text-white font-normal">
+                          {u.block} — Apto {u.unit_number}
+                        </option>
+                      ))}
+                  </optgroup>
                 ))}
               </select>
               <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />

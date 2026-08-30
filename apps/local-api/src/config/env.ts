@@ -16,6 +16,7 @@ const envSchema = z.object({
   EVOLUTION_API_KEY: z.string().default('condo_evolution_super_secret_key_2026'),
   EVOLUTION_INSTANCE_NAME: z.string().default('portaria-principal'),
   LOCAL_BASE_URL: z.string().default('http://localhost:3001'),
+  WEB_APP_URL: z.string().default('http://localhost:3000'),
 });
 
 export const env = envSchema.parse(process.env);

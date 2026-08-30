@@ -3,16 +3,31 @@
 import React, { useState } from 'react';
 import { Package as PackageType } from '../types/database';
 import { LocalApiClient } from '../lib/local-api';
-import { Package, Clock, CheckCircle2, AlertCircle, Eye, ArrowRight, ShieldCheck } from 'lucide-react';
+import {
+  Package,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  Eye,
+  ArrowRight,
+  ShieldCheck,
+  MessageSquare,
+  Send,
+  Loader2,
+  RefreshCw
+} from 'lucide-react';
 
 interface PackageCardProps {
   pkg: PackageType;
   onSelectDeliver?: (pkg: PackageType) => void;
+  onPackageUpdated?: () => void;
   showActions?: boolean;
 }
 
-export function PackageCard({ pkg, onSelectDeliver, showActions = true }: PackageCardProps) {
+export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showActions = true }: PackageCardProps) {
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [whatsAppFeedback, setWhatsAppFeedback] = useState<string | null>(null);
 
   const getCarrierColor = (carrier: string) => {
     const c = carrier.toLowerCase();
@@ -34,13 +49,41 @@ export function PackageCard({ pkg, onSelectDeliver, showActions = true }: Packag
           </span>
         );
       case 'NOTIFIED':
+        return (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" /> Aguardando (WhatsApp Enviado)
+          </span>
+        );
       case 'RECEIVED':
       default:
         return (
           <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-            <Clock className="w-3.5 h-3.5 animate-pulse" /> Aguardando Retirada
+            <Clock className="w-3.5 h-3.5 animate-pulse" /> Aguardando (Sem WhatsApp)
           </span>
         );
+    }
+  };
+
+  const handleSendWhatsApp = async (force = false) => {
+    setIsSendingWhatsApp(true);
+    setWhatsAppFeedback(null);
+    try {
+      const res = await LocalApiClient.notifyPackage(pkg.id, force);
+      if (res.success) {
+        if (res.alreadySent) {
+          setWhatsAppFeedback('ℹ️ Mensagem já havia sido enviada anteriormente.');
+        } else {
+          setWhatsAppFeedback('✅ Notificação enviada para o morador!');
+        }
+        if (onPackageUpdated) onPackageUpdated();
+      } else {
+        setWhatsAppFeedback(`❌ Erro: ${res.error || 'Falha ao enviar.'}`);
+      }
+    } catch (err: any) {
+      setWhatsAppFeedback(`❌ Erro de conexão: ${err.message}`);
+    } finally {
+      setIsSendingWhatsApp(false);
+      setTimeout(() => setWhatsAppFeedback(null), 5000);
     }
   };
 
@@ -104,32 +147,65 @@ export function PackageCard({ pkg, onSelectDeliver, showActions = true }: Packag
         )}
       </div>
 
-      {/* Thumbnails das Fotos (Etiqueta e Assinatura) */}
-      <div className="flex items-center gap-3">
-        {labelUrl && (
-          <button
-            type="button"
-            onClick={() => setModalImage(labelUrl)}
-            className="group relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs text-slate-300 transition"
-          >
-            <Eye className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-400" />
-            <span>Foto da Etiqueta</span>
-          </button>
-        )}
+      {/* WhatsApp Feedback Banner */}
+      {whatsAppFeedback && (
+        <div className="text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 font-medium">
+          {whatsAppFeedback}
+        </div>
+      )}
 
-        {pkg.status === 'DELIVERED' && signatureUrl && (
+      {/* Thumbnails das Fotos e Ação de WhatsApp */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {labelUrl && (
+            <button
+              type="button"
+              onClick={() => setModalImage(labelUrl)}
+              className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs text-slate-300 transition"
+            >
+              <Eye className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-400" />
+              <span>Etiqueta</span>
+            </button>
+          )}
+
+          {pkg.status === 'DELIVERED' && signatureUrl && (
+            <button
+              type="button"
+              onClick={() => setModalImage(signatureUrl)}
+              className="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs text-emerald-300 transition"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Assinatura</span>
+            </button>
+          )}
+        </div>
+
+        {/* Botão de WhatsApp */}
+        {pkg.status !== 'DELIVERED' && (
           <button
             type="button"
-            onClick={() => setModalImage(signatureUrl)}
-            className="group relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs text-emerald-300 transition"
+            onClick={() => handleSendWhatsApp(pkg.status === 'NOTIFIED')}
+            disabled={isSendingWhatsApp}
+            title={pkg.status === 'NOTIFIED' ? 'Reenviar notificação de WhatsApp' : 'Verificar e disparar mensagem WhatsApp'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-50 ${
+              pkg.status === 'NOTIFIED'
+                ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
+                : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40 animate-pulse'
+            }`}
           >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Assinatura de Retirada</span>
+            {isSendingWhatsApp ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : pkg.status === 'NOTIFIED' ? (
+              <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Send className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+            <span>{pkg.status === 'NOTIFIED' ? 'Reenviar WhatsApp' : 'Enviar WhatsApp'}</span>
           </button>
         )}
       </div>
 
-      {/* Ações */}
+      {/* Ações de Entrega */}
       {showActions && pkg.status !== 'DELIVERED' && onSelectDeliver && (
         <button
           type="button"

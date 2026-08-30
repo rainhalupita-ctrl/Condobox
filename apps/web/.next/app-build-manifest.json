@@ -16,10 +16,30 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/cadastro/page": [
+    "/portaria/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/cadastro/page.js"
+      "static/chunks/app/portaria/page.js"
+    ],
+    "/p/[token]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/p/[token]/page.js"
+    ],
+    "/morador/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/morador/page.js"
+    ],
+    "/admin/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/admin/page.js"
+    ],
+    "/_not-found/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/_not-found/page.js"
     ]
   }
 }

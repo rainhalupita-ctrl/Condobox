@@ -15,41 +15,39 @@ export class OCRService {
   private genAI: GoogleGenerativeAI | null = null;
 
   constructor() {
+    this.initClient();
+  }
+
+  private initClient() {
     if (env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim() !== '') {
       this.genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
     }
   }
 
   /**
-   * Processa a foto da etiqueta utilizando Gemini Flash Vision
+   * Processa a foto da etiqueta utilizando Gemini Flash Vision com fallback inteligente de modelos
    */
   async extractPackageInfo(imageBuffer: Buffer, mimeType: string = 'image/jpeg'): Promise<OCRExtractionResult> {
-    if (!this.genAI || !env.GEMINI_API_KEY) {
+    this.initClient();
+
+    if (!this.genAI || !env.GEMINI_API_KEY || env.GEMINI_API_KEY.trim() === '') {
       console.warn('[OCRService] Chave GEMINI_API_KEY não configurada. Usando fallback.');
       return this.fallbackHeuristic(imageBuffer);
     }
 
-    try {
-      const base64Image = imageBuffer.toString('base64');
-      const model = this.genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
-        generationConfig: {
-          responseMimeType: 'application/json'
-        }
-      });
+    const base64Image = imageBuffer.toString('base64');
+    const prompt = `
+Você é um especialista em OCR e visão computacional de alta precisão para recepção de encomendas em condomínios no Brasil.
+Analise a imagem da etiqueta de entrega (Correios, Mercado Livre, Shopee, Amazon, Dell, Total Express, Jadlog, Loggi, etc.) e extraia com a máxima precisão as seguintes informações:
 
-      const prompt = `
-Você é um especialista em OCR e visão computacional para recepção de encomendas em condomínios no Brasil.
-Analise a imagem da etiqueta de entrega e extraia com a máxima precisão as seguintes informações:
-
-1. "recipientName": Nome completo do destinatário / morador.
-2. "block": Identificação do bloco/torre, se houver (ex: "Bloco A", "Torre 2", "B").
-3. "unitNumber": Número do apartamento ou casa (ex: "101", "204", "Casa 12").
-4. "carrier": Nome da transportadora ou marketplace (ex: "Mercado Livre", "Shopee", "Amazon", "Correios", "Shein", "Total Express", "Loggi", "Magalu", "Outro").
-5. "trackingCode": Código de rastreio ou número do pedido/etiqueta.
+1. "recipientName": Nome completo do destinatário / morador (ex: se na etiqueta diz "DXM KLEBIN", extraia "DXM KLEBIN").
+2. "block": Identificação do bloco/torre, se houver (ex: se o endereço contiver "A805", "CIVIT I 1770 A805", "BL A", extraia "Bloco A").
+3. "unitNumber": Número do apartamento ou casa (ex: se o endereço contiver "A805", extraia "805").
+4. "carrier": Nome da transportadora, marketplace ou remetente (ex: "Dell", "Mercado Livre", "Shopee", "Amazon", "Correios", "Total Express", "Outro").
+5. "trackingCode": Código de rastreio, número da Nota Fiscal (NF) ou código do pacote (ex: "7958078", "CPQ 11028199").
 6. "confidence": Um número de 0.0 a 1.0 indicando o grau de certeza da leitura.
 
-Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
+Responda ESTRITAMENTE em formato JSON:
 {
   "recipientName": string | null,
   "block": string | null,
@@ -60,41 +58,63 @@ Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
 }
 `;
 
-      const result = await model.generateContent([
-        prompt,
-        {
-          inlineData: {
-            mimeType: mimeType || 'image/jpeg',
-            data: base64Image
+    // Modelos ativos suportados em ordem de preferência
+    const modelsToTry = [
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash'
+    ];
+
+    for (const modelName of modelsToTry) {
+      try {
+        const model = this.genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType: 'application/json'
           }
-        }
-      ]);
+        });
 
-      const responseText = result.response.text() || '';
-      const parsed = JSON.parse(responseText);
+        const result = await model.generateContent([
+          prompt,
+          {
+            inlineData: {
+              mimeType: mimeType || 'image/jpeg',
+              data: base64Image
+            }
+          }
+        ]);
 
-      return {
-        recipientName: parsed.recipientName || null,
-        block: parsed.block || null,
-        unitNumber: parsed.unitNumber || null,
-        carrier: parsed.carrier || 'Outro',
-        trackingCode: parsed.trackingCode || null,
-        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.9,
-      };
-    } catch (error) {
-      console.error('[OCRService] Erro ao processar imagem no Gemini:', error);
-      return this.fallbackHeuristic(imageBuffer);
+        const responseText = result.response.text() || '';
+        const parsed = JSON.parse(responseText);
+
+        console.log(`[OCRService] ✅ Extração com sucesso usando [${modelName}]:`, parsed);
+
+        return {
+          recipientName: parsed.recipientName || null,
+          block: parsed.block || null,
+          unitNumber: parsed.unitNumber || null,
+          carrier: parsed.carrier || 'Outro',
+          trackingCode: parsed.trackingCode || null,
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
+        };
+      } catch (error: any) {
+        console.warn(`[OCRService] ⚠️ Modelo ${modelName} falhou: ${error?.message?.slice(0, 100)}`);
+      }
     }
+
+    console.error('[OCRService] Todos os modelos do Gemini falharam.');
+    return this.fallbackHeuristic(imageBuffer);
   }
 
   private fallbackHeuristic(imageBuffer: Buffer): OCRExtractionResult {
     return {
-      recipientName: 'Carlos Silva',
+      recipientName: null,
       block: 'Bloco A',
-      unitNumber: '101',
-      carrier: 'Mercado Livre',
-      trackingCode: 'BR' + Math.floor(100000000 + Math.random() * 900000000) + 'BR',
-      confidence: 0.8
+      unitNumber: null,
+      carrier: 'Outro',
+      trackingCode: null,
+      confidence: 0.5
     };
   }
 }

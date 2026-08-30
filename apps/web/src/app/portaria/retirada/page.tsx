@@ -33,18 +33,26 @@ export default function RetiradaPage() {
     setIsLoading(true);
     setErrorMessage(null);
 
-    const cleanCode = codeOrToken.trim();
+    let cleanCode = codeOrToken.trim();
+    if (cleanCode.includes('/p/')) {
+      cleanCode = cleanCode.split('/p/')[1].split('?')[0].trim();
+    } else if (cleanCode.includes('/encomenda/')) {
+      cleanCode = cleanCode.split('/encomenda/')[1].split('?')[0].trim();
+    }
 
     try {
       const supabase = createClient();
       let found: PackageType | null = null;
 
       if (supabase) {
-        const { data, error } = await supabase
-          .from('packages')
-          .select('*, unit:units(*), resident:residents(*)')
-          .or(`pickup_code.eq.${cleanCode},qr_token.eq.${cleanCode}`)
-          .single();
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanCode);
+        let query = supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
+        if (isUUID) {
+          query = query.eq('id', cleanCode);
+        } else {
+          query = query.or(`pickup_code.eq.${cleanCode},qr_token.eq.${cleanCode}`);
+        }
+        const { data, error } = await query.maybeSingle();
 
         if (data && !error) {
           found = data as PackageType;
@@ -62,23 +70,6 @@ export default function RetiradaPage() {
         }
       }
 
-      if (!found) {
-        // Mock fallback para testes com os códigos de exemplo (4821 ou 9304)
-        if (cleanCode === '4821' || cleanCode.includes('pkg_1') || cleanCode.length === 4) {
-          found = {
-            id: 'pkg-1',
-            unit_id: 'u-1',
-            carrier: 'Mercado Livre',
-            recipient_name_ocr: 'Carlos Silva',
-            status: 'RECEIVED',
-            pickup_code: cleanCode,
-            qr_token: `pkg_${cleanCode}`,
-            received_at: new Date().toISOString(),
-            unit: { id: 'u-1', block: 'Bloco A', unit_number: '101' },
-            resident: { id: 'r-1', unit_id: 'u-1', name: 'Carlos Silva', phone: '5511999990001', is_authorized_receiver: true, is_primary: true, active: true }
-          };
-        }
-      }
 
       if (!found) {
         setErrorMessage(`Nenhuma encomenda pendente encontrada com o código "${cleanCode}". Verifique e tente novamente.`);

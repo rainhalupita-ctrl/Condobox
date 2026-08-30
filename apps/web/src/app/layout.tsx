@@ -7,6 +7,9 @@ export const metadata: Metadata = {
   title: 'CondoBox — Gestão de Encomendas para Condomínios',
   description: 'Controle de encomendas com OCR Gemini, WhatsApp e Assinatura Digital',
   manifest: '/manifest.json',
+  icons: {
+    icon: '/icon.png',
+  },
 };
 
 export const viewport: Viewport = {

@@ -6,9 +6,13 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --prefix apps/web",
+    "dev": "npm run dev:all",
+    "dev:all": "npx concurrently -n \"WEB,API\" -c \"cyan,magenta\" \"npm run dev:web\" \"npm run dev:api\"",
     "dev:web": "npm run dev --prefix apps/web",
     "dev:api": "npm run dev --prefix apps/local-api",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "tunnel": "npx --yes localtunnel --port 3000",
     "build": "npm run build --prefix apps/web && npm run build --prefix apps/local-api",
     "build:web": "npm run build --prefix apps/web",
     "build:api": "npm run build --prefix apps/local-api"

@@ -26,10 +26,16 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const cleanEmail = email.trim().toLowerCase();
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
 
     if (authError || !data.user) {
-      setError('E-mail ou senha inválidos. Verifique seus dados e tente novamente.');
+      const msg = authError?.message?.toLowerCase() || '';
+      if (msg.includes('rate limit') || msg.includes('too many requests')) {
+        setError('Muitas tentativas recentes. Por segurança, aguarde alguns minutos antes de tentar novamente.');
+      } else {
+        setError('E-mail ou senha incorretos. Verifique seus dados e tente novamente.');
+      }
       setLoading(false);
       return;
     }
@@ -179,12 +185,21 @@ export default function LoginPage() {
         </form>
 
         {/* Rodapé */}
-        <p className="text-center text-slate-500 text-sm mt-6">
-          Ainda não tem conta?{' '}
-          <Link href="/cadastro" className="text-green-400 hover:text-green-300 font-medium">
-            Cadastrar-se
-          </Link>
-        </p>
+        {tab === 'morador' ? (
+          <p className="text-center text-slate-500 text-sm mt-6">
+            Ainda não tem conta?{' '}
+            <Link href="/cadastro" className="text-green-400 hover:text-green-300 font-medium">
+              Cadastrar-se como Morador
+            </Link>
+          </p>
+        ) : (
+          <div className="mt-6 text-center bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
+            <p className="text-slate-400 text-xs leading-relaxed">
+              🔒 Contas de portaria são criadas <strong className="text-slate-300">somente pelo síndico</strong>.<br />
+              Entre em contato com a administração do condomínio.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

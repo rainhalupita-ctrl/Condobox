@@ -5,6 +5,7 @@ import { PackageCard } from '../../components/package-card';
 import { QRGenerator } from '../../components/qr-generator';
 import { Package as PackageType, Resident } from '../../types/database';
 import { createClient } from '../../lib/supabase/client';
+import { useAuth } from '../../contexts/auth-context';
 import {
   Smartphone,
   QrCode,
@@ -14,139 +15,166 @@ import {
   UserCheck,
   ShieldCheck,
   RefreshCw,
-  Bell
+  Bell,
+  Building,
+  AlertCircle
 } from 'lucide-react';
+import Link from 'next/link';
 
 export default function MoradorPage() {
-  const [residents, setResidents] = useState<Resident[]>([]);
-  const [selectedResidentId, setSelectedResidentId] = useState<string>('r-1');
+  const { user, profile, loading: authLoading } = useAuth();
+  const [resident, setResident] = useState<Resident | null>(null);
   const [packages, setPackages] = useState<PackageType[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'PENDING' | 'HISTORY'>('PENDING');
 
-  useEffect(() => {
-    loadMockOrRealData();
-  }, [selectedResidentId]);
-
-  const loadMockOrRealData = async () => {
+  const loadResidentAndPackages = async () => {
+    if (!user) return;
     setLoading(true);
     const supabase = createClient();
 
-    if (supabase) {
-      const { data: resData } = await supabase.from('residents').select('*, unit:units(*)');
-      if (resData && resData.length > 0) {
-        setResidents(resData);
-        if (!selectedResidentId) setSelectedResidentId(resData[0].id);
+    try {
+      // 1. Buscar morador vinculado ao user_id autenticado
+      let { data: resData } = await supabase
+        .from('residents')
+        .select('*, unit:units(*)')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      // Fallback: se não vinculado por user_id, buscar por email ou telefone
+      if (!resData && user.email) {
+        const { data: resByEmail } = await supabase
+          .from('residents')
+          .select('*, unit:units(*)')
+          .eq('email', user.email)
+          .maybeSingle();
+        
+        if (resByEmail) {
+          resData = resByEmail;
+          // Vincular automaticamente o user_id para os próximos acessos
+          await supabase
+            .from('residents')
+            .update({ user_id: user.id })
+            .eq('id', resByEmail.id);
+        }
       }
 
-      const { data: pkgData } = await supabase
-        .from('packages')
-        .select('*, unit:units(*), resident:residents(*)')
-        .eq('resident_id', selectedResidentId)
-        .order('received_at', { ascending: false });
+      setResident(resData as Resident | null);
 
-      if (pkgData) {
-        setPackages(pkgData);
-        setLoading(false);
-        return;
+      if (resData?.unit_id) {
+        // 2. Buscar encomendas reais da unidade do morador
+        const { data: pkgData } = await supabase
+          .from('packages')
+          .select('*, unit:units(*), resident:residents(*)')
+          .eq('unit_id', resData.unit_id)
+          .order('received_at', { ascending: false });
+
+        setPackages((pkgData as PackageType[]) || []);
+      } else {
+        setPackages([]);
       }
+    } catch (err) {
+      console.error('Erro ao carregar dados do morador:', err);
+    } finally {
+      setLoading(false);
     }
-
-    // Mock para demonstração
-    const mockRes: Resident[] = [
-      { id: 'r-1', unit_id: 'u-1', name: 'Carlos Silva', phone: '5511999990001', is_authorized_receiver: true, is_primary: true, active: true, unit: { id: 'u-1', block: 'Bloco A', unit_number: '101' } },
-      { id: 'r-2', unit_id: 'u-1', name: 'Mariana Silva', phone: '5511999990002', is_authorized_receiver: true, is_primary: false, active: true, unit: { id: 'u-1', block: 'Bloco A', unit_number: '101' } },
-      { id: 'r-4', unit_id: 'u-5', name: 'Fernanda Souza', phone: '5511999990004', is_authorized_receiver: true, is_primary: true, active: true, unit: { id: 'u-5', block: 'Bloco B', unit_number: '101' } },
-    ];
-    setResidents(mockRes);
-
-    const mockPkgs: PackageType[] = [
-      {
-        id: 'pkg-1',
-        unit_id: 'u-1',
-        resident_id: 'r-1',
-        carrier: 'Mercado Livre',
-        tracking_code: 'ML998822BR',
-        recipient_name_ocr: 'Carlos Silva',
-        status: 'RECEIVED',
-        pickup_code: '4821',
-        qr_token: 'pkg_token_4821',
-        label_image_path: null,
-        received_at: new Date(Date.now() - 3600000).toISOString(),
-        unit: { id: 'u-1', block: 'Bloco A', unit_number: '101' },
-        resident: mockRes[0]
-      },
-      {
-        id: 'pkg-3',
-        unit_id: 'u-1',
-        resident_id: 'r-1',
-        carrier: 'Amazon',
-        tracking_code: 'AMZ-4411-BR',
-        recipient_name_ocr: 'Carlos Silva',
-        status: 'DELIVERED',
-        pickup_code: '1290',
-        qr_token: 'pkg_token_1290',
-        label_image_path: null,
-        signature_image_path: null,
-        received_at: new Date(Date.now() - 86400000).toISOString(),
-        delivered_at: new Date(Date.now() - 43200000).toISOString(),
-        delivered_to_name: 'Carlos Silva',
-        unit: { id: 'u-1', block: 'Bloco A', unit_number: '101' },
-        resident: mockRes[0]
-      }
-    ];
-
-    setPackages(mockPkgs);
-    setLoading(false);
   };
 
-  const currentResident = residents.find(r => r.id === selectedResidentId) || residents[0];
-  const pendingPackages = packages.filter(p => p.status !== 'DELIVERED');
-  const historyPackages = packages.filter(p => p.status === 'DELIVERED');
+  useEffect(() => {
+    if (!authLoading && user) {
+      loadResidentAndPackages();
+
+      const supabase = createClient();
+      const channel = supabase
+        .channel('packages-morador-live')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'packages' },
+          () => {
+            loadResidentAndPackages();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [authLoading, user]);
+
+  const pendingPackages = packages.filter(p => p.status !== 'DELIVERED' && p.status !== 'RETURNED');
+  const historyPackages = packages.filter(p => p.status === 'DELIVERED' || p.status === 'RETURNED');
+
+  if (authLoading || loading) {
+    return (
+      <div className="py-20 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
+        <RefreshCw className="w-8 h-8 animate-spin text-emerald-400" />
+        <p className="text-sm font-medium">Carregando suas informações e encomendas...</p>
+      </div>
+    );
+  }
+
+  // Caso o usuário não tenha registro de morador/unidade vinculado
+  if (!resident) {
+    return (
+      <div className="max-w-xl mx-auto py-12 px-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center mx-auto">
+            <AlertCircle size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-100">Unidade não vinculada</h2>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Olá, <strong className="text-slate-200">{profile?.name || user?.email}</strong>! Sua conta ainda não possui um apartamento/unidade associado no condomínio.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition"
+            >
+              Solicitar ao Síndico ou Portaria
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Seletor de Perfil do Morador (Simulação / Auth) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+      {/* Perfil Real do Morador Autenticado */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl flex items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center font-bold text-lg">
-            {currentResident ? currentResident.name.charAt(0) : 'M'}
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-lg">
+            {resident.name ? resident.name.charAt(0).toUpperCase() : 'M'}
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-100">{currentResident?.name || 'Morador'}</h2>
-              <span className="text-[10px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full">
+              <h2 className="text-lg font-bold text-slate-100">{resident.name}</h2>
+              <span className="text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
                 Morador Ativo
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              {currentResident?.unit ? `${currentResident.unit.block} - Apto ${currentResident.unit.unit_number}` : 'Unidade'}
+            <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
+              <Building size={13} className="text-slate-500" />
+              {resident.unit ? `${resident.unit.block} — Apto ${resident.unit.unit_number}` : 'Unidade'}
             </p>
           </div>
         </div>
 
-        {/* Alternar Morador para Teste */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs text-slate-400 whitespace-nowrap">Trocar Perfil:</span>
-          <select
-            value={selectedResidentId}
-            onChange={(e) => setSelectedResidentId(e.target.value)}
-            className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-sky-500 font-medium"
-          >
-            {residents.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name} ({r.unit ? `${r.unit.block} ${r.unit.unit_number}` : ''})
-              </option>
-            ))}
-          </select>
-        </div>
+        <button
+          onClick={loadResidentAndPackages}
+          className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+          title="Atualizar"
+        >
+          <RefreshCw size={16} />
+        </button>
       </div>
 
-      {/* Cartão de Retirada Rápida com QR Code (Se houver encomendas pendentes) */}
+      {/* Cartão de Retirada com QR Code (Se houver encomendas pendentes) */}
       {pendingPackages.length > 0 && (
-        <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 border border-sky-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8 animate-fade-in">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8 animate-fade-in">
           <div className="space-y-4 text-center md:text-left">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/20 text-sky-300 text-xs font-semibold border border-sky-500/30">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-semibold border border-emerald-500/30">
               <Bell className="w-3.5 h-3.5 animate-bounce" /> {pendingPackages.length} Encomenda(s) Pronta(s) para Retirada
             </div>
             <h3 className="text-2xl sm:text-3xl font-black text-slate-100">
@@ -157,7 +185,7 @@ export default function MoradorPage() {
             </p>
             <div className="flex items-center justify-center md:justify-start gap-3 pt-2">
               <span className="text-xs text-slate-400">Código de Retirada:</span>
-              <span className="text-2xl font-black font-mono text-sky-400 bg-sky-950/80 border border-sky-700/60 px-4 py-1 rounded-xl tracking-widest">
+              <span className="text-2xl font-black font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-4 py-1 rounded-xl tracking-widest">
                 {pendingPackages[0].pickup_code}
               </span>
             </div>
@@ -179,7 +207,7 @@ export default function MoradorPage() {
           onClick={() => setActiveTab('PENDING')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition ${
             activeTab === 'PENDING'
-              ? 'bg-sky-600 text-white shadow-md'
+              ? 'bg-emerald-600 text-white shadow-md'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
@@ -189,7 +217,7 @@ export default function MoradorPage() {
           onClick={() => setActiveTab('HISTORY')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition ${
             activeTab === 'HISTORY'
-              ? 'bg-sky-600 text-white shadow-md'
+              ? 'bg-emerald-600 text-white shadow-md'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
@@ -197,19 +225,14 @@ export default function MoradorPage() {
         </button>
       </div>
 
-      {/* Lista de Encomendas */}
-      {loading ? (
-        <div className="py-12 text-center text-slate-400 flex flex-col items-center gap-3">
-          <RefreshCw className="w-8 h-8 animate-spin text-sky-400" />
-          <p className="text-sm">Carregando encomendas...</p>
-        </div>
-      ) : activeTab === 'PENDING' ? (
+      {/* Lista de Encomendas Reais */}
+      {activeTab === 'PENDING' ? (
         pendingPackages.length === 0 ? (
           <div className="py-16 text-center text-slate-400 bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl p-8 flex flex-col items-center gap-3">
             <Package className="w-12 h-12 text-slate-600" />
             <h3 className="text-base font-bold text-slate-300">Você não tem encomendas pendentes na portaria</h3>
             <p className="text-xs text-slate-500 max-w-sm">
-              Quando um pacote chegar, você receberá uma notificação instantânea no WhatsApp.
+              Assim que um pacote for registrado na portaria para o seu apartamento, ele aparecerá aqui com o código e QR Code de retirada.
             </p>
           </div>
         ) : (
@@ -224,7 +247,7 @@ export default function MoradorPage() {
           <ShieldCheck className="w-12 h-12 text-slate-600" />
           <h3 className="text-base font-bold text-slate-300">Nenhum histórico anterior</h3>
           <p className="text-xs text-slate-500 max-w-sm">
-            Aqui você poderá consultar todas as entregas passadas e visualizar as assinaturas digitais coletadas.
+            Aqui você poderá consultar todas as encomendas retiradas no passado com data e assinatura.
           </p>
         </div>
       ) : (

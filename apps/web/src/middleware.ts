@@ -10,9 +10,22 @@ const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
 };
 
 // Rotas públicas (sem autenticação necessária)
-const PUBLIC_PATHS = ['/login', '/cadastro', '/api'];
+const PUBLIC_PATHS = ['/login', '/cadastro', '/p', '/encomenda'];
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // 1. NUNCA interceptar arquivos estáticos, chunks, CSS, JS, imagens ou rotas da API interna
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/api') ||
+    pathname.includes('.') ||
+    pathname === '/favicon.ico' ||
+    pathname === '/manifest.json'
+  ) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -35,12 +48,11 @@ export async function middleware(request: NextRequest) {
   );
 
   const { data: { user } } = await supabase.auth.getUser();
-  const pathname = request.nextUrl.pathname;
 
   // Permitir rotas públicas sempre
   const isPublic = PUBLIC_PATHS.some(p => pathname.startsWith(p));
   if (isPublic) {
-    // Se já está logado e tenta acessar /login ou /cadastro, redireciona pro home
+    // Se já está logado e tenta acessar /login ou /cadastro, redireciona para a home
     if (user && (pathname === '/login' || pathname === '/cadastro')) {
       const profile = await supabase
         .from('profiles')
@@ -100,6 +112,13 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icon.png|manifest.json|.*\\.svg|.*\\.png|.*\\.jpg|.*\\.jpeg|.*\\.gif|.*\\.webp).*)',
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public files with extensions (.svg, .png, .jpg, .css, .js, etc)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|manifest.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|ico|woff|woff2|ttf|map)).*)',
   ],
 };
