@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
       unitNumber: null as string | null,
       carrier: 'Outro',
       trackingCode: null as string | null,
+      invoiceNumber: null as string | null,
       confidence: 0.95
     };
 

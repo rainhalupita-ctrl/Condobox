@@ -10,6 +10,7 @@ export interface OCRResponse {
     unitNumber: string | null;
     carrier: string;
     trackingCode: string | null;
+    invoiceNumber?: string | null;
     confidence: number;
   };
   suggestedMatch: {
