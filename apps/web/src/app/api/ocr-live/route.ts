@@ -175,13 +175,15 @@ function parseRawText(text: string) {
 
 // ─── Provider: Google Gemini Flash-Lite (Ultra-Rápido ~1.2s) ─────────────────
 async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = `Você é especialista em OCR de etiquetas brasileiras.
-Extraia dados do DESTINATÁRIO em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":0.95}
-REGRAS:
-- "Avenida Civit I, nº 1770 - A805" -> 1770 é número da rua, o apartamento é "805" e bloco é "Bloco A".
-- unitNumber = APENAS o número do apartamento (ex: "805", "101", "204").
-- block = bloco/torre (ex: "Bloco A", "Bloco B").
-- NUNCA use CEP (ex: 29168-322) como trackingCode.`;
+  const PROMPT = `Você é especialista em OCR de etiquetas com PRECISÃO DE 100%.
+Extraia em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":1.0}
+DIRETRIZES:
+1. DISTINÇÃO CRÍTICA DE DÍGITOS: Diferencie cuidadosamente '8' (dois círculos fechados) de '6' (apenas círculo inferior) e '0'.
+2. ENDEREÇO: Em "Avenida Civit I, nº 1770 - A805", o número 1770 é o número do condomínio na rua. O apartamento é "805" e o bloco é "Bloco A".
+3. unitNumber = APENAS o número do apartamento (ex: "805").
+4. block = bloco/torre (ex: "Bloco A", "Bloco B").
+5. carrier = nome do remetente/loja (ex: "Mercado Livre").
+6. NUNCA use CEP (ex: 29168-322) como trackingCode.`;
 
   const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
   for (const model of models) {
@@ -193,7 +195,7 @@ REGRAS:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 80 },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 90 },
           }),
           signal: AbortSignal.timeout(3000),
         }
@@ -215,7 +217,7 @@ REGRAS:
 
 // ─── Provider: NVIDIA NIM (Llama 3.2 Vision) ──────────────────────────────────
 async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = 'Extraia destinatario, apto, bloco, remetente e rastreio em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":0.9}. NUNCA use CEP no trackingCode.';
+  const PROMPT = 'Extraia destinatario, apto, bloco, remetente e rastreio em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":0.95}. Diferencie 8 de 6. NUNCA use CEP no trackingCode.';
   try {
     const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',

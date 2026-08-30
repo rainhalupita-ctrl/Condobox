@@ -239,9 +239,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (!ctx) return resolve(null);
 
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(video, 0, 0, width, height);
 
         // Checagem rápida de brilho — descarta frames escuros/cobertos
@@ -259,21 +261,26 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const avgBrightness = count > 0 ? brightnessSum / count : 128;
 
         canvas.toBlob(
-          (blob) => resolve(blob ? { blob, avgBrightness } : null),
+          (blob) => {
+            if (!blob) return resolve(null);
+            resolve({ blob, avgBrightness });
+          },
           'image/jpeg',
           quality
         );
       });
 
     const runLiveScan = async () => {
-      if (!isActive || autoCaptureFiredRef.current || isScanning || !isMountedRef.current) return;
+      if (!isMountedRef.current || !isActive || isScanning || capturedBlob || autoCaptureFiredRef.current) {
+        return;
+      }
 
       isScanning = true;
       setIsLiveAnalyzing(true);
 
       try {
-        // Frame leve e otimizado (560px, qualidade 0.60 ~25KB) para upload ultra-rápido em milissegundos
-        const fast = await captureFrame(560, 0.60);
+        // Frame nítido em alta definição (1080px, qualidade 0.85) para distinção 100% precisa de dígitos (ex: 8 vs 6)
+        const fast = await captureFrame(1080, 0.85);
         if (!fast || fast.avgBrightness < 15 || !isMountedRef.current || !isActive) {
           return;
         }
