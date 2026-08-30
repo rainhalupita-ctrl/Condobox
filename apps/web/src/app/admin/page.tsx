@@ -1265,32 +1265,27 @@ export default function AdminPage() {
 
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Apartamento *</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      list="admin-modal-units-list"
-                      value={newResUnitNumber}
-                      onChange={(e) => setNewResUnitNumber(e.target.value)}
-                      placeholder="Ex: 101, 805"
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold"
-                    />
-                    <datalist id="admin-modal-units-list">
-                      {Array.from(
-                        new Set(
-                          units
-                            .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
-                            .map((u) => u.unit_number)
-                        )
+                  <select
+                    required
+                    value={newResUnitNumber}
+                    onChange={(e) => setNewResUnitNumber(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold"
+                  >
+                    <option value="">Selecione o apartamento...</option>
+                    {Array.from(
+                      new Set(
+                        units
+                          .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
+                          .map((u) => u.unit_number)
                       )
-                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-                        .map((num) => (
-                          <option key={num} value={num}>
-                            Apto {num}
-                          </option>
-                        ))}
-                    </datalist>
-                  </div>
+                    )
+                      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                      .map((num) => (
+                        <option key={num} value={num}>
+                          Apto {num}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               </div>
 
