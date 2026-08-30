@@ -23,7 +23,7 @@ const FORBIDDEN_WORDS = [
   'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO', 'DELL',
 ];
 
-const RICH_PROMPT = `Você é especialista em OCR de etiquetas de encomendas residenciais brasileiras.
+const RICH_PROMPT = `Você é especialista em OCR de etiquetas de encomendas residenciais brasileiras (Mercado Livre, Shopee, Amazon, Correios, Loggi, Jadlog, Shein etc.).
 Analise a imagem e extraia em JSON estrito:
 {
   "recipientName": string|null,
@@ -34,12 +34,12 @@ Analise a imagem e extraia em JSON estrito:
   "invoiceNumber": string|null,
   "confidence": number
 }
-REGRAS:
-1. recipientName = APENAS nome da pessoa física destinatária. NUNCA empresa/transportadora/aviso.
+REGRAS CRÍTICAS:
+1. recipientName = APENAS nome da pessoa física destinatária (morador). NUNCA empresa, loja, remetente ou aviso.
 2. unitNumber = número do apartamento/unidade (ex: "101", "805").
 3. block = bloco ou torre se houver.
-4. carrier = Mercado Livre | Shopee | Amazon | Correios | Loggi | Jadlog | Shein | Magalu | Total Express | Outro.
-5. trackingCode = código de rastreio ou barras.
+4. carrier = Remetente, loja ou transportadora de onde veio (ex: "Mercado Livre", "Shopee", "Amazon", "Nike", "Drogasil", "Correios", "Shein", "Magalu", "Zara", "Loggi", etc.).
+5. trackingCode = código de rastreio ou código de barras. AVISO CRÍTICO: NUNCA coloque CEP (8 dígitos como 29168-074 ou 29168074) como trackingCode. Se não houver código de rastreio específico, retorne null.
 6. invoiceNumber = NF/DANFE se visível.
 7. confidence = 0.0-1.0 refletindo certeza dos dados extraídos.`;
 
@@ -54,6 +54,34 @@ export class OCRService {
     if (env.GEMINI_API_KEY?.trim()) {
       this.genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
     }
+  }
+
+  private sanitizeTrackingCode(rawTracking: any): string | null {
+    if (!rawTracking) return null;
+    const clean = String(rawTracking).trim();
+    if (clean.length < 5) return null;
+
+    // Rejeita se for CEP brasileiro (5 dígitos + hífen opcional + 3 dígitos)
+    if (/^\d{5}-?\d{3}$/.test(clean)) return null;
+
+    // Rejeita se for apenas 8 dígitos numéricos (CEP desformatado)
+    const digitsOnly = clean.replace(/\D/g, '');
+    if (digitsOnly.length === 8 && /^\d+$/.test(clean.replace(/[-\s]/g, ''))) return null;
+
+    // Rejeita se começar com CEP ou termos de endereço
+    const upper = clean.toUpperCase();
+    if (
+      upper.startsWith('CEP') ||
+      upper.includes('CIDADE') ||
+      upper.includes('BAIRRO') ||
+      upper.includes('RUA') ||
+      upper.includes('AVENIDA') ||
+      upper.includes('ESTADO')
+    ) {
+      return null;
+    }
+
+    return clean;
   }
 
   private sanitize(parsed: any): OCRExtractionResult {
@@ -75,15 +103,19 @@ export class OCRService {
       rawUnit = matchLetterNum[2];
     }
 
+    const cleanTracking = this.sanitizeTrackingCode(parsed.trackingCode);
+    const sender = parsed.carrier || parsed.sender ? String(parsed.carrier || parsed.sender).trim() : null;
+
     const hasUnit = Boolean(rawUnit && rawUnit.replace(/\D/g, '').length >= 1);
-    const detected = hasUnit || !!cleanRecipient || !!(parsed.trackingCode?.trim()?.length >= 6);
+    const hasTracking = !!cleanTracking;
+    const detected = hasUnit || !!cleanRecipient || hasTracking;
 
     return {
       recipientName: cleanRecipient,
       block: rawBlock,
       unitNumber: hasUnit ? rawUnit : null,
-      carrier: parsed.carrier || 'Outro',
-      trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
+      carrier: sender || 'Outro',
+      trackingCode: cleanTracking,
       invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
       confidence: detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.92) : 0,
     };
@@ -99,8 +131,8 @@ export class OCRService {
     const blocoMatch = fullText.match(/(?:BLOCO?|BL\.?|TORRE?)\s*[:\-]?\s*([A-Z0-9]{1,3})/i);
     const block = blocoMatch ? `Bloco ${blocoMatch[1].toUpperCase()}` : null;
 
-    const trackMatch = text.match(/\b([A-Z]{2}\d{9,}[A-Z]{2}|\d{13,20})\b/);
-    const trackingCode = trackMatch ? trackMatch[1] : null;
+    const trackMatch = text.match(/\b([A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{2,4}\s*\d{6,14}|\d{12,20})\b/);
+    const trackingCode = this.sanitizeTrackingCode(trackMatch ? trackMatch[1] : null);
 
     let recipientName: string | null = null;
     for (let i = 0; i < lines.length; i++) {
@@ -112,8 +144,12 @@ export class OCRService {
 
     const detected = !!(unitNumber || trackingCode);
     return {
-      recipientName, block, unitNumber, carrier: 'Outro',
-      trackingCode, invoiceNumber: null,
+      recipientName,
+      block,
+      unitNumber,
+      carrier: 'Outro',
+      trackingCode,
+      invoiceNumber: null,
       confidence: detected ? 0.6 : 0,
       rawText: text,
     };

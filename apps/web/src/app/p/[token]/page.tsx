@@ -242,7 +242,7 @@ export default function PublicPackagePage() {
                 </div>
 
                 <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Transportadora</span>
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Remetente</span>
                   <span className="font-bold text-slate-100 text-sm mt-0.5 block truncate">
                     {pkg.carrier}
                   </span>

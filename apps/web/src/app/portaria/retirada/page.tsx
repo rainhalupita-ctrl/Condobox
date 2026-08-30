@@ -197,7 +197,7 @@ export default function RetiradaPage() {
                 </span>
               </div>
               <div>
-                <span className="text-slate-500 block">Transportadora:</span>
+                <span className="text-slate-500 block">Remetente:</span>
                 <span className="font-bold text-slate-100">{scannedPackage.carrier}</span>
               </div>
             </div>

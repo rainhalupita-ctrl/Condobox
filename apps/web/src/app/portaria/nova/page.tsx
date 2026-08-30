@@ -501,7 +501,7 @@ export default function NovaEncomendaPage() {
             <div className="space-y-1.5">
               <h3 className="text-lg font-bold text-white">Realizando leitura, aguarde...</h3>
               <p className="text-xs text-slate-400">
-                A IA está identificando o morador, unidade, NF e transportadora na etiqueta.
+                A IA está identificando o morador, unidade, NF e remetente na etiqueta.
               </p>
             </div>
             <button
@@ -543,7 +543,7 @@ export default function NovaEncomendaPage() {
                 </span>
               </div>
               <div className="flex justify-between text-slate-300">
-                <span className="text-slate-500">Transportadora:</span>
+                <span className="text-slate-500">Remetente:</span>
                 <span className="font-semibold text-slate-200">{duplicateWarning.carrier}</span>
               </div>
               <div className="flex justify-between text-slate-300">
@@ -782,7 +782,7 @@ export default function NovaEncomendaPage() {
               </div>
             </div>
 
-            {/* Nome na Etiqueta (Informativo, não altera o morador) e Transportadora */}
+            {/* Nome na Etiqueta e Remetente */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
@@ -799,28 +799,52 @@ export default function NovaEncomendaPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Transportadora:
+                  Remetente:
                 </label>
-                <select
-                  value={carrier}
-                  onChange={(e) => setCarrier(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="Dell">Dell</option>
-                  <option value="Mercado Livre">Mercado Livre</option>
-                  <option value="Shopee">Shopee</option>
-                  <option value="Amazon">Amazon</option>
-                  <option value="Correios">Correios</option>
-                  <option value="Shein">Shein</option>
-                  <option value="Magalu">Magalu</option>
-                  <option value="Total Express">Total Express</option>
-                  <option value="Loggi">Loggi</option>
-                  <option value="Jadlog">Jadlog</option>
-                  {carrier && !['Dell', 'Mercado Livre', 'Shopee', 'Amazon', 'Correios', 'Shein', 'Magalu', 'Total Express', 'Loggi', 'Jadlog', 'Outro'].includes(carrier) && (
-                    <option value={carrier}>{carrier}</option>
-                  )}
-                  <option value="Outro">Outro</option>
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    list="remetente-list"
+                    value={carrier}
+                    onChange={(e) => setCarrier(e.target.value)}
+                    placeholder="Ex: Mercado Livre, Shopee, Amazon, Nike..."
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                  <datalist id="remetente-list">
+                    <option value="Mercado Livre" />
+                    <option value="Shopee" />
+                    <option value="Amazon" />
+                    <option value="Correios" />
+                    <option value="Shein" />
+                    <option value="Magalu" />
+                    <option value="Total Express" />
+                    <option value="Loggi" />
+                    <option value="Jadlog" />
+                    <option value="Dell" />
+                    <option value="Nike" />
+                    <option value="Drogasil" />
+                    <option value="Kabum" />
+                    <option value="Zara" />
+                    <option value="Outro" />
+                  </datalist>
+                </div>
+                {/* Sugestões Rápidas em Pills */}
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  {['Mercado Livre', 'Shopee', 'Amazon', 'Correios', 'Shein', 'Magalu'].map((sug) => (
+                    <button
+                      key={sug}
+                      type="button"
+                      onClick={() => setCarrier(sug)}
+                      className={`text-[11px] px-2 py-0.5 rounded-lg border transition ${
+                        carrier === sug
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-semibold'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

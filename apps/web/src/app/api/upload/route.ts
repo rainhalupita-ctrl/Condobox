@@ -13,6 +13,35 @@ const FORBIDDEN_WORDS = [
   'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO', 'DELL',
 ];
 
+// ─── Sanitização de Código de Rastreio (Filtra e Rejeita CEPs de 8 dígitos) ───
+function sanitizeTrackingCode(rawTracking: any): string | null {
+  if (!rawTracking) return null;
+  const clean = String(rawTracking).trim();
+  if (clean.length < 5) return null;
+
+  // Rejeita se for CEP brasileiro (5 dígitos + hífen opcional + 3 dígitos)
+  if (/^\d{5}-?\d{3}$/.test(clean)) return null;
+
+  // Rejeita se for apenas 8 dígitos numéricos (CEP desformatado)
+  const digitsOnly = clean.replace(/\D/g, '');
+  if (digitsOnly.length === 8 && /^\d+$/.test(clean.replace(/[-\s]/g, ''))) return null;
+
+  // Rejeita se começar com CEP ou termos de endereço
+  const upper = clean.toUpperCase();
+  if (
+    upper.startsWith('CEP') ||
+    upper.includes('CIDADE') ||
+    upper.includes('BAIRRO') ||
+    upper.includes('RUA') ||
+    upper.includes('AVENIDA') ||
+    upper.includes('ESTADO')
+  ) {
+    return null;
+  }
+
+  return clean;
+}
+
 function cleanOcrData(parsed: any) {
   let cleanRecipient: string | null = (parsed.recipientName || '').trim();
   if (
@@ -32,8 +61,11 @@ function cleanOcrData(parsed: any) {
     rawUnit = matchLetterNum[2];
   }
 
+  const cleanTracking = sanitizeTrackingCode(parsed.trackingCode);
+  const sender = parsed.carrier || parsed.sender ? String(parsed.carrier || parsed.sender).trim() : null;
+
   const hasUnit = Boolean(rawUnit && rawUnit.replace(/\D/g, '').length >= 1);
-  const hasTracking = !!(parsed.trackingCode && String(parsed.trackingCode).trim().length >= 6);
+  const hasTracking = !!cleanTracking;
   const detected = hasUnit || !!cleanRecipient || hasTracking;
   const confidence = detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.92) : 0;
 
@@ -41,8 +73,8 @@ function cleanOcrData(parsed: any) {
     recipientName: cleanRecipient,
     block: rawBlock,
     unitNumber: hasUnit ? rawUnit : null,
-    carrier: parsed.carrier || 'Outro',
-    trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
+    carrier: sender || 'Outro',
+    trackingCode: cleanTracking,
     invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
     confidence,
   };
@@ -59,8 +91,8 @@ function parseRawText(text: string) {
   const blocoMatch = fullText.match(/(?:BLOCO?|BL\.?|TORRE?)\s*[:\-]?\s*([A-Z0-9]{1,3})/i);
   const block = blocoMatch ? `Bloco ${blocoMatch[1].toUpperCase()}` : null;
 
-  const trackMatch = text.match(/\b([A-Z]{2}\d{9,}[A-Z]{2}|\d{13,20})\b/);
-  const trackingCode = trackMatch ? trackMatch[1] : null;
+  const trackMatch = text.match(/\b([A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{2,4}\s*\d{6,14}|\d{12,20})\b/);
+  const trackingCode = sanitizeTrackingCode(trackMatch ? trackMatch[1] : null);
 
   let recipientName: string | null = null;
   for (let i = 0; i < lines.length; i++) {
@@ -87,11 +119,11 @@ Analise a imagem e extraia em JSON estrito:
   "confidence": number
 }
 REGRAS CRÍTICAS:
-1. recipientName = APENAS nome da pessoa física destinatária. NUNCA empresa, transportadora ou texto de aviso.
+1. recipientName = APENAS nome da pessoa física destinatária (morador). NUNCA empresa, loja, remetente ou aviso.
 2. unitNumber = número do apartamento/unidade (ex: "101", "805").
 3. block = bloco ou torre se presente na etiqueta.
-4. carrier = identifique: Mercado Livre, Shopee, Amazon, Correios, Loggi, Jadlog, Shein, Magalu, Total Express, ou Outro.
-5. trackingCode = código de rastreio ou barras.
+4. carrier = Remetente, loja ou transportadora de onde veio (ex: "Mercado Livre", "Shopee", "Amazon", "Nike", "Drogasil", "Correios", "Shein", "Magalu", "Zara", "Loggi", etc.).
+5. trackingCode = código de rastreio ou código de barras. AVISO CRÍTICO: NUNCA coloque CEP (8 dígitos como 29168-074 ou 29168074) como trackingCode. Se não houver código de rastreio específico, retorne null.
 6. invoiceNumber = número da NF/DANFE se visível.`;
 
 async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {

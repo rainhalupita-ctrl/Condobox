@@ -3,12 +3,42 @@ import Tesseract from 'tesseract.js';
 
 export const dynamic = 'force-dynamic';
 
+// ─── Sanitização de Código de Rastreio (Filtra e Rejeita CEPs de 8 dígitos) ───
+function sanitizeTrackingCode(rawTracking: any): string | null {
+  if (!rawTracking) return null;
+  const clean = String(rawTracking).trim();
+  if (clean.length < 5) return null;
+
+  // Rejeita se for CEP brasileiro (5 dígitos + hífen opcional + 3 dígitos)
+  if (/^\d{5}-?\d{3}$/.test(clean)) return null;
+
+  // Rejeita se for apenas 8 dígitos numéricos (CEP desformatado)
+  const digitsOnly = clean.replace(/\D/g, '');
+  if (digitsOnly.length === 8 && /^\d+$/.test(clean.replace(/[-\s]/g, ''))) return null;
+
+  // Rejeita se começar com CEP ou termos de endereço
+  const upper = clean.toUpperCase();
+  if (
+    upper.startsWith('CEP') ||
+    upper.includes('CIDADE') ||
+    upper.includes('BAIRRO') ||
+    upper.includes('RUA') ||
+    upper.includes('AVENIDA') ||
+    upper.includes('ESTADO')
+  ) {
+    return null;
+  }
+
+  return clean;
+}
+
 // ─── Sanitização e normalização do resultado de OCR ──────────────────────────
 function formatOcrResult(parsed: any) {
   let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
   let rawBlock = parsed.block ? String(parsed.block).trim() : null;
   let recipient = parsed.recipientName ? String(parsed.recipientName).trim() : null;
-  const tracking = parsed.trackingCode ? String(parsed.trackingCode).trim() : null;
+  const tracking = sanitizeTrackingCode(parsed.trackingCode);
+  const sender = parsed.carrier || parsed.sender ? String(parsed.carrier || parsed.sender).trim() : null;
 
   // Palavras proibidas — nunca são nomes de moradores
   const FORBIDDEN = [
@@ -45,6 +75,7 @@ function formatOcrResult(parsed: any) {
     recipientName: recipient,
     block: rawBlock,
     unitNumber: hasUnit ? rawUnit : null,
+    carrier: sender || 'Outro',
     trackingCode: tracking,
     confidence: detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.92) : 0,
   };
@@ -63,9 +94,9 @@ function parseRawText(text: string) {
   const blocoMatch = fullText.match(/(?:BLOCO?|BL\.?|TORRE?)\s*[:\-]?\s*([A-Z0-9]{1,3})/i);
   const block = blocoMatch ? `Bloco ${blocoMatch[1].toUpperCase()}` : null;
 
-  // Busca código de rastreio (padrão Correios BR e outros)
-  const trackMatch = text.match(/\b([A-Z]{2}\d{9,}[A-Z]{2}|\d{13,20})\b/);
-  const trackingCode = trackMatch ? trackMatch[1] : null;
+  // Busca código de rastreio (padrão Correios BR ou códigos com letras/números — NUNCA CEP)
+  const trackMatch = text.match(/\b([A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{2,4}\s*\d{6,14}|\d{12,20})\b/);
+  const trackingCode = sanitizeTrackingCode(trackMatch ? trackMatch[1] : null);
 
   // Busca destinatário — linha após "Destinatário" ou "Para:"
   let recipientName: string | null = null;
@@ -84,6 +115,7 @@ function parseRawText(text: string) {
     recipientName,
     block,
     unitNumber,
+    carrier: 'Outro',
     trackingCode,
     confidence: detected ? 0.6 : 0,
   };
@@ -91,7 +123,7 @@ function parseRawText(text: string) {
 
 // ─── Provider: Google Gemini Flash-Lite (Ultra-Rápido ~1.2s) ─────────────────
 async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.95}';
+  const PROMPT = 'Extraia destinatario, apto, bloco, remetente (ex: Mercado Livre, Shopee, Amazon, Nike, etc) e codigo de rastreio em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":0.95}. AVISO: NUNCA coloque CEP (8 digitos como 29168-074) no trackingCode.';
 
   const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
   for (const model of models) {
@@ -103,7 +135,7 @@ async function tryGemini(base64Image: string, mimeType: string, apiKey: string) 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 60 },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 80 },
           }),
           signal: AbortSignal.timeout(3000),
         }
@@ -125,7 +157,7 @@ async function tryGemini(base64Image: string, mimeType: string, apiKey: string) 
 
 // ─── Provider: NVIDIA NIM (Llama 3.2 Vision) ──────────────────────────────────
 async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) {
-  const PROMPT = 'Extraia destinatario, apto e bloco em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"trackingCode":string|null,"confidence":0.9}';
+  const PROMPT = 'Extraia destinatario, apto, bloco, remetente e rastreio em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":0.9}. NUNCA use CEP no trackingCode.';
   try {
     const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
@@ -142,7 +174,7 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
           },
         ],
         temperature: 0,
-        max_tokens: 60,
+        max_tokens: 80,
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(3500),
