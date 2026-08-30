@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
         try {
           let sendRes: Response | null = null;
 
-          // 1. Tenta enviar como mensagem com Imagem (mediaMessage)
+          // 1. Tenta enviar como mensagem com Imagem (Evolution API v2)
           if (labelImageUrl) {
             try {
               sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
@@ -120,11 +120,11 @@ export async function POST(request: NextRequest) {
                 },
                 body: JSON.stringify({
                   number: cleanPhone,
-                  mediaMessage: {
-                    mediatype: 'image',
-                    caption: messageText,
-                    media: labelImageUrl
-                  }
+                  media: labelImageUrl,
+                  mediatype: 'image',
+                  mimetype: 'image/jpeg',
+                  caption: messageText,
+                  fileName: 'etiqueta.jpg'
                 }),
                 signal: AbortSignal.timeout(12000)
               });
