@@ -161,7 +161,7 @@ export async function packageRoutes(fastify: FastifyInstance) {
 
     // 2. Verifica se já foi notificada anteriormente através dos logs
     const { data: logs } = await client
-      .from('notification_logs')
+      .from('notifications_log')
       .select('*')
       .eq('package_id', id)
       .eq('status', 'SENT')
@@ -285,7 +285,7 @@ export async function packageRoutes(fastify: FastifyInstance) {
     for (const pkg of pendingPackages || []) {
       // Checa se tem log prévio de envio
       const { data: logs } = await client
-        .from('notification_logs')
+        .from('notifications_log')
         .select('id')
         .eq('package_id', pkg.id)
         .eq('status', 'SENT');
