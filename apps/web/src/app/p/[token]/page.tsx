@@ -19,8 +19,7 @@ import {
   Sparkles,
   RefreshCw,
   QrCode,
-  MessageSquare,
-  Lock
+  MessageSquare
 } from 'lucide-react';
 
 interface PublicPackageData {
@@ -50,19 +49,8 @@ export default function PublicPackagePage() {
   const [pkg, setPkg] = useState<PublicPackageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [unlocked, setUnlocked] = useState(false);
-  const [isSendingConfirm, setIsSendingConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
-
-  const [isWaitingConfirmation, setIsWaitingConfirmation] = useState(false);
-
-  useEffect(() => {
-    if (pkg?.status === 'DELIVERED' || pkg?.notes?.includes('CIENTE')) {
-      setUnlocked(true);
-      setIsWaitingConfirmation(false);
-    }
-  }, [pkg]);
 
   useEffect(() => {
     if (token) {
@@ -70,31 +58,11 @@ export default function PublicPackagePage() {
     }
   }, [token]);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isWaitingConfirmation && !unlocked) {
-      interval = setInterval(() => {
-        loadPackageSilently();
-      }, 3000);
-    }
-    return () => clearInterval(interval);
-  }, [isWaitingConfirmation, unlocked, token]);
-
-  const loadPackageSilently = async () => {
-    try {
-      const res = await fetch(`/api/package/${token}?t=${Date.now()}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (res.ok && data.package) {
-        setPkg(data.package);
-      }
-    } catch (err) {}
-  };
-
   const loadPackage = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/package/${token}?t=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/package/${token}`);
       const data = await res.json();
       if (res.ok && data.package) {
         setPkg(data.package);
@@ -184,208 +152,170 @@ export default function PublicPackagePage() {
             </button>
           </div>
         ) : (
-          <>
-            {!unlocked ? (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-8 shadow-2xl backdrop-blur-xl text-center space-y-6 animate-fade-in mt-8">
-                <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-3xl flex items-center justify-center shadow-xl shadow-emerald-950/80 animate-pulse mx-auto">
-                  <Lock className="w-8 h-8 text-emerald-400" />
-                </div>
-
-                <div className="space-y-2">
-                  <h2 className="text-xl font-black text-slate-100">
-                    Encomenda Protegida
-                  </h2>
-                  <p className="text-sm text-slate-400 leading-relaxed max-w-sm mx-auto">
-                    {isWaitingConfirmation 
-                      ? 'Aguardando sua confirmação no WhatsApp... Assim que enviar, o QR Code e os detalhes da encomenda serão liberados automaticamente nesta tela.' 
-                      : 'Para visualizar o QR Code e as informações da sua encomenda, você precisa enviar uma mensagem de confirmação para a portaria.'}
+          <div className="space-y-4 animate-fade-in">
+            {/* Status Banner */}
+            <div
+              className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+                isDelivered
+                  ? 'bg-blue-950/40 border-blue-800/50 text-blue-300'
+                  : 'bg-emerald-950/40 border-emerald-800/50 text-emerald-300'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                {isDelivered ? (
+                  <CheckCircle2 className="w-5 h-5 text-blue-400 shrink-0" />
+                ) : (
+                  <Clock className="w-5 h-5 text-emerald-400 animate-pulse shrink-0" />
+                )}
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider">
+                    {isDelivered ? 'Encomenda Entregue' : 'Disponível na Portaria'}
+                  </h3>
+                  <p className="text-[11px] opacity-80 mt-0.5">
+                    {isDelivered
+                      ? `Retirada por ${pkg.delivered_to_name || 'morador'} em ${deliveredDate}`
+                      : 'Apresente o QR Code ou código abaixo ao porteiro'}
                   </p>
                 </div>
+              </div>
+            </div>
 
+            {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
+              <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+              {/* QR Code Container */}
+              <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
+                <QRCodeSVG
+                  value={pkg.qr_token || pkg.pickup_code}
+                  size={190}
+                  level="H"
+                  includeMargin={false}
+                  className="mx-auto"
+                />
+              </div>
+
+              {/* Código Numérico de 4 Dígitos */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
+                  Código de Retirada
+                </span>
+                <div className="flex items-center justify-center gap-3">
+                  <div className="bg-slate-950 border border-emerald-500/40 px-5 py-2 rounded-2xl shadow-inner inline-flex items-center gap-2">
+                    <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-emerald-400">
+                      {pkg.pickup_code}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    title="Copiar Código"
+                    className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl transition active:scale-95 flex items-center justify-center"
+                  >
+                    {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                </div>
+                {copied && (
+                  <p className="text-[11px] font-semibold text-emerald-400 animate-fade-in">
+                    Código copiado para a área de transferência!
+                  </p>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-400 px-4 leading-relaxed">
+                💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
+              </p>
+
+              {!isDelivered && (
                 <a
-                  href={`https://wa.me/557398419901?text=Estou ciente da encomenda ${pkg.pickup_code}`}
+                  href={`https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => setIsWaitingConfirmation(true)}
-                  className="w-full max-w-sm mx-auto py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 shadow-2xl shadow-emerald-950 transition active:scale-98 group cursor-pointer"
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition active:scale-98"
                 >
-                  {isWaitingConfirmation ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 text-emerald-100 animate-spin shrink-0" />
-                      <span>Aguardando Envio...</span>
-                    </>
-                  ) : (
-                    <>
-                      <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition shrink-0" />
-                      <span>Abrir WhatsApp e Confirmar</span>
-                    </>
-                  )}
+                  <MessageSquare className="w-4 h-4 text-emerald-100" />
+                  Responder no WhatsApp que estou ciente (1 Clique)
                 </a>
+              )}
+            </div>
+
+            {/* DETALHES DA ENCOMENDA */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3.5 text-xs text-slate-300">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-emerald-400" />
+                Dados de Entrega
+              </h4>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Unidade</span>
+                  <span className="font-bold text-slate-100 text-sm mt-0.5 block">
+                    {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Unidade'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Remetente</span>
+                  <span className="font-bold text-slate-100 text-sm mt-0.5 block truncate">
+                    {pkg.carrier}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Destinatário</span>
+                  <span className="font-semibold text-slate-200 mt-0.5 block truncate">
+                    {pkg.recipient_name}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Recebido Em</span>
+                  <span className="font-semibold text-slate-200 mt-0.5 block">
+                    {formattedDate}
+                  </span>
+                </div>
               </div>
-            ) : (
-              <div className="space-y-4 animate-fade-in">
-                {/* Status Banner */}
-                <div
-                  className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
-                    isDelivered
-                      ? 'bg-blue-950/40 border-blue-800/50 text-blue-300'
-                      : 'bg-emerald-950/40 border-emerald-800/50 text-emerald-300'
-                  }`}
+
+              {pkg.tracking_code && (
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Rastreio / NF</span>
+                    <span className="font-mono text-slate-200 font-semibold">{pkg.tracking_code}</span>
+                  </div>
+                  <Truck className="w-4 h-4 text-slate-500" />
+                </div>
+              )}
+
+              {/* Botão de Ver Foto da Etiqueta */}
+              {labelUrl && (
+                <button
+                  type="button"
+                  onClick={() => setModalImage(labelUrl)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold transition border border-slate-700"
                 >
-                  <div className="flex items-center gap-2.5">
-                    {isDelivered ? (
-                      <CheckCircle2 className="w-5 h-5 text-blue-400 shrink-0" />
-                    ) : (
-                      <Clock className="w-5 h-5 text-emerald-400 animate-pulse shrink-0" />
-                    )}
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider">
-                        {isDelivered ? 'Encomenda Entregue' : 'Disponível na Portaria'}
-                      </h3>
-                      <p className="text-[11px] opacity-80 mt-0.5">
-                        {isDelivered
-                          ? `Retirada por ${pkg.delivered_to_name || 'morador'} em ${deliveredDate}`
-                          : 'Apresente o QR Code ou código abaixo ao porteiro'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                  <Eye className="w-4 h-4 text-emerald-400" />
+                  <span>Ver Foto da Etiqueta da Encomenda</span>
+                </button>
+              )}
 
-                {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
-                <div className="relative bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 overflow-hidden">
-                  <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+              {isDelivered && signatureUrl && (
+                <button
+                  type="button"
+                  onClick={() => setModalImage(signatureUrl)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-xl font-semibold transition border border-slate-700"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Ver Assinatura Digital de Entrega</span>
+                </button>
+              )}
+            </div>
 
-                  <div className="transition-all duration-700 ease-out space-y-5">
-                    {/* QR Code Container */}
-                    <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
-                      <QRCodeSVG
-                        value={pkg.qr_token || pkg.pickup_code}
-                        size={190}
-                        level="H"
-                        includeMargin={false}
-                        className="mx-auto"
-                      />
-                    </div>
-
-                    {/* Código Numérico de 4 Dígitos */}
-                    <div className="space-y-1.5">
-                      <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
-                        Código de Retirada
-                      </span>
-                      <div className="flex items-center justify-center gap-3">
-                        <div className="bg-slate-950 border border-emerald-500/40 px-5 py-2 rounded-2xl shadow-inner inline-flex items-center gap-2">
-                          <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-emerald-400">
-                            {pkg.pickup_code}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleCopyCode}
-                          title="Copiar Código"
-                          className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl transition active:scale-95 flex items-center justify-center"
-                        >
-                          {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
-                        </button>
-                      </div>
-                      {copied && (
-                        <p className="text-[11px] font-semibold text-emerald-400 animate-fade-in">
-                          Código copiado para a área de transferência!
-                        </p>
-                      )}
-                    </div>
-
-                    <p className="text-xs text-slate-400 px-4 leading-relaxed">
-                      💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
-                    </p>
-
-                    <div className="pt-1">
-                      <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold shadow-sm">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>Confirmação enviada para a Portaria</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* DETALHES DA ENCOMENDA */}
-                <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3.5 text-xs text-slate-300">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-emerald-400" />
-                    Dados de Entrega
-                  </h4>
-
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                      <span className="text-slate-500 block text-[10px] uppercase font-bold">Unidade</span>
-                      <span className="font-bold text-slate-100 text-sm mt-0.5 block">
-                        {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Unidade'}
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                      <span className="text-slate-500 block text-[10px] uppercase font-bold">Remetente</span>
-                      <span className="font-bold text-slate-100 text-sm mt-0.5 block truncate">
-                        {pkg.carrier}
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                      <span className="text-slate-500 block text-[10px] uppercase font-bold">Destinatário</span>
-                      <span className="font-semibold text-slate-200 mt-0.5 block truncate">
-                        {pkg.recipient_name}
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                      <span className="text-slate-500 block text-[10px] uppercase font-bold">Recebido Em</span>
-                      <span className="font-semibold text-slate-200 mt-0.5 block">
-                        {formattedDate}
-                      </span>
-                    </div>
-                  </div>
-
-                  {pkg.tracking_code && (
-                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 flex items-center justify-between">
-                      <div>
-                        <span className="text-slate-500 block text-[10px] uppercase font-bold">Rastreio / NF</span>
-                        <span className="font-mono text-slate-200 font-semibold">{pkg.tracking_code}</span>
-                      </div>
-                      <Truck className="w-4 h-4 text-slate-500" />
-                    </div>
-                  )}
-
-                  {/* Botão de Ver Foto da Etiqueta */}
-                  {labelUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setModalImage(labelUrl)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold transition border border-slate-700"
-                    >
-                      <Eye className="w-4 h-4 text-emerald-400" />
-                      <span>Ver Foto da Etiqueta da Encomenda</span>
-                    </button>
-                  )}
-
-                  {isDelivered && signatureUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setModalImage(signatureUrl)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-xl font-semibold transition border border-slate-700"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <span>Ver Assinatura Digital de Entrega</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Rodapé Informativo */}
-                <div className="text-center py-4 text-[11px] text-slate-500">
-                  Sistema CondoBox • Portaria Inteligente
-                </div>
-              </div>
-            )}
-          </>
+            {/* Rodapé Informativo */}
+            <div className="text-center py-4 text-[11px] text-slate-500">
+              Sistema CondoBox • Portaria Inteligente
+            </div>
+          </div>
         )}
       </div>
 
