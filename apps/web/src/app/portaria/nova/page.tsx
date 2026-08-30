@@ -126,28 +126,31 @@ export default function NovaEncomendaPage() {
         .select('id, status')
         .in('id', pendingIds);
 
-      // 2. Verifica tabela notifications_log (status SENT ou DELIVERED)
+      // 2. Verifica tabela notifications_log (status SENT, DELIVERED ou FAILED)
       const { data: logs } = await supabase
         .from('notifications_log')
         .select('package_id, status')
         .in('package_id', pendingIds)
-        .in('status', ['SENT', 'DELIVERED']);
+        .in('status', ['SENT', 'DELIVERED', 'FAILED']);
 
-      const notifiedPkgIds = new Set<string>();
+      const notifiedPkgIds = new Map<string, 'SENT' | 'FAILED'>();
+      
       (pkgs || []).forEach((p) => {
-        if (p.status === 'NOTIFIED' || p.status === 'DELIVERED') notifiedPkgIds.add(p.id);
+        if (p.status === 'NOTIFIED' || p.status === 'DELIVERED') notifiedPkgIds.set(p.id, 'SENT');
       });
+      
       (logs || []).forEach((l) => {
-        if (l.status === 'SENT' || l.status === 'DELIVERED') notifiedPkgIds.add(l.package_id);
+        if (l.status === 'SENT' || l.status === 'DELIVERED') notifiedPkgIds.set(l.package_id, 'SENT');
+        else if (l.status === 'FAILED' && !notifiedPkgIds.has(l.package_id)) notifiedPkgIds.set(l.package_id, 'FAILED');
       });
 
       if (notifiedPkgIds.size > 0) {
         setRecentSaved((prev) =>
-          prev.map((p) => (notifiedPkgIds.has(p.id) ? { ...p, whatsappStatus: 'SENT' } : p))
+          prev.map((p) => (notifiedPkgIds.has(p.id) ? { ...p, whatsappStatus: notifiedPkgIds.get(p.id)! } : p))
         );
 
         if (lastNotificationToast && notifiedPkgIds.has(lastNotificationToast.id)) {
-          setLastNotificationToast((prev) => (prev ? { ...prev, whatsappStatus: 'SENT' } : null));
+          setLastNotificationToast((prev) => (prev ? { ...prev, whatsappStatus: notifiedPkgIds.get(prev.id)! } : null));
         }
       }
     };
@@ -178,13 +181,16 @@ export default function NovaEncomendaPage() {
         { event: 'INSERT', schema: 'public', table: 'notifications_log' },
         (payload) => {
           const newLog = payload.new as any;
-          if (newLog && (newLog.status === 'SENT' || newLog.status === 'DELIVERED')) {
-            setRecentSaved((prev) =>
-              prev.map((p) => (p.id === newLog.package_id ? { ...p, whatsappStatus: 'SENT' } : p))
-            );
-            setLastNotificationToast((prev) =>
-              prev && prev.id === newLog.package_id ? { ...prev, whatsappStatus: 'SENT' } : prev
-            );
+          if (newLog) {
+            const status = (newLog.status === 'SENT' || newLog.status === 'DELIVERED') ? 'SENT' : (newLog.status === 'FAILED' ? 'FAILED' : null);
+            if (status) {
+              setRecentSaved((prev) =>
+                prev.map((p) => (p.id === newLog.package_id ? { ...p, whatsappStatus: status } : p))
+              );
+              setLastNotificationToast((prev) =>
+                prev && prev.id === newLog.package_id ? { ...prev, whatsappStatus: status } : prev
+              );
+            }
           }
         }
       )
@@ -686,6 +692,10 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
               <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
                 <Phone className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp Enviado
               </span>
+            ) : lastNotificationToast.whatsappStatus === 'FAILED' ? (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 text-xs font-bold border border-rose-500/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Erro ao Enviar
+              </span>
             ) : (
               <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 text-xs font-bold border border-amber-500/30 animate-pulse">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" /> Disparando WhatsApp...
@@ -756,6 +766,10 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
                       {pkg.whatsappStatus === 'SENT' ? (
                         <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-xl">
                           <Check className="w-3.5 h-3.5" /> WhatsApp Enviado
+                        </span>
+                      ) : pkg.whatsappStatus === 'FAILED' ? (
+                        <span className="flex items-center gap-1 text-[11px] font-semibold text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2.5 py-1 rounded-xl">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Erro ao Enviar
                         </span>
                       ) : (
                         <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-xl animate-pulse">
