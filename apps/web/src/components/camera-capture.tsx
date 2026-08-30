@@ -371,10 +371,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               disablePictureInPicture
               // @ts-ignore
               webkit-playsinline="true"
-              x5-playsinline="true"
-              style={{
-                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
-              }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
