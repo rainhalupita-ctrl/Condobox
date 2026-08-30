@@ -85,12 +85,16 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
   const stopCamera = () => {
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach(track => {
+        track.stop();
+        track.enabled = false;
+      });
       setStream(null);
     }
   };
 
   const switchCamera = () => {
+    stopCamera();
     const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextFacing);
     if (typeof window !== 'undefined') {
@@ -116,7 +120,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const previewUrl = URL.createObjectURL(blob);
         setCapturedBlob(blob);
         setCapturedPreview(previewUrl);
-        stopCamera();
+        stopCamera(); // Desliga o sensor da câmera no celular imediatamente
       }
     }, 'image/jpeg', 0.92);
   };

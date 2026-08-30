@@ -21,10 +21,11 @@ import Link from 'next/link';
 
 export default function NovaEncomendaPage() {
   const router = useRouter();
-  const [step, setStep] = useState<'CAPTURE' | 'PROCESSING' | 'CONFIRM'>('CAPTURE');
+  const [step, setStep] = useState<'SELECT' | 'CAPTURE' | 'PROCESSING' | 'CONFIRM'>('SELECT');
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [ocrData, setOcrData] = useState<OCRResponse | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Dados do formulário
   const [units, setUnits] = useState<Unit[]>([]);
@@ -169,8 +170,58 @@ export default function NovaEncomendaPage() {
     }
   };
 
+  const compressImage = (fileOrBlob: Blob | File): Promise<Blob> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(fileOrBlob);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const maxDim = 1280;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((b) => {
+            resolve(b || fileOrBlob);
+          }, 'image/jpeg', 0.85);
+        } else {
+          resolve(fileOrBlob);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(fileOrBlob);
+      };
+      img.src = url;
+    });
+  };
+
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const compressed = await compressImage(file);
+      const previewUrl = URL.createObjectURL(compressed);
+      handleCapturePhoto(compressed, previewUrl);
+    }
+  };
+
   const resetForm = () => {
-    setStep('CAPTURE');
+    setStep('SELECT');
     setCapturedBlob(null);
     setCapturedPreview(null);
     setOcrData(null);
@@ -198,6 +249,14 @@ export default function NovaEncomendaPage() {
           Recepção de Encomendas
         </span>
       </div>
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        onChange={handleGalleryUpload}
+        className="hidden"
+      />
 
       {/* Sucesso após cadastro */}
       {savedSuccess ? (
@@ -268,9 +327,70 @@ export default function NovaEncomendaPage() {
             </button>
           </div>
         </div>
+      ) : step === 'SELECT' ? (
+        /* Tela Inicial: Escolha do Método de Cadastro */
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-6 animate-fade-in text-center">
+          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+            <Sparkles className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2 max-w-md mx-auto">
+            <h2 className="text-2xl font-black text-slate-100">Como deseja registrar a encomenda?</h2>
+            <p className="text-sm text-slate-400">
+              Fotografe a etiqueta para leitura automática com IA ou preencha manualmente.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 max-w-2xl mx-auto">
+            {/* Opção 1: Câmera com IA */}
+            <button
+              type="button"
+              onClick={() => setStep('CAPTURE')}
+              className="flex flex-col items-center justify-center gap-3 p-6 bg-gradient-to-b from-emerald-900/40 to-slate-900 border-2 border-emerald-500/50 hover:border-emerald-400 rounded-2xl transition hover:scale-[1.02] shadow-xl group text-left"
+            >
+              <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-950">
+                <Camera className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <span className="font-bold text-slate-100 text-sm block">Escanear Câmera</span>
+                <span className="text-[11px] text-emerald-400 font-medium">Reconhecimento por IA</span>
+              </div>
+            </button>
+
+            {/* Opção 2: Galeria */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex flex-col items-center justify-center gap-3 p-6 bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-2xl transition hover:scale-[1.02] shadow-lg group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-200">
+                <Package className="w-6 h-6 text-slate-300" />
+              </div>
+              <div className="text-center">
+                <span className="font-bold text-slate-200 text-sm block">Escolher Foto</span>
+                <span className="text-[11px] text-slate-500">Da Galeria / Arquivo</span>
+              </div>
+            </button>
+
+            {/* Opção 3: Manual */}
+            <button
+              type="button"
+              onClick={() => setStep('CONFIRM')}
+              className="flex flex-col items-center justify-center gap-3 p-6 bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-2xl transition hover:scale-[1.02] shadow-lg group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-200">
+                <Send className="w-6 h-6 text-slate-300" />
+              </div>
+              <div className="text-center">
+                <span className="font-bold text-slate-200 text-sm block">Digitar Manual</span>
+                <span className="text-[11px] text-slate-500">Sem tirar foto</span>
+              </div>
+            </button>
+          </div>
+        </div>
       ) : step === 'CAPTURE' ? (
         /* Passo 1: Captura da Foto */
-        <CameraCapture onCapture={handleCapturePhoto} onCancel={() => router.push('/portaria')} />
+        <CameraCapture onCapture={handleCapturePhoto} onCancel={() => setStep('SELECT')} />
       ) : step === 'PROCESSING' ? (
         /* Passo 2: Processamento OCR com Gemini */
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-6 shadow-2xl">
