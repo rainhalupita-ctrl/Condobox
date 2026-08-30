@@ -108,43 +108,92 @@ export default function NovaEncomendaPage() {
     return () => window.removeEventListener('ocr-enriched', handler);
   }, []);
 
-  // Monitora o status das notificações de WhatsApp em segundo plano a cada 2.5s
+  // Monitora o status das notificações de WhatsApp em segundo plano a cada 2s + Realtime
   useEffect(() => {
     if (recentSaved.length === 0) return;
-    const interval = setInterval(async () => {
-      const supabase = createClient();
+    const supabase = createClient();
+
+    const checkStatus = async () => {
       const pendingIds = recentSaved
         .filter((p) => p.whatsappStatus === 'QUEUED' || p.whatsappStatus === 'SENDING')
         .map((p) => p.id);
 
       if (pendingIds.length === 0) return;
 
-      const { data } = await supabase
+      // 1. Verifica tabela packages (status NOTIFIED ou DELIVERED)
+      const { data: pkgs } = await supabase
         .from('packages')
         .select('id, status')
         .in('id', pendingIds);
 
-      if (data && data.length > 0) {
+      // 2. Verifica tabela notifications_log (status SENT ou DELIVERED)
+      const { data: logs } = await supabase
+        .from('notifications_log')
+        .select('package_id, status')
+        .in('package_id', pendingIds)
+        .in('status', ['SENT', 'DELIVERED']);
+
+      const notifiedPkgIds = new Set<string>();
+      (pkgs || []).forEach((p) => {
+        if (p.status === 'NOTIFIED' || p.status === 'DELIVERED') notifiedPkgIds.add(p.id);
+      });
+      (logs || []).forEach((l) => {
+        if (l.status === 'SENT' || l.status === 'DELIVERED') notifiedPkgIds.add(l.package_id);
+      });
+
+      if (notifiedPkgIds.size > 0) {
         setRecentSaved((prev) =>
-          prev.map((p) => {
-            const match = data.find((d) => d.id === p.id);
-            if (match && (match.status === 'NOTIFIED' || match.status === 'DELIVERED')) {
-              return { ...p, whatsappStatus: 'SENT' };
-            }
-            return p;
-          })
+          prev.map((p) => (notifiedPkgIds.has(p.id) ? { ...p, whatsappStatus: 'SENT' } : p))
         );
 
-        if (lastNotificationToast && pendingIds.includes(lastNotificationToast.id)) {
-          const match = data.find((d) => d.id === lastNotificationToast.id);
-          if (match && (match.status === 'NOTIFIED' || match.status === 'DELIVERED')) {
-            setLastNotificationToast((prev) => (prev ? { ...prev, whatsappStatus: 'SENT' } : null));
-          }
+        if (lastNotificationToast && notifiedPkgIds.has(lastNotificationToast.id)) {
+          setLastNotificationToast((prev) => (prev ? { ...prev, whatsappStatus: 'SENT' } : null));
         }
       }
-    }, 2500);
+    };
 
-    return () => clearInterval(interval);
+    checkStatus();
+    const interval = setInterval(checkStatus, 2000);
+
+    // Canal Realtime para atualização instantânea sem esperar o polling
+    const channel = supabase
+      .channel('nova-packages-notif-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'packages' },
+        (payload) => {
+          const updated = payload.new as any;
+          if (updated && (updated.status === 'NOTIFIED' || updated.status === 'DELIVERED')) {
+            setRecentSaved((prev) =>
+              prev.map((p) => (p.id === updated.id ? { ...p, whatsappStatus: 'SENT' } : p))
+            );
+            setLastNotificationToast((prev) =>
+              prev && prev.id === updated.id ? { ...prev, whatsappStatus: 'SENT' } : prev
+            );
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications_log' },
+        (payload) => {
+          const newLog = payload.new as any;
+          if (newLog && (newLog.status === 'SENT' || newLog.status === 'DELIVERED')) {
+            setRecentSaved((prev) =>
+              prev.map((p) => (p.id === newLog.package_id ? { ...p, whatsappStatus: 'SENT' } : p))
+            );
+            setLastNotificationToast((prev) =>
+              prev && prev.id === newLog.package_id ? { ...prev, whatsappStatus: 'SENT' } : prev
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [recentSaved, lastNotificationToast]);
 
   const loadUnitsAndResidents = async () => {

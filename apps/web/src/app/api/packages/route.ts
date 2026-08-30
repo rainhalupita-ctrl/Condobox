@@ -161,16 +161,16 @@ export async function POST(request: NextRequest) {
           whatsappError = e.message;
         }
 
-        // Registra log
-        await supabase.from('notification_logs').insert({
+        // Registra log na tabela notifications_log
+        await supabase.from('notifications_log').insert({
           package_id: newPackage.id,
           resident_id: newPackage.resident_id || null,
           channel: 'WHATSAPP',
           recipient_phone: cleanPhone,
-          message_body: messageText,
+          message_content: messageText,
           status: whatsappSent ? 'SENT' : 'FAILED',
-          error_details: whatsappError || null,
-          sent_at: new Date().toISOString()
+          error_message: whatsappError || null,
+          sent_at: whatsappSent ? new Date().toISOString() : null
         });
       }
     }
