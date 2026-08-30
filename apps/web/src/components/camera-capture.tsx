@@ -131,16 +131,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Se for câmera frontal (selfie), espelha como um espelho de smartphone
-    if (facingMode === 'user') {
-      ctx.save();
-      ctx.translate(width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0, width, height);
-      ctx.restore();
-    } else {
-      ctx.drawImage(video, 0, 0, width, height);
-    }
+    ctx.drawImage(video, 0, 0, width, height);
 
     canvas.toBlob(
       (blob) => {
@@ -191,15 +182,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(null);
 
-        if (facingMode === 'user') {
-          ctx.save();
-          ctx.translate(width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, 0, 0, width, height);
-          ctx.restore();
-        } else {
-          ctx.drawImage(video, 0, 0, width, height);
-        }
+        ctx.drawImage(video, 0, 0, width, height);
 
         // Checagem de brilho — descarta frames pretos/cobertos
         let brightnessSum = 0;
@@ -386,10 +369,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               // @ts-ignore
               webkit-playsinline="true"
               x5-playsinline="true"
-              style={{
-                // Na câmera frontal (selfie) espelha naturalmente; na traseira fica normal para leitura de texto
-                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
-              }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
