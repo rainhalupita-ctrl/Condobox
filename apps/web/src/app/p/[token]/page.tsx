@@ -51,6 +51,7 @@ export default function PublicPackagePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [isSendingConfirm, setIsSendingConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
 
@@ -60,12 +61,13 @@ export default function PublicPackagePage() {
     }
   }, [pkg]);
 
-  const handleUnlockAndSendWhatsApp = () => {
+  const handleUnlockAndSendWhatsApp = async () => {
+    setIsSendingConfirm(true);
+    try {
+      await fetch(`/api/package/${token}`, { method: 'POST' });
+    } catch {}
     setUnlocked(true);
-    fetch(`/api/package/${token}`, { method: 'POST' }).catch(() => {});
-    const portariaPhone = '557398419901';
-    const waText = encodeURIComponent(`Estou ciente da encomenda ${pkg?.pickup_code}`);
-    window.open(`https://wa.me/${portariaPhone}?text=${waText}`, '_blank');
+    setIsSendingConfirm(false);
   };
 
   useEffect(() => {
@@ -200,8 +202,8 @@ export default function PublicPackagePage() {
             <div className="relative bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 overflow-hidden">
               <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-              {/* Conteúdo do QR Code e Código (com ou sem desfoque gaussiano) */}
-              <div className={`transition-all duration-700 ease-out space-y-5 ${!unlocked ? 'filter blur-md select-none pointer-events-none opacity-40 scale-[0.98]' : 'filter-none opacity-100 scale-100'}`}>
+              {/* Conteúdo do QR Code e Código (com desfoque gaussiano dinâmico) */}
+              <div className={`transition-all duration-700 ease-out space-y-5 ${!unlocked ? 'filter blur-xl select-none pointer-events-none opacity-25 scale-95' : 'filter-none opacity-100 scale-100'}`}>
                 {/* QR Code Container */}
                 <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
                   <QRCodeSVG
@@ -245,22 +247,19 @@ export default function PublicPackagePage() {
                   💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
                 </p>
 
-                {!isDelivered && (
-                  <a
-                    href={`https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 transition active:scale-98"
-                  >
-                    <MessageSquare className="w-4 h-4 text-emerald-400" />
-                    Enviar confirmação novamente no WhatsApp
-                  </a>
+                {unlocked && (
+                  <div className="pt-1">
+                    <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold shadow-sm">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Confirmação enviada para a Portaria</span>
+                    </div>
+                  </div>
                 )}
               </div>
 
               {/* OVERLAY GLASSMORPHIC COM BOTÃO SE ESTIVER BLOQUEADO (DESFOQUE GAUSSIANO) */}
               {!unlocked && (
-                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm animate-fade-in space-y-4 text-center">
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-slate-950/85 backdrop-blur-md animate-fade-in space-y-4 text-center">
                   <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-3xl flex items-center justify-center shadow-xl shadow-emerald-950/80 animate-pulse">
                     <Lock className="w-8 h-8 text-emerald-400" />
                   </div>
@@ -277,10 +276,20 @@ export default function PublicPackagePage() {
                   <button
                     type="button"
                     onClick={handleUnlockAndSendWhatsApp}
-                    className="w-full max-w-xs py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 shadow-2xl shadow-emerald-950 transition active:scale-98 group cursor-pointer"
+                    disabled={isSendingConfirm}
+                    className="w-full max-w-xs py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 shadow-2xl shadow-emerald-950 transition active:scale-98 group cursor-pointer disabled:opacity-75"
                   >
-                    <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition shrink-0" />
-                    <span>Enviar Confirmação e Ver Código</span>
+                    {isSendingConfirm ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 text-emerald-100 animate-spin shrink-0" />
+                        <span>Enviando Confirmação...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition shrink-0" />
+                        <span>Enviar Confirmação e Ver Código</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}

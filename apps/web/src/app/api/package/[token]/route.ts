@@ -42,53 +42,7 @@ export async function GET(
       );
     }
 
-    // Se o morador abriu o link e ainda não estava marcado como CIENTE
-    if (!pkg.notes?.includes('CIENTE') && pkg.status !== 'DELIVERED') {
-      const nowIso = new Date().toISOString();
-      const updatedNotes = pkg.notes ? `${pkg.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`;
-
-      // Atualiza no Supabase
-      try {
-        await supabase
-          .from('packages')
-          .update({ notes: updatedNotes, status: pkg.status === 'RECEIVED' ? 'NOTIFIED' : pkg.status })
-          .eq('id', pkg.id);
-      } catch {}
-
-      // Envia confirmação pelo WhatsApp
-      let phone = pkg.resident?.phone;
-      if (phone) {
-        let cleanPhone = phone.replace(/\D/g, '');
-        if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10) cleanPhone = `55${cleanPhone}`;
-
-        const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-        const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
-        const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
-
-        const name = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador';
-        const confirmMsg = `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-          `Olá, *${name}*!\n\n` +
-          `Registramos que você acessou os dados da sua encomenda (*${pkg.carrier}*).\n\n` +
-          `🏢 A portaria já sabe que você está ciente da chegada!\n\n` +
-          `🔑 Apresente o código *${pkg.pickup_code}* ou o QR Code ao retirar.`;
-
-        fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': evolutionKey
-          },
-          body: JSON.stringify({
-            number: cleanPhone,
-            text: confirmMsg
-          }),
-          signal: AbortSignal.timeout(6000)
-        }).catch(() => {});
-      }
-
-      pkg.notes = updatedNotes;
-    }
-
+    // Retorna os dados da encomenda sem marcar automaticamente como ciente
     return NextResponse.json({
       package: {
         id: pkg.id,
@@ -133,7 +87,10 @@ export async function POST(
 
   try {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
-    let query = supabase.from('packages').select('*');
+    let query = supabase
+      .from('packages')
+      .select('*, unit:units(block, unit_number), resident:residents(name, phone)');
+
     if (isUUID) {
       query = query.eq('id', token);
     } else {
@@ -158,7 +115,44 @@ export async function POST(
       })
       .eq('id', pkg.id);
 
-    return NextResponse.json({ success: true, notes: updatedNotes });
+    // Envia mensagem direta pelo Evolution API
+    let phone = pkg.resident?.phone;
+    if (phone) {
+      let cleanPhone = phone.replace(/\D/g, '');
+      if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10) cleanPhone = `55${cleanPhone}`;
+
+      const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
+      const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
+      const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
+
+      const name = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador';
+      const confirmMsg = `👍 *CONFIRMAÇÃO REGISTRADA COM SUCESSO!*\n\n` +
+        `Olá, *${name}*!\n\n` +
+        `Registramos sua confirmação de recebimento da encomenda da *${pkg.carrier}*.\n\n` +
+        `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+        `🏢 Apresente este código ou o QR Code na portaria ao retirar.`;
+
+      fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': evolutionKey
+        },
+        body: JSON.stringify({
+          number: cleanPhone,
+          text: confirmMsg
+        }),
+        signal: AbortSignal.timeout(6000)
+      }).catch((err) => {
+        console.warn('[API Package Confirm] Falha ao disparar mensagem via Evolution API:', err.message);
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      notes: updatedNotes,
+      pickup_code: pkg.pickup_code
+    });
   } catch (err: any) {
     return NextResponse.json({ error: 'Erro ao registrar confirmação' }, { status: 500 });
   }
