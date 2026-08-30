@@ -28,9 +28,12 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       const savedFacing = localStorage.getItem('condobox_camera_facing');
       if (savedFacing === 'user' || savedFacing === 'environment') {
         setFacingMode(savedFacing);
+      } else {
+        setFacingMode(isMobile ? 'environment' : 'user');
       }
     }
   }, []);
@@ -369,6 +372,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               // @ts-ignore
               webkit-playsinline="true"
               x5-playsinline="true"
+              style={{
+                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
+              }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
