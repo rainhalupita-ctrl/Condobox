@@ -45,7 +45,16 @@ export class LocalApiClient {
 
   public static getImageUrl(path?: string | null): string {
     if (!path) return '';
-    if (path.startsWith('http') || path.startsWith('data:')) return path;
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path;
+
+    // Se for caminho relativo gravado no Supabase Storage ('labels/...' ou 'signatures/...')
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (supabaseUrl && (path.startsWith('labels/') || path.startsWith('signatures/'))) {
+      const bucket = path.startsWith('labels/') ? 'labels' : 'signatures';
+      const cleanPath = path.replace(/^(labels|signatures)\//, '');
+      return `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${cleanPath}`;
+    }
+
     const base = this.getBaseUrl() || 'http://localhost:3001';
     return `${base}/images/${path}`;
   }

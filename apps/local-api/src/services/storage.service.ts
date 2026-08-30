@@ -3,6 +3,7 @@ import fsSync from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ABSOLUTE_STORAGE_DIR, env } from '../config/env.js';
+import { supabaseService } from './supabase.service.js';
 
 export class StorageService {
   private labelsDir: string;
@@ -41,7 +42,34 @@ export class StorageService {
 
     await fs.writeFile(fullPath, buffer);
 
-    const url = `${env.LOCAL_BASE_URL}/images/${relativePath}`;
+    let url = `${env.LOCAL_BASE_URL}/images/${relativePath}`;
+
+    // Faz upload espelhado para o Supabase Storage (bucket 'labels') para acesso público global
+    try {
+      if (supabaseService.isConfigured()) {
+        const { data, error } = await supabaseService.getClient().storage
+          .from('labels')
+          .upload(`${datePrefix}/${filename}`, buffer, {
+            contentType: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
+            upsert: true
+          });
+
+        if (!error && data) {
+          const { data: pubData } = supabaseService.getClient().storage.from('labels').getPublicUrl(`${datePrefix}/${filename}`);
+          if (pubData?.publicUrl) {
+            url = pubData.publicUrl;
+            return {
+              relativePath: pubData.publicUrl,
+              fullPath,
+              url: pubData.publicUrl,
+              filename
+            };
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[StorageService] Falha ao espelhar imagem no Supabase Storage:', e.message);
+    }
 
     return {
       relativePath,
@@ -77,7 +105,34 @@ export class StorageService {
 
     await fs.writeFile(fullPath, buffer);
 
-    const url = `${env.LOCAL_BASE_URL}/images/${relativePath}`;
+    let url = `${env.LOCAL_BASE_URL}/images/${relativePath}`;
+
+    // Faz upload espelhado para o Supabase Storage (bucket 'signatures') para acesso público global
+    try {
+      if (supabaseService.isConfigured()) {
+        const { data: uploadData, error } = await supabaseService.getClient().storage
+          .from('signatures')
+          .upload(`${datePrefix}/${filename}`, buffer, {
+            contentType: 'image/png',
+            upsert: true
+          });
+
+        if (!error && uploadData) {
+          const { data: pubData } = supabaseService.getClient().storage.from('signatures').getPublicUrl(`${datePrefix}/${filename}`);
+          if (pubData?.publicUrl) {
+            url = pubData.publicUrl;
+            return {
+              relativePath: pubData.publicUrl,
+              fullPath,
+              url: pubData.publicUrl,
+              filename
+            };
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[StorageService] Falha ao espelhar assinatura no Supabase Storage:', e.message);
+    }
 
     return {
       relativePath,

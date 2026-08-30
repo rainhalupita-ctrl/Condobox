@@ -102,26 +102,58 @@ export async function POST(request: NextRequest) {
         const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
         const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
         const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
+        const labelImageUrl = labelImagePath && (labelImagePath.startsWith('http://') || labelImagePath.startsWith('https://'))
+          ? labelImagePath
+          : undefined;
 
         try {
-          const sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': evolutionKey
-            },
-            body: JSON.stringify({
-              number: cleanPhone,
-              text: messageText
-            }),
-            signal: AbortSignal.timeout(8000)
-          });
+          let sendRes: Response | null = null;
 
-          if (sendRes.ok) {
+          // 1. Tenta enviar como mensagem com Imagem (mediaMessage)
+          if (labelImageUrl) {
+            try {
+              sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': evolutionKey
+                },
+                body: JSON.stringify({
+                  number: cleanPhone,
+                  mediaMessage: {
+                    mediatype: 'image',
+                    caption: messageText,
+                    media: labelImageUrl
+                  }
+                }),
+                signal: AbortSignal.timeout(12000)
+              });
+            } catch (mediaErr) {
+              console.warn('[WhatsApp] Falha no sendMedia, tentando sendText fallback:', mediaErr);
+            }
+          }
+
+          // 2. Se não tinha imagem ou se sendMedia falhou, envia mensagem de texto padrão
+          if (!sendRes || !sendRes.ok) {
+            sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': evolutionKey
+              },
+              body: JSON.stringify({
+                number: cleanPhone,
+                text: messageText
+              }),
+              signal: AbortSignal.timeout(8000)
+            });
+          }
+
+          if (sendRes && sendRes.ok) {
             whatsappSent = true;
             await supabase.from('packages').update({ status: 'NOTIFIED' }).eq('id', newPackage.id);
             newPackage.status = 'NOTIFIED';
-          } else {
+          } else if (sendRes) {
             const errData = await sendRes.json().catch(() => ({}));
             whatsappError = errData.response?.message || 'Falha no envio';
           }

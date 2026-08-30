@@ -278,11 +278,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Salva a imagem no Supabase Storage (bucket público 'labels') ──────────
     const filename = `label_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+    let imagePublicUrl = `data:${mimeType};base64,${base64Image}`;
+
+    try {
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('labels')
+        .upload(filename, buffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (!uploadErr && uploadData) {
+        const { data: pubData } = supabase.storage.from('labels').getPublicUrl(filename);
+        if (pubData?.publicUrl) {
+          imagePublicUrl = pubData.publicUrl;
+        }
+      } else if (uploadErr) {
+        console.warn('[OCR-UPLOAD] Erro ao salvar imagem no Supabase Storage:', uploadErr.message);
+      }
+    } catch (storageErr: any) {
+      console.warn('[OCR-UPLOAD] Exceção no Supabase Storage:', storageErr.message);
+    }
 
     return NextResponse.json({
       success: true,
-      image: { path: `labels/${filename}`, url: `data:${mimeType};base64,${base64Image}` },
+      image: { path: imagePublicUrl, url: imagePublicUrl },
       ocr: finalOcr,
       suggestedMatch: { unit: matchedUnit, resident: matchedResident },
     });

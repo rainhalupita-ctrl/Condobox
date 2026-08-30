@@ -232,7 +232,11 @@ export class WhatsAppQueueWorker {
         carrier: pkg.carrier || 'Encomenda',
         pickupCode: pkg.pickup_code,
         qrToken: pkg.qr_token,
-        labelImageUrl: pkg.label_image_path ? `http://localhost:3001/images/${pkg.label_image_path}` : undefined
+        labelImageUrl: pkg.label_image_path
+          ? (pkg.label_image_path.startsWith('http')
+              ? pkg.label_image_path
+              : `${whatsappService.getPublicWebUrl().replace(/\/$/, '')}/images/${pkg.label_image_path}`)
+          : undefined
       });
 
       if (res.success) {

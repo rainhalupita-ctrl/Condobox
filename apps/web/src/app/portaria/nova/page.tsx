@@ -355,13 +355,24 @@ export default function NovaEncomendaPage() {
         ? `NF: ${invoiceNumber}${notes ? ` | ${notes}` : ''}`
         : (notes || null);
 
+      // Se o path da imagem ainda está vazio (modo ao vivo), faz o upload agora antes de salvar
+      let labelImagePath = ocrData?.image?.path || null;
+      if (!labelImagePath && capturedBlob) {
+        try {
+          const uploadData = await LocalApiClient.uploadLabelAndOCR(capturedBlob);
+          labelImagePath = uploadData?.image?.path || null;
+        } catch (uploadErr) {
+          console.warn('[Nova] Falha no upload da imagem antes de salvar:', uploadErr);
+        }
+      }
+
       const res = await LocalApiClient.createPackage({
         unitId: selectedUnitId,
         residentId: selectedResidentId || null,
         carrier: carrier,
         trackingCode: trackingCode || null,
         recipientNameOcr: recipientNameOcr || null,
-        labelImagePath: ocrData?.image?.path || null,
+        labelImagePath,
         notes: finalNotes,
         sendWhatsApp: sendWhatsApp,
         residentPhone: customPhone || selectedRes?.phone || null,
