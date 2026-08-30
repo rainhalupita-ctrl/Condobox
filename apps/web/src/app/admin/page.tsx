@@ -27,10 +27,10 @@ import {
   QrCode,
   Send,
   Smartphone,
-  Smartphone,
   Terminal,
   FileSpreadsheet,
-  Mail
+  Mail,
+  X
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 
