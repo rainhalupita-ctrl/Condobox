@@ -19,19 +19,17 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(bytes).toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    const prompt = 'Analise esta imagem de etiqueta de encomenda. Retorne APENAS um JSON: {"block": "string ou null", "unitNumber": "string ou null", "confidence": 0.0}. Se identificar ex: A805 ou B102, unitNumber="805", block="Bloco A". REGRAS: Imagem escura/borrada/sem etiqueta retorna {"block":null,"unitNumber":null,"confidence":0}. confidence: 0.0 a 1.0. Apenas o JSON.';
+    const prompt = 'Extraia o numero do apartamento e bloco desta etiqueta. Retorne JSON {"block":"string ou null","unitNumber":"string ou null","confidence":0.9}. Se for A805 ou B102, unitNumber="805", block="Bloco A". Apenas o JSON.';
 
     const modelsToTry = [
       'gemini-3.1-flash-lite',
-      'gemini-3.5-flash',
       'gemini-3.5-flash-lite',
-      'gemini-3.6-flash',
     ];
 
     for (const modelName of modelsToTry) {
       try {
         const res = await fetch(
-          ['https://generativelanguage.googleapis.com/v1beta/models/', modelName, ':generateContent'].join(''),
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
           {
             method: 'POST',
             headers: {
@@ -50,10 +48,10 @@ export async function POST(request: NextRequest) {
               generationConfig: {
                 responseMimeType: 'application/json',
                 temperature: 0,
-                maxOutputTokens: 80,
+                maxOutputTokens: 60,
               },
             }),
-            signal: AbortSignal.timeout(4000),
+            signal: AbortSignal.timeout(8000),
           }
         );
 
@@ -75,10 +73,10 @@ export async function POST(request: NextRequest) {
           : '';
         const hasUnit = unitNumberClean.length >= 1;
         const confidence = hasUnit
-          ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.8)
+          ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.85)
           : 0;
 
-        console.log('[OCR-LIVE] OK', modelName, 'ap:', parsed.unitNumber, 'bloco:', parsed.block, 'conf:', confidence);
+        console.log('[OCR-LIVE] SUCESSO', modelName, 'ap:', parsed.unitNumber, 'bloco:', parsed.block, 'conf:', confidence);
 
         return NextResponse.json({
           block: parsed.block ? String(parsed.block).trim() : null,
@@ -86,7 +84,7 @@ export async function POST(request: NextRequest) {
           confidence,
         });
       } catch (e: any) {
-        console.warn('[OCR-LIVE]', modelName, 'erro:', e.message?.slice(0, 60));
+        console.warn('[OCR-LIVE]', modelName, 'erro:', e.message?.slice(0, 80));
       }
     }
 

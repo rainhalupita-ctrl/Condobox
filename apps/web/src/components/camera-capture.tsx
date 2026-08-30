@@ -251,7 +251,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const liveRes = await fetch('/api/ocr-live', {
           method: 'POST',
           body: fd,
-          signal: AbortSignal.timeout(4500),
+          signal: AbortSignal.timeout(9000),
         });
 
         if (!liveRes.ok || autoCaptureFiredRef.current) return;
