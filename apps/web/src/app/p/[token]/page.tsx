@@ -244,9 +244,9 @@ export default function PublicPackagePage() {
                       onClick={() => {
                         setIsUnlocked(true);
                         localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
-                        const whatsappUrl = `https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
-                        // Navega na mesma aba para evitar abas "órfãs" do WhatsApp Web.
-                        // Quando o usuário voltar (botão Voltar do celular), o localStorage garantirá que a página esteja desbloqueada.
+                        // Usa o scheme nativo do WhatsApp em vez do wa.me para evitar a página intermediária no navegador
+                        const whatsappUrl = `whatsapp://send?phone=557398419901&text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
+                        // Navega usando o scheme nativo. Isso chama o app diretamente e não cria abas órfãs.
                         window.location.href = whatsappUrl;
                       }}
                       className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50"
