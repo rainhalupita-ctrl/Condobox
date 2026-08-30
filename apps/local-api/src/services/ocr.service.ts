@@ -58,46 +58,57 @@ Responda ESTRITAMENTE em formato JSON:
 }
 `;
 
-    // Modelos ativos suportados em ordem de preferência
     const modelsToTry = [
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
-      'gemini-2.5-flash'
+      'gemini-flash-latest',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash'
     ];
 
     for (const modelName of modelsToTry) {
       try {
-        const model = this.genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: {
-            responseMimeType: 'application/json'
-          }
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': env.GEMINI_API_KEY
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: mimeType || 'image/jpeg',
+                      data: base64Image
+                    }
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json'
+            }
+          }),
+          signal: AbortSignal.timeout(30000)
         });
 
-        const result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              mimeType: mimeType || 'image/jpeg',
-              data: base64Image
-            }
-          }
-        ]);
+        if (res.ok) {
+          const data = await res.json();
+          const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const parsed = JSON.parse(responseText);
 
-        const responseText = result.response.text() || '';
-        const parsed = JSON.parse(responseText);
+          console.log(`[OCRService] ✅ Extração com sucesso usando [${modelName}]:`, parsed);
 
-        console.log(`[OCRService] ✅ Extração com sucesso usando [${modelName}]:`, parsed);
-
-        return {
-          recipientName: parsed.recipientName || null,
-          block: parsed.block || null,
-          unitNumber: parsed.unitNumber || null,
-          carrier: parsed.carrier || 'Outro',
-          trackingCode: parsed.trackingCode || null,
-          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
-        };
+          return {
+            recipientName: parsed.recipientName || null,
+            block: parsed.block || null,
+            unitNumber: parsed.unitNumber || null,
+            carrier: parsed.carrier || 'Outro',
+            trackingCode: parsed.trackingCode || null,
+            confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
+          };
+        }
       } catch (error: any) {
         console.warn(`[OCRService] ⚠️ Modelo ${modelName} falhou: ${error?.message?.slice(0, 100)}`);
       }

@@ -16,8 +16,8 @@ export async function POST(request: NextRequest) {
     const base64Image = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    // 1. OCR com Gemini Flash
-    const apiKey = process.env.GEMINI_API_KEY || 'AQ.Ab8RN6Lc1i-cKsRyHKZCYrNtJa1dckHHT-auj2uUltu0ESTfRQ';
+    // 1. OCR com Gemini Flash (suporta chave AI Studio X-goog-api-key)
+    const apiKey = process.env.GEMINI_API_KEY || '';
     let ocrResult = {
       recipientName: null as string | null,
       block: null as string | null,
@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
     };
 
     if (apiKey) {
-      const genAI = new GoogleGenerativeAI(apiKey);
       const prompt = `
 Você é um especialista em OCR e visão computacional de alta precisão para recepção de encomendas em condomínios no Brasil.
 Analise a imagem da etiqueta de entrega (Correios, Mercado Livre, Shopee, Amazon, Dell, Total Express, Jadlog, Loggi, etc.) e extraia com a máxima precisão as seguintes informações:
@@ -51,32 +50,55 @@ Responda ESTRITAMENTE em formato JSON:
 }
 `;
 
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-3.5-flash'];
+      const modelsToTry = ['gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash'];
       for (const modelName of modelsToTry) {
         try {
-          const model = genAI.getGenerativeModel({
-            model: modelName,
-            generationConfig: { responseMimeType: 'application/json' }
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-goog-api-key': apiKey
+            },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    { text: prompt },
+                    {
+                      inlineData: {
+                        mimeType,
+                        data: base64Image
+                      }
+                    }
+                  ]
+                }
+              ],
+              generationConfig: {
+                responseMimeType: 'application/json'
+              }
+            }),
+            signal: AbortSignal.timeout(15000)
           });
-          const result = await model.generateContent([
-            prompt,
-            { inlineData: { mimeType, data: base64Image } }
-          ]);
-          const responseText = result.response.text();
-          if (responseText) {
-            const parsed = JSON.parse(responseText);
-            ocrResult = {
-              recipientName: parsed.recipientName || null,
-              block: parsed.block || null,
-              unitNumber: parsed.unitNumber || null,
-              carrier: parsed.carrier || 'Outro',
-              trackingCode: parsed.trackingCode || null,
-              confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95
-            };
-            break;
+
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              const parsed = JSON.parse(text);
+              ocrResult = {
+                recipientName: parsed.recipientName || null,
+                block: parsed.block || null,
+                unitNumber: parsed.unitNumber || null,
+                carrier: parsed.carrier || 'Outro',
+                trackingCode: parsed.trackingCode || null,
+                confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95
+              };
+              console.log(`[OCR] ✅ Sucesso com [${modelName}]:`, ocrResult);
+              break;
+            }
           }
         } catch (e: any) {
-          console.warn(`[Vercel OCR] Modelo ${modelName} falhou:`, e.message?.slice(0, 80));
+          console.warn(`[OCR] Modelo ${modelName} falhou:`, e.message?.slice(0, 80));
         }
       }
     }
