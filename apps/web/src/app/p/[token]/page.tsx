@@ -51,6 +51,7 @@ export default function PublicPackagePage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const [isUnlocked, setIsUnlocked] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -184,59 +185,75 @@ export default function PublicPackagePage() {
             <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
               <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-              {/* QR Code Container */}
-              <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
-                <QRCodeSVG
-                  value={pkg.qr_token || pkg.pickup_code}
-                  size={190}
-                  level="H"
-                  includeMargin={false}
-                  className="mx-auto"
-                />
-              </div>
-
-              {/* Código Numérico de 4 Dígitos */}
-              <div className="space-y-1.5">
-                <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
-                  Código de Retirada
-                </span>
-                <div className="flex items-center justify-center gap-3">
-                  <div className="bg-slate-950 border border-emerald-500/40 px-5 py-2 rounded-2xl shadow-inner inline-flex items-center gap-2">
-                    <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-emerald-400">
-                      {pkg.pickup_code}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyCode}
-                    title="Copiar Código"
-                    className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl transition active:scale-95 flex items-center justify-center"
-                  >
-                    {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
-                  </button>
+              {/* Bloco de Conteúdo (Desfocado se não confirmado) */}
+              <div className={`transition-all duration-700 ${!isUnlocked && !isDelivered ? 'blur-md opacity-40 select-none pointer-events-none' : ''}`}>
+                {/* QR Code Container */}
+                <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
+                  <QRCodeSVG
+                    value={pkg.qr_token || pkg.pickup_code}
+                    size={190}
+                    level="H"
+                    includeMargin={false}
+                    className="mx-auto"
+                  />
                 </div>
-                {copied && (
-                  <p className="text-[11px] font-semibold text-emerald-400 animate-fade-in">
-                    Código copiado para a área de transferência!
-                  </p>
-                )}
+
+                {/* Código Numérico de 4 Dígitos */}
+                <div className="space-y-1.5 mt-5">
+                  <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
+                    Código de Retirada
+                  </span>
+                  <div className="flex items-center justify-center gap-3">
+                    <div className="bg-slate-950 border border-emerald-500/40 px-5 py-2 rounded-2xl shadow-inner inline-flex items-center gap-2">
+                      <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-emerald-400">
+                        {pkg.pickup_code}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyCode}
+                      title="Copiar Código"
+                      className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl transition active:scale-95 flex items-center justify-center"
+                    >
+                      {copied ? <Check className="w-5 h-5 text-emerald-400" /> : <Copy className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  {copied && (
+                    <p className="text-[11px] font-semibold text-emerald-400 animate-fade-in">
+                      Código copiado para a área de transferência!
+                    </p>
+                  )}
+                </div>
+
+                <p className="text-xs text-slate-400 px-4 leading-relaxed mt-5">
+                  💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
+                </p>
               </div>
 
-              <p className="text-xs text-slate-400 px-4 leading-relaxed">
-                💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
-              </p>
-
-              {!isDelivered && (
-                <a
-                  href={`https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition active:scale-98"
-                >
-                  <MessageSquare className="w-4 h-4 text-emerald-100" />
-                  Responder no WhatsApp que estou ciente (1 Clique)
-                </a>
+              {/* OVERLAY DE BLOQUEIO / BOTÃO DE CONFIRMAÇÃO */}
+              {!isUnlocked && !isDelivered && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-6 animate-fade-in">
+                  <div className="w-full">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUnlocked(true);
+                        const whatsappUrl = `https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
+                        window.open(whatsappUrl, '_blank');
+                      }}
+                      className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="w-5 h-5 text-emerald-100" />
+                        <span>Abrir WhatsApp e Confirmar</span>
+                      </div>
+                      <span className="text-[10px] font-normal text-emerald-100/80">
+                        O QR Code será liberado imediatamente
+                      </span>
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 
