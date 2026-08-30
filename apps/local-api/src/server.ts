@@ -10,6 +10,7 @@ import { signatureRoutes } from './routes/signature.routes.js';
 import { healthRoutes } from './routes/health.routes.js';
 import { whatsappRoutes } from './routes/whatsapp.routes.js';
 import { setupCleanupCron } from './services/cleanup.cron.js';
+import { whatsAppQueueWorker } from './services/whatsapp-queue.worker.js';
 
 const fastify = Fastify({
   logger: {
@@ -51,8 +52,9 @@ async function main() {
   await fastify.register(packageRoutes);
   await fastify.register(signatureRoutes);
 
-  // 4. Inicializar Cron de Limpeza de Fotos Antigas (90 dias)
+  // 4. Inicializar Cron de Limpeza e Fila de WhatsApp
   setupCleanupCron(90);
+  whatsAppQueueWorker.start();
 
   // 5. Iniciar Servidor
   try {
