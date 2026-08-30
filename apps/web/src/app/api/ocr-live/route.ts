@@ -20,9 +20,9 @@ export async function POST(request: NextRequest) {
     const prompt = 'Analise esta imagem de etiqueta de encomenda. Retorne APENAS um JSON: {"block": "string ou null", "unitNumber": "string ou null", "confidence": 0.0}. REGRAS: Imagem escura/borrada/sem etiqueta retorna {"block":null,"unitNumber":null,"confidence":0}. unitNumber: numero do apartamento/unidade. block: bloco/torre. confidence: 0.0 a 1.0, use 0 se nao encontrou unitNumber. Apenas o JSON.';
 
     const modelsToTry = [
-      'gemini-2.0-flash-lite',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash-8b',
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-3.1-flash-lite',
     ];
 
     for (const modelName of modelsToTry) {
