@@ -246,8 +246,18 @@ export default function PublicPackagePage() {
                         localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
                         // Usa o scheme nativo do WhatsApp em vez do wa.me para evitar a página intermediária no navegador
                         const whatsappUrl = `whatsapp://send?phone=557398419901&text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
-                        // Navega usando o scheme nativo. Isso chama o app diretamente e não cria abas órfãs.
-                        window.location.href = whatsappUrl;
+                        // Cria um iframe invisível para forçar a abertura do app nativo sem navegar a página atual
+                        const iframe = document.createElement('iframe');
+                        iframe.style.display = 'none';
+                        iframe.src = whatsappUrl;
+                        document.body.appendChild(iframe);
+                        
+                        // Remove o iframe depois para limpeza
+                        setTimeout(() => {
+                          if (document.body.contains(iframe)) {
+                            document.body.removeChild(iframe);
+                          }
+                        }, 2000);
                       }}
                       className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50"
                     >
