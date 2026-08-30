@@ -19,7 +19,8 @@ import {
   Sparkles,
   RefreshCw,
   QrCode,
-  MessageSquare
+  MessageSquare,
+  Lock
 } from 'lucide-react';
 
 interface PublicPackageData {
@@ -195,44 +196,12 @@ export default function PublicPackagePage() {
               </div>
             </div>
 
-            {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
-            {!unlocked ? (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
-                <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            {/* CARD PRINCIPAL DO QR CODE E CÓDIGO COM DESFOQUE GAUSSIANO */}
+            <div className="relative bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 overflow-hidden">
+              <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-                <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-3xl flex items-center justify-center mx-auto shadow-lg shadow-emerald-950">
-                  <Package className="w-8 h-8" />
-                </div>
-
-                <div>
-                  <span className="text-[11px] uppercase font-bold tracking-widest text-emerald-400">
-                    Nova Encomenda na Portaria
-                  </span>
-                  <h2 className="text-xl font-black text-slate-100 mt-1">
-                    {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Sua Unidade'}
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Remetente: <strong className="text-slate-200">{pkg.carrier}</strong>
-                  </p>
-                </div>
-
-                <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">
-                  Toque no botão abaixo para <strong>liberar seu QR Code</strong> e <strong>enviar a confirmação para a portaria</strong> via WhatsApp.
-                </p>
-
-                <button
-                  type="button"
-                  onClick={handleUnlockAndSendWhatsApp}
-                  className="w-full py-4 px-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-3 shadow-xl shadow-emerald-950/60 transition active:scale-98 group"
-                >
-                  <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition" />
-                  <span>Ver Código e Enviar Confirmação</span>
-                </button>
-              </div>
-            ) : (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden animate-fade-in">
-                <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
+              {/* Conteúdo do QR Code e Código (com ou sem desfoque gaussiano) */}
+              <div className={`transition-all duration-700 ease-out space-y-5 ${!unlocked ? 'filter blur-md select-none pointer-events-none opacity-40 scale-[0.98]' : 'filter-none opacity-100 scale-100'}`}>
                 {/* QR Code Container */}
                 <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
                   <QRCodeSVG
@@ -288,7 +257,34 @@ export default function PublicPackagePage() {
                   </a>
                 )}
               </div>
-            )}
+
+              {/* OVERLAY GLASSMORPHIC COM BOTÃO SE ESTIVER BLOQUEADO (DESFOQUE GAUSSIANO) */}
+              {!unlocked && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm animate-fade-in space-y-4 text-center">
+                  <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-3xl flex items-center justify-center shadow-xl shadow-emerald-950/80 animate-pulse">
+                    <Lock className="w-8 h-8 text-emerald-400" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-base sm:text-lg font-black text-slate-100">
+                      Código e QR Code Bloqueados
+                    </h3>
+                    <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
+                      Envie a confirmação para a portaria via WhatsApp para liberar seu código de retirada instantaneamente.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleUnlockAndSendWhatsApp}
+                    className="w-full max-w-xs py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-black flex items-center justify-center gap-2.5 shadow-2xl shadow-emerald-950 transition active:scale-98 group cursor-pointer"
+                  >
+                    <MessageSquare className="w-5 h-5 text-emerald-100 group-hover:scale-110 transition shrink-0" />
+                    <span>Enviar Confirmação e Ver Código</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* DETALHES DA ENCOMENDA */}
             <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3.5 text-xs text-slate-300">

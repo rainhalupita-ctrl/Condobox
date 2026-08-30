@@ -89,15 +89,10 @@ export async function POST(request: NextRequest) {
 
         const webBaseUrl = process.env.WEB_APP_URL || 'https://web-eight-rust-97.vercel.app';
         const pickupUrl = `${webBaseUrl}/p/${newPackage.qr_token || newPackage.pickup_code}`;
-        const portariaPhone = process.env.WHATSAPP_PORTARIA_NUMBER || '557398419901';
-        const waConfirmLink = `https://wa.me/${portariaPhone}?text=${encodeURIComponent(`Estou ciente da encomenda ${pickupCode}`)}`;
 
         const messageText = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
           `Olá, *${name}*!\n\n` +
-          `Uma encomenda da *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
-          `🔑 *Código de Retirada:* *${pickupCode}*\n\n` +
-          `👇 *Toque no link para responder que está ciente (1 clique):*\n` +
-          `${waConfirmLink}\n\n` +
+          `Uma encomenda de *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
           `📱 *Link com QR Code de retirada:*\n` +
           `${pickupUrl}\n\n` +
           `_Apresente o QR Code ou informe o código de 4 dígitos na portaria._\n\n` +
