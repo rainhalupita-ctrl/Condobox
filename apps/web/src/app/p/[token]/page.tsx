@@ -18,7 +18,8 @@ import {
   ShieldCheck,
   Sparkles,
   RefreshCw,
-  QrCode
+  QrCode,
+  MessageSquare
 } from 'lucide-react';
 
 interface PublicPackageData {
@@ -225,6 +226,18 @@ export default function PublicPackagePage() {
               <p className="text-xs text-slate-400 px-4 leading-relaxed">
                 💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
               </p>
+
+              {!isDelivered && (
+                <a
+                  href={`https://wa.me/557398419901?text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition active:scale-98"
+                >
+                  <MessageSquare className="w-4 h-4 text-emerald-100" />
+                  Responder no WhatsApp que estou ciente (1 Clique)
+                </a>
+              )}
             </div>
 
             {/* DETALHES DA ENCOMENDA */}

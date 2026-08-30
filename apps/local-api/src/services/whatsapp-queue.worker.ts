@@ -21,6 +21,9 @@ export class WhatsAppQueueWorker {
 
     console.log('🔄 [WhatsApp Worker] Inicializando fila de notificações automáticas (Chegada + Retirada)...');
 
+    // 0. Garante que o Webhook esteja ativo na Evolution API para receber respostas dos moradores
+    whatsappService.ensureWebhookConfigured().catch(() => {});
+
     // 1. Polling a cada 3 segundos como garantia máxima de entrega
     this.intervalId = setInterval(() => {
       this.processQueue();
