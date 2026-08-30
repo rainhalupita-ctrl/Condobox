@@ -67,6 +67,17 @@ export default function NovaEncomendaPage() {
       const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
       setOcrData(ocrResult);
 
+      // Garante que as unidades e moradores estejam carregados
+      let currentUnits = units;
+      let currentResidents = residents;
+      if (currentUnits.length === 0) {
+        const supabase = createClient();
+        const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
+        const { data: rData } = await supabase.from('residents').select('*').eq('active', true);
+        if (uData) { currentUnits = uData; setUnits(uData); }
+        if (rData) { currentResidents = rData; setResidents(rData); }
+      }
+
       // Preenche os campos automaticamente com a extração da IA
       if (ocrResult.ocr.carrier) setCarrier(ocrResult.ocr.carrier);
       if (ocrResult.ocr.trackingCode) setTrackingCode(ocrResult.ocr.trackingCode);
@@ -76,21 +87,21 @@ export default function NovaEncomendaPage() {
       let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
       if (!targetUnitId && ocrResult.ocr.unitNumber) {
         const cleanNum = ocrResult.ocr.unitNumber.replace(/\D/g, '');
-        const found = units.find(u => {
+        const found = currentUnits.find(u => {
           const uNum = u.unit_number.replace(/\D/g, '');
           const matchNum = uNum === cleanNum;
           if (ocrResult.ocr.block) {
             return matchNum && u.block.toLowerCase().includes(ocrResult.ocr.block.toLowerCase());
           }
           return matchNum;
-        }) || units.find(u => u.unit_number.replace(/\D/g, '') === cleanNum);
+        }) || currentUnits.find(u => u.unit_number.replace(/\D/g, '') === cleanNum);
         if (found) targetUnitId = found.id;
       }
 
       if (targetUnitId) {
         setSelectedUnitId(targetUnitId);
         // Moradores da unidade
-        const unitRes = residents.filter(r => r.unit_id === targetUnitId);
+        const unitRes = currentResidents.filter(r => r.unit_id === targetUnitId);
         if (ocrResult.suggestedMatch?.resident) {
           setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
           setCustomPhone(ocrResult.suggestedMatch.resident.phone);
