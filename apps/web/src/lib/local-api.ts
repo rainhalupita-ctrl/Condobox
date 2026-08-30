@@ -24,11 +24,6 @@ export class LocalApiClient {
     if (typeof window !== 'undefined') {
       const savedIp = localStorage.getItem('condo_local_api_url');
       if (savedIp) return savedIp.replace(/\/$/, '');
-
-      // Se estiver no Vercel ou em produção na nuvem sem API local configurada, usa as rotas internas /api
-      if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-        return '';
-      }
     }
     return (process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001').replace(/\/$/, '');
   }
