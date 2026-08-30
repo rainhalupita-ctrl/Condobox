@@ -785,19 +785,20 @@ export default function AdminPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setIsBatchImportModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 transition active:scale-95"
+                className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-950 transition active:scale-95 whitespace-nowrap"
+                title="Importar moradores em lote via Planilha Excel ou Lista"
               >
-                <FileSpreadsheet className="w-4 h-4" /> Importar em Lote (Planilha / Lista)
+                <FileSpreadsheet className="w-4 h-4" /> Importar
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsAddResidentModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition"
+                className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition whitespace-nowrap"
               >
                 <Plus className="w-4 h-4" /> Novo Morador
               </button>
