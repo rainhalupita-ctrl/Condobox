@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, X, Upload, Zap } from 'lucide-react';
+import { Camera, RefreshCw, X, Upload, Zap, FlipHorizontal } from 'lucide-react';
 import { OCRResponse } from '../lib/local-api';
 
 interface CameraCaptureProps {
@@ -15,8 +15,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   
-  // Por padrão no celular abre a câmera traseira ('environment')
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [isMirrored, setIsMirrored] = useState(false);
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -31,6 +31,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       const savedFacing = localStorage.getItem('condobox_camera_facing');
       if (savedFacing === 'user' || savedFacing === 'environment') {
         setFacingMode(savedFacing);
+      }
+      const savedMirror = localStorage.getItem('condobox_camera_mirror');
+      if (savedMirror !== null) {
+        setIsMirrored(savedMirror === 'true');
       }
     }
   }, []);
@@ -100,6 +104,14 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
   };
 
+  const toggleMirror = () => {
+    const next = !isMirrored;
+    setIsMirrored(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('condobox_camera_mirror', String(next));
+    }
+  };
+
   // Captura Manual
   const takeSnapshot = useCallback(() => {
     if (!videoRef.current || autoCaptureFiredRef.current) return;
@@ -131,7 +143,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, width, height);
+    if (isMirrored) {
+      ctx.save();
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, width, height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(video, 0, 0, width, height);
+    }
 
     canvas.toBlob(
       (blob) => {
@@ -146,7 +166,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       'image/jpeg',
       0.82
     );
-  }, [onCapture, facingMode]);
+  }, [onCapture, isMirrored]);
 
   // ─── Análise em Tempo Real em 2 Estágios ───────────────────────────────────
   // Estágio 1 (rápido): frame 600px → /api/ocr-live → identifica bloco + apto
@@ -182,7 +202,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(null);
 
-        ctx.drawImage(video, 0, 0, width, height);
+        if (isMirrored) {
+          ctx.save();
+          ctx.translate(width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(video, 0, 0, width, height);
+          ctx.restore();
+        } else {
+          ctx.drawImage(video, 0, 0, width, height);
+        }
 
         // Checagem de brilho — descarta frames pretos/cobertos
         let brightnessSum = 0;
@@ -212,7 +240,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       setIsLiveAnalyzing(true);
 
       try {
-        // Estágio 1: Resolução de 600px para garantir leitura nítida de números pequenos
+        // Estágio 1: Resolução de 600px para leitura nítida
         const fast = await captureFrame(600, 0.75);
         if (!fast || fast.avgBrightness < 15) {
           return;
@@ -295,7 +323,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     return () => {
       clearInterval(interval);
     };
-  }, [stream, capturedBlob, onCapture, facingMode]);
+  }, [stream, capturedBlob, onCapture, isMirrored]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -339,7 +367,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Visualizador da Câmera ou Preview - Padrão Natural Smartphone */}
+      {/* Visualizador da Câmera ou Preview */}
       <div className={`relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border transition-all duration-300 ${isDetected ? 'border-emerald-400 ring-4 ring-emerald-500/30' : 'border-slate-800 shadow-inner'}`}>
         {capturedPreview ? (
           <img
@@ -369,6 +397,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               // @ts-ignore
               webkit-playsinline="true"
               x5-playsinline="true"
+              style={{
+                transform: isMirrored ? 'scaleX(-1)' : 'none',
+                transition: 'transform 0.2s ease',
+              }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
@@ -434,6 +466,17 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               <Upload className="w-4 h-4" /> Galeria / Arquivo
             </button>
 
+            {/* Botão de Espelhar / Inverter Câmera */}
+            <button
+              type="button"
+              onClick={toggleMirror}
+              className={`p-3 rounded-xl transition ${isMirrored ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}
+              title={isMirrored ? 'Espelhamento Ativo (Clique para desativar)' : 'Espelhamento Desativado (Clique para ativar)'}
+            >
+              <FlipHorizontal className="w-4 h-4" />
+            </button>
+
+            {/* Alternar Câmera */}
             <button
               type="button"
               onClick={switchCamera}
