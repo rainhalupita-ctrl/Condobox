@@ -181,6 +181,25 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         ctx.drawImage(video, 0, 0, width, height);
 
+        // Checagem visual rápida: Descarta quadros pretos, escuros ou sem contraste
+        try {
+          const imgData = ctx.getImageData(0, 0, width, height);
+          const pixels = imgData.data;
+          let brightnessSum = 0;
+          let count = 0;
+          for (let i = 0; i < pixels.length; i += 40) {
+            brightnessSum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+            count++;
+          }
+          const avgBrightness = brightnessSum / count;
+          // Se a imagem for quase preta (< 30) ou branca estourada (> 245), descarta imediatamente
+          if (avgBrightness < 30 || avgBrightness > 245) {
+            isScanning = false;
+            setIsLiveAnalyzing(false);
+            return;
+          }
+        } catch {}
+
         canvas.toBlob(async (blob) => {
           if (!blob || autoCaptureFiredRef.current) {
             isScanning = false;
@@ -192,15 +211,16 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
 
             const ocr = ocrResult?.ocr;
-            // A leitura automática ao vivo SÓ deve disparar se identificar com certeza o Apartamento / Unidade
-            const hasEssentialUnit =
-              ocr &&
-              Boolean(
-                (ocr.unitNumber && ocr.unitNumber.replace(/\D/g, '').length >= 1) ||
-                ocrResult?.suggestedMatch?.unit
-              );
+            const unitNumberClean = ocr?.unitNumber ? ocr.unitNumber.replace(/\D/g, '') : '';
+            
+            // A leitura automática ao vivo SÓ deve avançar se identificar com 100% de clareza o Apartamento e/ou Unidade cadastrada
+            const hasEssentialFields =
+              Boolean(ocr) &&
+              (typeof ocr?.confidence !== 'number' || ocr.confidence >= 0.7) &&
+              unitNumberClean.length >= 1 &&
+              (Boolean(ocrResult?.suggestedMatch?.unit) || Boolean(ocr?.block));
 
-            if (hasEssentialUnit && !autoCaptureFiredRef.current) {
+            if (hasEssentialFields && !autoCaptureFiredRef.current) {
               autoCaptureFiredRef.current = true;
               setIsDetected(true);
               clearInterval(interval);

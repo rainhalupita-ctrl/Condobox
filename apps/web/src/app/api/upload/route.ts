@@ -29,16 +29,24 @@ export async function POST(request: NextRequest) {
     };
 
     if (apiKey) {
-      const prompt = `Analise a etiqueta de encomenda e extraia em JSON estrito:
+      const prompt = `Você é um leitor de OCR especializado em etiquetas de encomendas.
+Analise a imagem da etiqueta e extraia APENAS dados REAIS e LEGÍVEIS impressos na imagem em JSON estrito:
 {
-  "recipientName": string ou null (nome impresso no pacote),
-  "block": string ou null (bloco ou torre),
-  "unitNumber": string ou null (número do apartamento),
-  "carrier": string (Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro),
-  "trackingCode": string ou null (código de rastreio),
-  "invoiceNumber": string ou null (número da NF ou DANFE se houver),
+  "recipientName": string ou null,
+  "block": string ou null,
+  "unitNumber": string ou null,
+  "carrier": string,
+  "trackingCode": string ou null,
+  "invoiceNumber": string ou null,
   "confidence": number
-}`;
+}
+
+REGRAS CRÍTICAS ANTI-ALUCINAÇÃO:
+1. Se a imagem estiver preta, escura, borrada, sem texto legível ou não contiver uma etiqueta de encomenda, retorne OBRIGATORIAMENTE todos os campos como null (confidence: 0). NUNCA invente dados fictícios ou nomes de exemplo.
+2. "unitNumber": Número do apartamento/unidade residencial. Se não estiver claramente visível e legível, retorne null.
+3. "block": Identificação do bloco ou torre. Se não estiver visível, retorne null.
+4. "recipientName": Nome do morador/destinatário. NUNCA coloque nomes de empresas, transportadoras (ex: Mercado Livre, Shopee, Amazon, Correios), avisos ("FRAGIL", "DESTINATARIO", "DANFE") nem exemplos fictícios. Se ilegível, retorne null.
+5. "carrier": Transportadora identificada (Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro).`;
 
       const modelsToTry = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-3.5-flash'];
       for (const modelName of modelsToTry) {
@@ -78,16 +86,38 @@ export async function POST(request: NextRequest) {
             if (text) {
               const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
               const parsed = JSON.parse(cleanJson);
+
+              // Sanitização do nome do destinatário
+              let cleanRecipient: string | null = (parsed.recipientName || '').trim();
+              const forbiddenWords = [
+                'MERCADO LIVRE', 'SHOPEE', 'AMAZON', 'CORREIOS', 'LOGGI', 'TOTAL EXPRESS',
+                'JADLOG', 'SHEIN', 'MAGALU', 'MAGAZINE LUIZA', 'FRAGIL', 'FRÁGIL',
+                'DESTINATARIO', 'DESTINATÁRIO', 'REMETENTE', 'DANFE', 'NOTA FISCAL',
+                'NF-E', 'ENCOMENDA', 'ENTREGA', 'CONDOMINIO', 'CONDOMÍNIO', 'PORTARIA',
+                'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO', 'MARIA LUIZA DE SOUZA'
+              ];
+              if (
+                !cleanRecipient ||
+                cleanRecipient.length < 3 ||
+                forbiddenWords.some(fw => cleanRecipient!.toUpperCase() === fw || cleanRecipient!.toUpperCase().startsWith(fw))
+              ) {
+                cleanRecipient = null;
+              }
+
+              // Se não identificou apartamento, reduz a confiança
+              const hasUnit = Boolean(parsed.unitNumber && String(parsed.unitNumber).replace(/\D/g, '').length >= 1);
+              const confidence = hasUnit ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.95) : 0;
+
               ocrResult = {
-                recipientName: parsed.recipientName || null,
-                block: parsed.block || null,
-                unitNumber: parsed.unitNumber || null,
+                recipientName: cleanRecipient,
+                block: parsed.block ? String(parsed.block).trim() : null,
+                unitNumber: hasUnit ? String(parsed.unitNumber).trim() : null,
                 carrier: parsed.carrier || 'Outro',
-                trackingCode: parsed.trackingCode || null,
-                invoiceNumber: parsed.invoiceNumber || null,
-                confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95
+                trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
+                invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
+                confidence
               };
-              console.log(`[OCR] ✅ Sucesso com [${modelName}]:`, ocrResult);
+              console.log(`[OCR] ✅ Extração com [${modelName}]:`, ocrResult);
               break;
             }
           } else {
