@@ -215,8 +215,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       setIsLiveAnalyzing(true);
 
       try {
-        // Estágio 1: Resolução de 600px para leitura nítida
-        const fast = await captureFrame(600, 0.75);
+        // Estágio 1: Resolução de 800px para leitura nítida e de alta precisão
+        const fast = await captureFrame(800, 0.82);
         if (!fast || fast.avgBrightness < 15) {
           return;
         }
@@ -235,14 +235,17 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const unitClean = liveOcr?.unitNumber
           ? String(liveOcr.unitNumber).replace(/\D/g, '')
           : '';
+        const hasRecipient = typeof liveOcr?.recipientName === 'string' && liveOcr.recipientName.trim().length >= 3;
+        const hasTracking = typeof liveOcr?.trackingCode === 'string' && liveOcr.trackingCode.trim().length >= 6;
+        const hasUnit = unitClean.length >= 1;
+
         const detected =
-          unitClean.length >= 1 &&
-          typeof liveOcr.confidence === 'number' &&
-          liveOcr.confidence >= 0.5;
+          (hasUnit || hasRecipient || hasTracking) &&
+          (typeof liveOcr.confidence === 'number' ? liveOcr.confidence >= 0.5 : true);
 
         if (!detected || autoCaptureFiredRef.current) return;
 
-        // Estágio 2: Encontrou unidade/apto com sucesso!
+        // Estágio 2: Encontrou dados da etiqueta com sucesso!
         autoCaptureFiredRef.current = true;
         setIsDetected(true);
         clearInterval(interval);
@@ -258,13 +261,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         const partialOcr = {
           ocr: {
-            recipientName: null,
-            block: liveOcr.block,
-            unitNumber: liveOcr.unitNumber,
+            recipientName: liveOcr.recipientName || null,
+            block: liveOcr.block || null,
+            unitNumber: liveOcr.unitNumber || null,
             carrier: 'Outro',
-            trackingCode: null,
+            trackingCode: liveOcr.trackingCode || null,
             invoiceNumber: null,
-            confidence: liveOcr.confidence,
+            confidence: liveOcr.confidence || 0.95,
           },
           suggestedMatch: { unit: null, resident: null },
           image: { path: '', url: previewUrl },
@@ -272,19 +275,17 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         };
         onCapture(fast.blob, previewUrl, partialOcr as any);
 
-        // Enriquecimento completo em background (720px)
-        captureFrame(720, 0.82).then(async (full) => {
-          if (!full) return;
-          try {
-            const fd2 = new FormData();
-            fd2.append('file', full.blob, 'label.jpg');
-            const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd2 });
-            if (uploadRes.ok) {
-              const fullOcr = await uploadRes.json();
+        // Enriquecimento completo e match com banco em background
+        const fd2 = new FormData();
+        fd2.append('file', fast.blob, 'label.jpg');
+        fetch('/api/upload', { method: 'POST', body: fd2 })
+          .then((r) => r.ok && r.json())
+          .then((fullOcr) => {
+            if (fullOcr) {
               window.dispatchEvent(new CustomEvent('ocr-enriched', { detail: fullOcr }));
             }
-          } catch {}
-        });
+          })
+          .catch(() => {});
 
         return;
       } catch {
@@ -293,7 +294,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         isScanning = false;
         setIsLiveAnalyzing(false);
       }
-    }, 2200);
+    }, 4000);
 
     return () => {
       clearInterval(interval);

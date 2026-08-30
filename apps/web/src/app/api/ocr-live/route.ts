@@ -19,77 +19,83 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(bytes).toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    const prompt = 'Extraia o numero do apartamento e bloco desta etiqueta. Retorne JSON {"block":"string ou null","unitNumber":"string ou null","confidence":0.9}. Se for A805 ou B102, unitNumber="805", block="Bloco A". Apenas o JSON.';
+    const prompt = 'Extraia o destinatário, apartamento e bloco desta etiqueta. Retorne JSON {"recipientName":"...","block":"...","unitNumber":"...","trackingCode":"...","confidence":0.95}';
 
-    const modelsToTry = [
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash-lite',
-    ];
-
-    for (const modelName of modelsToTry) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-goog-api-key': apiKey,
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    { text: prompt },
-                    { inlineData: { mimeType, data: base64Image } },
-                  ],
-                },
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-goog-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                { inlineData: { mimeType, data: base64Image } },
               ],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0,
-                maxOutputTokens: 60,
-              },
-            }),
-            signal: AbortSignal.timeout(8000),
-          }
-        );
-
-        if (!res.ok) {
-          const errText = await res.text();
-          console.warn('[OCR-LIVE]', modelName, res.status, errText.slice(0, 100));
-          continue;
-        }
-
-        const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) continue;
-
-        const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-        const parsed = JSON.parse(cleanJson);
-
-        const unitNumberClean = parsed.unitNumber
-          ? String(parsed.unitNumber).replace(/\D/g, '')
-          : '';
-        const hasUnit = unitNumberClean.length >= 1;
-        const confidence = hasUnit
-          ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.85)
-          : 0;
-
-        console.log('[OCR-LIVE] SUCESSO', modelName, 'ap:', parsed.unitNumber, 'bloco:', parsed.block, 'conf:', confidence);
-
-        return NextResponse.json({
-          block: parsed.block ? String(parsed.block).trim() : null,
-          unitNumber: hasUnit ? String(parsed.unitNumber).trim() : null,
-          confidence,
-        });
-      } catch (e: any) {
-        console.warn('[OCR-LIVE]', modelName, 'erro:', e.message?.slice(0, 80));
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0,
+            maxOutputTokens: 120,
+          },
+        }),
+        signal: AbortSignal.timeout(12000),
       }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('[OCR-LIVE] Gemini status:', res.status, errText.slice(0, 100));
+      return NextResponse.json({ recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 });
     }
 
-    return NextResponse.json({ block: null, unitNumber: null, confidence: 0 });
-  } catch {
-    return NextResponse.json({ block: null, unitNumber: null, confidence: 0 });
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      return NextResponse.json({ recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 });
+    }
+
+    const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+    const parsed = JSON.parse(cleanJson);
+
+    let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
+    let rawBlock = parsed.block ? String(parsed.block).trim() : null;
+    const recipient = parsed.recipientName ? String(parsed.recipientName).trim() : null;
+    const tracking = parsed.trackingCode ? String(parsed.trackingCode).trim() : null;
+
+    // Se o unitNumber vier como A805 ou B102, separa bloco e número
+    const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
+    if (matchLetterNum) {
+      if (!rawBlock || rawBlock === 'null') rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
+      rawUnit = matchLetterNum[2];
+    }
+
+    const unitNumberDigits = rawUnit.replace(/\D/g, '');
+    const hasUnit = unitNumberDigits.length >= 1;
+    const hasRecipient = !!recipient && recipient.length >= 3;
+    const hasTracking = !!tracking && tracking.length >= 6;
+
+    const detected = hasUnit || hasRecipient || hasTracking;
+    const confidence = detected
+      ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.95)
+      : 0;
+
+    console.log('[OCR-LIVE] ✅ SUCESSO ap:', rawUnit, 'bloco:', rawBlock, 'morador:', recipient, 'conf:', confidence);
+
+    return NextResponse.json({
+      recipientName: recipient,
+      block: rawBlock,
+      unitNumber: hasUnit ? rawUnit : null,
+      trackingCode: tracking,
+      confidence,
+    });
+  } catch (e: any) {
+    console.warn('[OCR-LIVE] erro:', e.message?.slice(0, 80));
+    return NextResponse.json({ recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 });
   }
 }

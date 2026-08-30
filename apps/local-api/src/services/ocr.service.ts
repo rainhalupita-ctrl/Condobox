@@ -142,11 +142,16 @@ REGRAS CRÍTICAS DE PRECISÃO:
   async extractLiveOCR(imageBuffer: Buffer, mimeType: string = 'image/jpeg') {
     this.initClient();
     if (!env.GEMINI_API_KEY) {
-      return { block: null, unitNumber: null, confidence: 0 };
+      return { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
     }
 
     const base64Image = imageBuffer.toString('base64');
-    const prompt = 'Extraia o numero do apartamento e bloco desta etiqueta. Retorne JSON {"block":"string ou null","unitNumber":"string ou null","confidence":0.9}. Se for A805 ou B102, unitNumber="805", block="Bloco A". Apenas o JSON.';
+    const prompt = `Analise esta etiqueta de encomenda e extraia:
+1. recipientName: Nome do destinatario (ex: Kleber venancio).
+2. unitNumber: Numero do apartamento ou lote (ex: em A805 -> 805, 404, 102).
+3. block: Bloco ou Torre (ex: em A805 -> Bloco A, CIVIT 1).
+4. trackingCode: Codigo de rastreio (ex: ON780589007BR).
+Retorne JSON: {"recipientName":"string ou null","block":"string ou null","unitNumber":"string ou null","trackingCode":"string ou null","confidence":0.95}`;
 
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`, {
@@ -167,7 +172,7 @@ REGRAS CRÍTICAS DE PRECISÃO:
           generationConfig: {
             responseMimeType: 'application/json',
             temperature: 0,
-            maxOutputTokens: 60
+            maxOutputTokens: 120
           }
         }),
         signal: AbortSignal.timeout(8000)
@@ -178,18 +183,35 @@ REGRAS CRÍTICAS DE PRECISÃO:
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) {
           const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
-          const unitNumberClean = parsed.unitNumber ? String(parsed.unitNumber).replace(/\D/g, '') : '';
-          const hasUnit = unitNumberClean.length >= 1;
+          let rawUnit = parsed.unitNumber ? String(parsed.unitNumber).trim() : '';
+          let rawBlock = parsed.block ? String(parsed.block).trim() : null;
+          const recipient = parsed.recipientName ? String(parsed.recipientName).trim() : null;
+          const tracking = parsed.trackingCode ? String(parsed.trackingCode).trim() : null;
+
+          const matchLetterNum = rawUnit.match(/^([A-Za-z])\s*(\d{1,5})$/);
+          if (matchLetterNum) {
+            if (!rawBlock) rawBlock = `Bloco ${matchLetterNum[1].toUpperCase()}`;
+            rawUnit = matchLetterNum[2];
+          }
+
+          const unitNumberDigits = rawUnit.replace(/\D/g, '');
+          const hasUnit = unitNumberDigits.length >= 1;
+          const hasRecipient = !!recipient && recipient.length >= 3;
+          const hasTracking = !!tracking && tracking.length >= 6;
+          const detected = hasUnit || hasRecipient || hasTracking;
+
           return {
-            block: parsed.block ? String(parsed.block).trim() : null,
-            unitNumber: hasUnit ? String(parsed.unitNumber).trim() : null,
-            confidence: hasUnit ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.9) : 0
+            recipientName: recipient,
+            block: rawBlock,
+            unitNumber: hasUnit ? rawUnit : null,
+            trackingCode: tracking,
+            confidence: detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.95) : 0
           };
         }
       }
     } catch {}
 
-    return { block: null, unitNumber: null, confidence: 0 };
+    return { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
   }
 
   private fallbackHeuristic(imageBuffer: Buffer): OCRExtractionResult {
