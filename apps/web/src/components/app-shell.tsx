@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { Navbar } from './navbar';
+import { CookieConsent } from './cookie-consent';
 
 const NO_NAVBAR_PATHS = ['/login', '/cadastro'];
 
@@ -20,6 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           CondoBox • Sistema de Portaria Inteligente
         </footer>
       )}
+      <CookieConsent />
     </div>
   );
 }
