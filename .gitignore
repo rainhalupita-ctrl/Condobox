@@ -9,12 +9,13 @@ out/
 build/
 dist/
 
-# Local Environment Variables
+# Local Environment Variables (Never commit secrets to git)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env*
+*.env
+**/.env
+**/.env*
+**/.env.local
 
 # Storage data (fotos e uploads temporários)
 data/packages/labels/
