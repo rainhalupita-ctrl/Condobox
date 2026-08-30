@@ -181,19 +181,20 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         ctx.drawImage(video, 0, 0, width, height);
 
-        // Checagem visual rápida: Descarta quadros pretos, escuros ou sem contraste
+        // Checagem visual rápida: Descarta se a imagem estiver completamente preta/escura
         try {
           const imgData = ctx.getImageData(0, 0, width, height);
           const pixels = imgData.data;
           let brightnessSum = 0;
+          const step = Math.max(1, Math.floor(pixels.length / 400));
           let count = 0;
-          for (let i = 0; i < pixels.length; i += 40) {
+          for (let i = 0; i < pixels.length; i += step * 4) {
             brightnessSum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
             count++;
           }
-          const avgBrightness = brightnessSum / count;
-          // Se a imagem for quase preta (< 30) ou branca estourada (> 245), descarta imediatamente
-          if (avgBrightness < 30 || avgBrightness > 245) {
+          const avgBrightness = count > 0 ? brightnessSum / count : 128;
+          // Se for quase 100% preta (< 15), descarta na hora sem chamar OCR
+          if (avgBrightness < 15) {
             isScanning = false;
             setIsLiveAnalyzing(false);
             return;
@@ -213,12 +214,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             const ocr = ocrResult?.ocr;
             const unitNumberClean = ocr?.unitNumber ? ocr.unitNumber.replace(/\D/g, '') : '';
             
-            // A leitura automática ao vivo SÓ deve avançar se identificar com 100% de clareza o Apartamento e/ou Unidade cadastrada
+            // A leitura automática ao vivo SÓ deve avançar se identificar com clareza o Apartamento / Unidade
             const hasEssentialFields =
               Boolean(ocr) &&
-              (typeof ocr?.confidence !== 'number' || ocr.confidence >= 0.7) &&
               unitNumberClean.length >= 1 &&
-              (Boolean(ocrResult?.suggestedMatch?.unit) || Boolean(ocr?.block));
+              (ocr.confidence === undefined || typeof ocr.confidence !== 'number' || ocr.confidence >= 0.5);
 
             if (hasEssentialFields && !autoCaptureFiredRef.current) {
               autoCaptureFiredRef.current = true;

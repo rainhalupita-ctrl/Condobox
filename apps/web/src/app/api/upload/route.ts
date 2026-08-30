@@ -48,7 +48,7 @@ REGRAS CRÍTICAS ANTI-ALUCINAÇÃO:
 4. "recipientName": Nome do morador/destinatário. NUNCA coloque nomes de empresas, transportadoras (ex: Mercado Livre, Shopee, Amazon, Correios), avisos ("FRAGIL", "DESTINATARIO", "DANFE") nem exemplos fictícios. Se ilegível, retorne null.
 5. "carrier": Transportadora identificada (Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro).`;
 
-      const modelsToTry = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-3.5-flash'];
+      const modelsToTry = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'];
       for (const modelName of modelsToTry) {
         try {
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`, {
