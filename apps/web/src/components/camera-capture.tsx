@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, X, Upload, Zap, FlipHorizontal, RotateCw } from 'lucide-react';
+import { Camera, RefreshCw, X, Upload, Zap } from 'lucide-react';
 import { OCRResponse } from '../lib/local-api';
 
 interface CameraCaptureProps {
@@ -15,10 +15,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   
-  // Controles de orientação e espelhamento
+  // Por padrão no celular abre a câmera traseira ('environment')
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
-  const [isMirrored, setIsMirrored] = useState(false);
-  const [rotation, setRotation] = useState<number>(0);
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -33,14 +31,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       const savedFacing = localStorage.getItem('condobox_camera_facing');
       if (savedFacing === 'user' || savedFacing === 'environment') {
         setFacingMode(savedFacing);
-      }
-      const savedMirror = localStorage.getItem('condobox_camera_mirror');
-      if (savedMirror !== null) {
-        setIsMirrored(savedMirror === 'true');
-      }
-      const savedRotation = localStorage.getItem('condobox_camera_rotation');
-      if (savedRotation !== null) {
-        setRotation(parseInt(savedRotation, 10) || 0);
       }
     }
   }, []);
@@ -110,47 +100,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
   };
 
-  const toggleMirror = () => {
-    const next = !isMirrored;
-    setIsMirrored(next);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('condobox_camera_mirror', String(next));
-    }
-  };
-
-  const rotateCamera = () => {
-    const next = (rotation + 90) % 360;
-    setRotation(next);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('condobox_camera_rotation', String(next));
-    }
-  };
-
-  // Helper para renderizar vídeo com rotação e espelhamento no Canvas
-  const drawTransformedVideo = (
-    ctx: CanvasRenderingContext2D,
-    video: HTMLVideoElement,
-    targetWidth: number,
-    targetHeight: number
-  ) => {
-    ctx.save();
-    ctx.translate(targetWidth / 2, targetHeight / 2);
-    if (rotation !== 0) {
-      ctx.rotate((rotation * Math.PI) / 180);
-    }
-    if (isMirrored) {
-      ctx.scale(-1, 1);
-    }
-    
-    // Se rotacionado em 90 ou 270 graus, as dimensões se invertem
-    const isSideways = rotation === 90 || rotation === 270;
-    const drawW = isSideways ? targetHeight : targetWidth;
-    const drawH = isSideways ? targetWidth : targetHeight;
-
-    ctx.drawImage(video, -drawW / 2, -drawH / 2, drawW, drawH);
-    ctx.restore();
-  };
-
   // Captura Manual
   const takeSnapshot = useCallback(() => {
     if (!videoRef.current || autoCaptureFiredRef.current) return;
@@ -182,7 +131,16 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    drawTransformedVideo(ctx, video, width, height);
+    // Se for câmera frontal (selfie), espelha como um espelho de smartphone
+    if (facingMode === 'user') {
+      ctx.save();
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, width, height);
+      ctx.restore();
+    } else {
+      ctx.drawImage(video, 0, 0, width, height);
+    }
 
     canvas.toBlob(
       (blob) => {
@@ -197,10 +155,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       'image/jpeg',
       0.82
     );
-  }, [onCapture, isMirrored, rotation]);
+  }, [onCapture, facingMode]);
 
   // ─── Análise em Tempo Real em 2 Estágios ───────────────────────────────────
-  // Estágio 1 (rápido): imagem 600px → /api/ocr-live → identifica bloco + apto
+  // Estágio 1 (rápido): frame 600px → /api/ocr-live → identifica bloco + apto
   // Estágio 2 (completo): enriquece em segundo plano com /api/upload
   useEffect(() => {
     if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
@@ -233,7 +191,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(null);
 
-        drawTransformedVideo(ctx, video, width, height);
+        if (facingMode === 'user') {
+          ctx.save();
+          ctx.translate(width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(video, 0, 0, width, height);
+          ctx.restore();
+        } else {
+          ctx.drawImage(video, 0, 0, width, height);
+        }
 
         // Checagem de brilho — descarta frames pretos/cobertos
         let brightnessSum = 0;
@@ -346,7 +312,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     return () => {
       clearInterval(interval);
     };
-  }, [stream, capturedBlob, onCapture, isMirrored, rotation]);
+  }, [stream, capturedBlob, onCapture, facingMode]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -390,7 +356,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Visualizador da Câmera ou Preview */}
+      {/* Visualizador da Câmera ou Preview - Padrão Natural Smartphone */}
       <div className={`relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border transition-all duration-300 ${isDetected ? 'border-emerald-400 ring-4 ring-emerald-500/30' : 'border-slate-800 shadow-inner'}`}>
         {capturedPreview ? (
           <img
@@ -421,8 +387,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               webkit-playsinline="true"
               x5-playsinline="true"
               style={{
-                transform: `rotate(${rotation}deg) scaleX(${isMirrored ? -1 : 1})`,
-                transition: 'transform 0.2s ease',
+                // Na câmera frontal (selfie) espelha naturalmente; na traseira fica normal para leitura de texto
+                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
               }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
@@ -449,39 +415,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
                     </span>
                   </>
                 )}
-              </div>
-
-              {/* Botões Rápidos de Ajuste da Câmera (Espelhar / Girar / Trocar) */}
-              <div className="self-center flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700 pointer-events-auto shadow-lg">
-                <button
-                  type="button"
-                  onClick={toggleMirror}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${isMirrored ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
-                  title="Inverter/Espelhar Câmera Horizontalmente"
-                >
-                  <FlipHorizontal className="w-3.5 h-3.5" />
-                  <span>{isMirrored ? 'Espelhado' : 'Normal'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={rotateCamera}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition"
-                  title="Girar Câmera 90 Graus"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  <span>{rotation}°</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={switchCamera}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition"
-                  title="Alternar entre Câmera Traseira e Frontal"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>{facingMode === 'environment' ? 'Traseira' : 'Frontal'}</span>
-                </button>
               </div>
 
               {/* Rodapé informativo */}
@@ -520,6 +453,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               className="flex items-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
             >
               <Upload className="w-4 h-4" /> Galeria / Arquivo
+            </button>
+
+            <button
+              type="button"
+              onClick={switchCamera}
+              className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+              title="Alternar entre Câmera Traseira e Frontal"
+            >
+              <RefreshCw className="w-4 h-4" />
             </button>
 
             <button
