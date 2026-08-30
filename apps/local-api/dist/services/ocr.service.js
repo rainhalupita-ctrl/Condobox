@@ -1,127 +1,356 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env.js';
+// Tesseract.js import dinâmico para compatibilidade ESM
+let TesseractWorker = null;
+const FORBIDDEN_WORDS = [
+    'MERCADO LIVRE', 'SHOPEE', 'AMAZON', 'CORREIOS', 'LOGGI', 'TOTAL EXPRESS',
+    'JADLOG', 'SHEIN', 'MAGALU', 'MAGAZINE LUIZA', 'FRAGIL', 'FRÁGIL',
+    'DESTINATARIO', 'DESTINATÁRIO', 'REMETENTE', 'DANFE', 'NOTA FISCAL',
+    'NF-E', 'ENCOMENDA', 'ENTREGA', 'CONDOMINIO', 'CONDOMÍNIO', 'PORTARIA',
+    'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO', 'DELL',
+];
+const RICH_PROMPT = `Você é especialista em OCR de etiquetas de encomendas residenciais brasileiras (Mercado Livre, Shopee, Amazon, Correios, Loggi, Jadlog, Shein etc.).
+Analise a imagem e extraia em JSON estrito:
+{
+  "recipientName": string|null,
+  "block": string|null,
+  "unitNumber": string|null,
+  "carrier": string,
+  "trackingCode": string|null,
+  "invoiceNumber": string|null,
+  "confidence": number
+}
+REGRAS CRÍTICAS:
+1. recipientName = APENAS nome da pessoa física destinatária (morador). NUNCA empresa, loja, remetente ou aviso.
+2. unitNumber = número do apartamento/unidade (ex: "101", "805").
+3. block = bloco ou torre se houver.
+4. carrier = Remetente, loja ou transportadora de onde veio (ex: "Mercado Livre", "Shopee", "Amazon", "Nike", "Drogasil", "Correios", "Shein", "Magalu", "Zara", "Loggi", etc.).
+5. trackingCode = código de rastreio ou código de barras. AVISO CRÍTICO: NUNCA coloque CEP (8 dígitos como 29168-074 ou 29168074) como trackingCode. Se não houver código de rastreio específico, retorne null.
+6. invoiceNumber = NF/DANFE se visível.
+7. confidence = 0.0-1.0 refletindo certeza dos dados extraídos.`;
 export class OCRService {
     genAI = null;
     constructor() {
         this.initClient();
     }
     initClient() {
-        if (env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim() !== '') {
+        if (env.GEMINI_API_KEY?.trim()) {
             this.genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
         }
     }
-    /**
-     * Processa a foto da etiqueta utilizando Gemini Flash Vision com fallback inteligente de modelos
-     */
-    async extractPackageInfo(imageBuffer, mimeType = 'image/jpeg') {
-        this.initClient();
-        if (!this.genAI || !env.GEMINI_API_KEY || env.GEMINI_API_KEY.trim() === '') {
-            console.warn('[OCRService] Chave GEMINI_API_KEY não configurada. Usando fallback.');
-            return this.fallbackHeuristic(imageBuffer);
+    sanitizeTrackingCode(rawTracking) {
+        if (!rawTracking)
+            return null;
+        const clean = String(rawTracking).trim();
+        if (clean.length < 5)
+            return null;
+        // Rejeita se for CEP brasileiro (5 dígitos + hífen opcional + 3 dígitos)
+        if (/^\d{5}-?\d{3}$/.test(clean))
+            return null;
+        // Rejeita se for apenas 8 dígitos numéricos (CEP desformatado)
+        const digitsOnly = clean.replace(/\D/g, '');
+        if (digitsOnly.length === 8 && /^\d+$/.test(clean.replace(/[-\s]/g, '')))
+            return null;
+        // Rejeita se começar com CEP ou termos de endereço
+        const upper = clean.toUpperCase();
+        if (upper.startsWith('CEP') ||
+            upper.includes('CIDADE') ||
+            upper.includes('BAIRRO') ||
+            upper.includes('RUA') ||
+            upper.includes('AVENIDA') ||
+            upper.includes('ESTADO')) {
+            return null;
         }
-        const base64Image = imageBuffer.toString('base64');
-        const apiKey = env.GEMINI_API_KEY;
-        const prompt = `Você é um especialista em OCR e leitura de etiquetas de encomendas brasileiras (Mercado Livre, Shopee, Amazon, Correios, Magalu, Shein, Jadlog, Loggi, etc.).
-Analise a imagem da etiqueta e extraia APENAS dados válidos e legíveis em formato JSON estrito:
-{
-  "recipientName": string ou null,
-  "block": string ou null,
-  "unitNumber": string ou null,
-  "carrier": string,
-  "trackingCode": string ou null,
-  "invoiceNumber": string ou null,
-  "confidence": number
-}
-
-REGRAS CRÍTICAS DE PRECISÃO:
-1. "recipientName": Extraia APENAS o nome da pessoa física (destinatário/morador). NUNCA coloque nomes de empresas, remetentes, avisos (ex: "FRÁGIL", "DOCS", "DESTINATÁRIO", "REMETENTE", "DANFE", transportadoras) nem textos cortados ou ilegíveis. Se não tiver certeza absoluta do nome do morador, retorne null.
-2. "unitNumber": Número do apartamento/unidade residencial (ex: "101", "805", "402", "12"). Procure por termos como "Apto", "Ap", "Unidade", "Casa", "Apto.", "Ap.". Se não estiver legível, retorne null.
-3. "block": Identificação do bloco/torre (ex: "Bloco A", "Torre 1", "Bloco B"). Se não houver bloco na etiqueta, retorne null.
-4. "carrier": Identifique a transportadora: Mercado Livre, Shopee, Amazon, Correios, Dell, Total Express, Loggi, Jadlog, Shein, Magalu ou Outro.
-5. "trackingCode": Código de rastreio ou código de barras da entrega.
-6. "invoiceNumber": Número da Nota Fiscal ou DANFE se visível na etiqueta.`;
-        const modelsToTry = [
-            'gemini-3.6-flash',
-            'gemini-3.1-flash-lite',
-            'gemini-3.7-flash',
-            'gemini-3.5-flash'
-        ];
-        for (const modelName of modelsToTry) {
-            try {
-                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-goog-api-key': apiKey
-                    },
-                    body: JSON.stringify({
-                        contents: [
-                            {
-                                parts: [
-                                    { text: prompt },
-                                    {
-                                        inlineData: {
-                                            mimeType: mimeType || 'image/jpeg',
-                                            data: base64Image
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        generationConfig: {
-                            responseMimeType: 'application/json',
-                            temperature: 0,
-                            maxOutputTokens: 250
-                        }
-                    }),
-                    signal: AbortSignal.timeout(8000)
-                });
-                if (res.ok) {
-                    const data = (await res.json());
-                    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                    const parsed = JSON.parse(responseText);
-                    console.log(`[OCRService] ✅ Extração com sucesso usando [${modelName}]:`, parsed);
-                    // Sanitização rigorosa do nome do destinatário para evitar ruídos ou nomes de transportadora
-                    let cleanRecipient = (parsed.recipientName || '').trim();
-                    const forbiddenWords = [
-                        'MERCADO LIVRE', 'SHOPEE', 'AMAZON', 'CORREIOS', 'LOGGI', 'TOTAL EXPRESS',
-                        'JADLOG', 'SHEIN', 'MAGALU', 'MAGAZINE LUIZA', 'FRAGIL', 'FRÁGIL',
-                        'DESTINATARIO', 'DESTINATÁRIO', 'REMETENTE', 'DANFE', 'NOTA FISCAL',
-                        'NF-E', 'ENCOMENDA', 'ENTREGA', 'CONDOMINIO', 'CONDOMÍNIO', 'PORTARIA',
-                        'PAC', 'SEDEX', 'EXPRESS', 'FULL', 'STANDARD', 'ENVIO'
-                    ];
-                    if (!cleanRecipient ||
-                        cleanRecipient.length < 3 ||
-                        forbiddenWords.some(fw => cleanRecipient.toUpperCase() === fw || cleanRecipient.toUpperCase().startsWith(fw))) {
-                        cleanRecipient = null;
-                    }
-                    return {
-                        recipientName: cleanRecipient,
-                        block: parsed.block ? String(parsed.block).trim() : null,
-                        unitNumber: parsed.unitNumber ? String(parsed.unitNumber).trim() : null,
-                        carrier: parsed.carrier || 'Outro',
-                        trackingCode: parsed.trackingCode ? String(parsed.trackingCode).trim() : null,
-                        invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
-                        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
-                    };
+        return clean;
+    }
+    parseBrazilianUnitAndBlock(rawUnit, rawBlock, rawAddress) {
+        let unit = rawUnit ? String(rawUnit).trim() : '';
+        let block = rawBlock ? String(rawBlock).trim() : null;
+        const full = `${rawAddress || ''} ${unit} ${block || ''}`.trim();
+        if (block && /civit|avenida|rua|alameda|estrada|rodovia|bairro/i.test(block)) {
+            block = null;
+        }
+        const explicitMatch = full.match(/(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})[^\d]*(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})/i);
+        if (explicitMatch) {
+            block = `Bloco ${explicitMatch[1].toUpperCase()}`;
+            unit = explicitMatch[2];
+            return { unit, block };
+        }
+        const reverseExplicit = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?|APART\.?)\s*(\d{1,5})[^\w]*(?:BLOCO?|BL\.?|TORRE?)\s*([A-Za-z0-9]{1,3})/i);
+        if (reverseExplicit) {
+            unit = reverseExplicit[1];
+            block = `Bloco ${reverseExplicit[2].toUpperCase()}`;
+            return { unit, block };
+        }
+        const streetDashUnit = full.match(/(?:n[ºo°]?\s*\d{1,6}\s*[-–—/]\s*)([A-Za-z])?(\d{1,5})([A-Za-z])?/i);
+        if (streetDashUnit) {
+            const letter = streetDashUnit[1] || streetDashUnit[3];
+            if (letter && (!block || block === 'null')) {
+                block = `Bloco ${letter.toUpperCase()}`;
+            }
+            unit = streetDashUnit[2];
+            return { unit, block };
+        }
+        const letterNumberMatch = unit.match(/^([A-Za-z])\s*(\d{1,5})$/) || full.match(/\b([A-Za-z])(\d{2,5})\b/);
+        if (letterNumberMatch) {
+            if (!block || block === 'null') {
+                block = `Bloco ${letterNumberMatch[1].toUpperCase()}`;
+            }
+            unit = letterNumberMatch[2];
+            return { unit, block };
+        }
+        const aptMatch = full.match(/(?:APTO?\.?|AP\.?|UNIDADE|UND\.?)\s*[:\-]?\s*(\d{1,5})/i);
+        if (aptMatch) {
+            unit = aptMatch[1];
+            return { unit, block };
+        }
+        const allNums = unit.match(/\b\d{1,5}\b/g);
+        if (allNums && allNums.length > 1) {
+            unit = allNums[allNums.length - 1];
+        }
+        else if (allNums && allNums.length === 1) {
+            unit = allNums[0];
+        }
+        const cleanDigits = unit.replace(/\D/g, '');
+        return { unit: cleanDigits || null, block };
+    }
+    sanitize(parsed) {
+        let cleanRecipient = (parsed.recipientName || '').trim();
+        if (!cleanRecipient ||
+            cleanRecipient.length < 3 ||
+            FORBIDDEN_WORDS.some(fw => cleanRecipient.toUpperCase() === fw || cleanRecipient.toUpperCase().startsWith(fw))) {
+            cleanRecipient = null;
+        }
+        const { unit: cleanUnit, block: cleanBlock } = this.parseBrazilianUnitAndBlock(parsed.unitNumber, parsed.block, parsed.address);
+        const cleanTracking = this.sanitizeTrackingCode(parsed.trackingCode);
+        const sender = parsed.carrier || parsed.sender ? String(parsed.carrier || parsed.sender).trim() : null;
+        const hasUnit = Boolean(cleanUnit && cleanUnit.length >= 1);
+        const hasTracking = !!cleanTracking;
+        const detected = hasUnit || !!cleanRecipient || hasTracking;
+        return {
+            recipientName: cleanRecipient,
+            block: cleanBlock,
+            unitNumber: cleanUnit,
+            carrier: sender || 'Outro',
+            trackingCode: cleanTracking,
+            invoiceNumber: parsed.invoiceNumber ? String(parsed.invoiceNumber).trim() : null,
+            confidence: detected ? (typeof parsed.confidence === 'number' ? parsed.confidence : 0.92) : 0,
+        };
+    }
+    parseRawText(text) {
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const fullText = lines.join(' ');
+        const { unit: unitNumber, block } = this.parseBrazilianUnitAndBlock(null, null, fullText);
+        const trackMatch = text.match(/\b([A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{2,4}\s*\d{6,14}|\d{12,20})\b/);
+        const trackingCode = this.sanitizeTrackingCode(trackMatch ? trackMatch[1] : null);
+        let recipientName = null;
+        for (let i = 0; i < lines.length; i++) {
+            if (/destinat[aá]rio|para:/i.test(lines[i]) && lines[i + 1]) {
+                const cand = lines[i + 1].trim();
+                if (cand.length >= 4 && /^[A-Za-zÀ-ÿ\s]+$/.test(cand)) {
+                    recipientName = cand;
+                    break;
                 }
             }
-            catch (error) {
-                console.warn(`[OCRService] Tentativa com ${modelName} falhou:`, error.message?.slice(0, 100));
+        }
+        const detected = !!(unitNumber || trackingCode);
+        return {
+            recipientName,
+            block,
+            unitNumber,
+            carrier: 'Outro',
+            trackingCode,
+            invoiceNumber: null,
+            confidence: detected ? 0.6 : 0,
+            rawText: text,
+        };
+    }
+    // ── Gemini Vision ──────────────────────────────────────────────────────────
+    async tryGemini(base64Image, mimeType) {
+        if (!env.GEMINI_API_KEY)
+            return null;
+        const models = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
+        for (const model of models) {
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-goog-api-key': env.GEMINI_API_KEY },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: RICH_PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
+                        generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 250 },
+                    }),
+                    signal: AbortSignal.timeout(8000),
+                });
+                if (!res.ok)
+                    continue;
+                const data = (await res.json());
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                if (!text)
+                    continue;
+                const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+                const result = this.sanitize(parsed);
+                if (result.confidence > 0) {
+                    console.log(`[OCRService] ✅ Gemini [${model}]`, result);
+                    return result;
+                }
+            }
+            catch (e) {
+                console.warn(`[OCRService] Gemini ${model} falhou:`, e.message?.slice(0, 80));
             }
         }
-        console.error('[OCRService] Todos os modelos do Gemini falharam.');
-        return this.fallbackHeuristic(imageBuffer);
+        return null;
     }
-    fallbackHeuristic(imageBuffer) {
-        return {
-            recipientName: null,
-            block: 'Bloco A',
-            unitNumber: null,
-            carrier: 'Outro',
-            trackingCode: null,
-            confidence: 0.5
-        };
+    // ── Groq Vision (llama-4-scout) ────────────────────────────────────────────
+    async tryGroq(base64Image, mimeType) {
+        const groqKey = env.GROQ_API_KEY;
+        if (!groqKey)
+            return null;
+        try {
+            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+                body: JSON.stringify({
+                    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                    messages: [{
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: RICH_PROMPT },
+                                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+                            ],
+                        }],
+                    temperature: 0,
+                    max_tokens: 250,
+                    response_format: { type: 'json_object' },
+                }),
+                signal: AbortSignal.timeout(8000),
+            });
+            if (!res.ok)
+                return null;
+            const data = (await res.json());
+            const content = data.choices?.[0]?.message?.content || '';
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (!jsonMatch)
+                return null;
+            const parsed = JSON.parse(jsonMatch[0]);
+            const result = this.sanitize(parsed);
+            if (result.confidence > 0) {
+                console.log('[OCRService] ✅ Groq Vision', result);
+                return result;
+            }
+        }
+        catch (e) {
+            console.warn('[OCRService] Groq falhou:', e.message?.slice(0, 80));
+        }
+        return null;
+    }
+    // ── NVIDIA NIM Vision ──────────────────────────────────────────────────────
+    async tryNvidia(base64Image, mimeType) {
+        const nvidiaKey = env.NVIDIA_API_KEY;
+        if (!nvidiaKey)
+            return null;
+        try {
+            const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${nvidiaKey}` },
+                body: JSON.stringify({
+                    model: 'meta/llama-3.2-11b-vision-instruct',
+                    messages: [{
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: RICH_PROMPT },
+                                { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+                            ],
+                        }],
+                    temperature: 0,
+                    max_tokens: 250,
+                }),
+                signal: AbortSignal.timeout(10000),
+            });
+            if (!res.ok)
+                return null;
+            const data = (await res.json());
+            const content = data.choices?.[0]?.message?.content || '';
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (!jsonMatch)
+                return null;
+            const parsed = JSON.parse(jsonMatch[0]);
+            const result = this.sanitize(parsed);
+            if (result.confidence > 0) {
+                console.log('[OCRService] ✅ NVIDIA NIM', result);
+                return result;
+            }
+        }
+        catch (e) {
+            console.warn('[OCRService] NVIDIA falhou:', e.message?.slice(0, 80));
+        }
+        return null;
+    }
+    // ── Tesseract.js (local, offline) ──────────────────────────────────────────
+    async tryTesseract(imageBuffer, mimeType) {
+        try {
+            const { createWorker } = await import('tesseract.js');
+            const worker = await createWorker('por+eng');
+            const { data: { text } } = await worker.recognize(imageBuffer);
+            await worker.terminate();
+            if (!text || text.trim().length < 5)
+                return null;
+            const result = this.parseRawText(text);
+            if (result.confidence > 0) {
+                console.log('[OCRService] ✅ Tesseract (local)', result);
+                return result;
+            }
+        }
+        catch (e) {
+            console.warn('[OCRService] Tesseract falhou:', e.message?.slice(0, 80));
+        }
+        return null;
+    }
+    /**
+     * Extração completa para upload de foto (prompt rico, fallback completo)
+     */
+    async extractPackageInfo(imageBuffer, mimeType = 'image/jpeg') {
+        const base64Image = imageBuffer.toString('base64');
+        // TIER 0: Gemini e Groq em paralelo
+        const tier0 = [
+            this.tryGemini(base64Image, mimeType),
+            this.tryGroq(base64Image, mimeType),
+        ];
+        const tier0Result = await Promise.any(tier0.map(p => p.then(r => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data')))))).catch(() => null);
+        if (tier0Result)
+            return tier0Result;
+        // TIER 1: NVIDIA NIM
+        const nvidiaResult = await this.tryNvidia(base64Image, mimeType);
+        if (nvidiaResult)
+            return nvidiaResult;
+        // TIER 2: Tesseract.js local
+        const tesseractResult = await this.tryTesseract(imageBuffer, mimeType);
+        if (tesseractResult)
+            return tesseractResult;
+        console.error('[OCRService] Todos os providers falharam. Retornando heurístico.');
+        return { recipientName: null, block: 'Bloco A', unitNumber: null, carrier: 'Outro', trackingCode: null, confidence: 0.5 };
+    }
+    /**
+     * Extração rápida para modo ao vivo (câmera)
+     */
+    async extractLiveOCR(imageBuffer, mimeType = 'image/jpeg') {
+        const base64Image = imageBuffer.toString('base64');
+        const dataUrl = `data:${mimeType};base64,${base64Image}`;
+        // TIER 0: Gemini e Groq em paralelo
+        const tier0Result = await Promise.any([
+            this.tryGemini(base64Image, mimeType),
+            this.tryGroq(base64Image, mimeType),
+        ].map(p => p.then(r => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data')))))).catch(() => null);
+        if (tier0Result)
+            return tier0Result;
+        // TIER 1: NVIDIA
+        const nvidiaResult = await this.tryNvidia(base64Image, mimeType);
+        if (nvidiaResult)
+            return nvidiaResult;
+        // TIER 2: Tesseract
+        const tessResult = await this.tryTesseract(imageBuffer, mimeType);
+        if (tessResult)
+            return tessResult;
+        return { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
     }
 }
 export const ocrService = new OCRService();

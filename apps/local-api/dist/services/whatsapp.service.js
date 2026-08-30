@@ -87,16 +87,16 @@ export class WhatsAppService {
     async sendMessage(options) {
         const phone = this.formatPhone(options.phone);
         try {
-            // Se houver imagem, envia media
+            // Se houver imagem, envia media (Evolution API v2)
             if (options.mediaUrl) {
                 const url = `${this.apiUrl}/message/sendMedia/${this.instanceName}`;
                 const body = {
                     number: phone,
-                    mediaMessage: {
-                        mediatype: 'image',
-                        caption: options.message,
-                        media: options.mediaUrl
-                    }
+                    media: options.mediaUrl,
+                    mediatype: 'image',
+                    mimetype: 'image/jpeg',
+                    caption: options.message,
+                    fileName: 'etiqueta.jpg'
                 };
                 const response = await fetch(url, {
                     method: 'POST',
@@ -108,7 +108,8 @@ export class WhatsAppService {
                     signal: AbortSignal.timeout(15000)
                 });
                 if (!response.ok) {
-                    // Fallback para texto simples se o envio de media falhar
+                    const errorText = await response.text().catch(() => '');
+                    console.warn('[WhatsAppService] Falha no sendMedia da Evolution API, tentando fallback text:', errorText);
                     return this.sendTextMessage(phone, options.message);
                 }
                 const data = await response.json();

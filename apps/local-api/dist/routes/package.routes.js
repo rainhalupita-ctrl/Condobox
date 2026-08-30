@@ -67,8 +67,12 @@ export async function packageRoutes(fastify) {
                     }
                 }
                 if (phone) {
+                    // Usa a URL pública/de rede para que o celular do morador consiga abrir a imagem
+                    const publicBase = whatsappService.getPublicWebUrl().replace(/\/$/, '');
                     const labelUrl = body.labelImagePath
-                        ? `${env.LOCAL_BASE_URL}/images/${body.labelImagePath}`
+                        ? (body.labelImagePath.startsWith('http')
+                            ? body.labelImagePath
+                            : `${publicBase}/images/${body.labelImagePath}`)
                         : undefined;
                     const notifyRes = await whatsappService.notifyPackageArrival({
                         phone,
