@@ -40,42 +40,27 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       }
 
       const constraints: MediaStreamConstraints = {
-        video: preferredDeviceId
-          ? {
-              deviceId: { ideal: preferredDeviceId },
-              facingMode: { ideal: facingMode },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            }
-          : {
-              facingMode: { ideal: facingMode },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            },
+        video: {
+          facingMode: { ideal: facingMode }
+        },
         audio: false
       };
 
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       setStream(mediaStream);
 
-      // 2. Salvar em cookies e localStorage para evitar perguntas repetidas de permissão
+      // Salvar em cookies e localStorage para persistência de estado
       if (typeof window !== 'undefined') {
         localStorage.setItem('condobox_camera_permission', 'granted');
         localStorage.setItem('condobox_camera_facing', facingMode);
         document.cookie = 'condobox_camera_permission=granted; path=/; max-age=31536000; SameSite=Lax';
-
-        const track = mediaStream.getVideoTracks()[0];
-        if (track) {
-          const settings = track.getSettings();
-          if (settings.deviceId) {
-            localStorage.setItem('condobox_camera_device_id', settings.deviceId);
-            document.cookie = `condobox_camera_device_id=${settings.deviceId}; path=/; max-age=31536000; SameSite=Lax`;
-          }
-        }
       }
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.play().catch(() => {});
       }
     } catch (err: any) {
       console.warn('Câmera nativa não disponível:', err);
@@ -251,7 +236,17 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover"
+              controls={false}
+              disablePictureInPicture
+              // @ts-ignore
+              webkit-playsinline="true"
+              x5-playsinline="true"
+              onLoadedMetadata={() => {
+                if (videoRef.current) {
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
+              className="w-full h-full object-cover pointer-events-none select-none"
             />
             {/* Grid overlay de enquadramento vertical */}
             <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
