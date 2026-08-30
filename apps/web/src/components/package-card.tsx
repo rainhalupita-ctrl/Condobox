@@ -67,11 +67,21 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     return 'bg-slate-700/40 text-slate-300 border-slate-600/40';
   };
 
+  const isCiente = (pkg as any).notes?.includes('CIENTE');
+
   const getStatusBadge = () => {
     if (pkg.status === 'DELIVERED') {
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
           <CheckCircle2 className="w-3.5 h-3.5" /> Entregue
+        </span>
+      );
+    }
+
+    if (isCiente) {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-teal-500/25 text-teal-300 border border-teal-500/40 shadow-sm">
+          <Eye className="w-3.5 h-3.5 text-teal-400" /> Morador Ciente
         </span>
       );
     }

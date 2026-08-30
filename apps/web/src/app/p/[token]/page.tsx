@@ -34,6 +34,7 @@ interface PublicPackageData {
   delivered_to_name?: string | null;
   label_image_path?: string | null;
   signature_image_path?: string | null;
+  notes?: string | null;
   unit?: {
     block: string;
     unit_number: string;
