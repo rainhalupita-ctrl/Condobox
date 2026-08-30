@@ -523,9 +523,10 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         navigator.vibrate?.([40, 60, 40]);
       } catch {}
 
-      // Tenta disparar notificação local imediata se disponível
-      if (pkgId) {
-        LocalApiClient.notifyPackage(pkgId, true).catch(() => {});
+      // Se a criação inicial (pela Vercel ou Local) falhou ao enviar o WhatsApp,
+      // tenta disparar a notificação local como fallback.
+      if (pkgId && !res.whatsapp?.sent) {
+        LocalApiClient.notifyPackage(pkgId, false).catch(() => {});
       }
 
       // Adiciona na lista de recentes para acompanhamento em tempo real
