@@ -60,9 +60,9 @@ Responda ESTRITAMENTE em formato JSON:
 
     const modelsToTry = [
       'gemini-3.6-flash',
+      'gemini-3.1-flash-lite',
       'gemini-3.7-flash',
-      'gemini-3.5-flash',
-      'gemini-flash-latest'
+      'gemini-3.5-flash'
     ];
 
     for (const modelName of modelsToTry) {
@@ -88,7 +88,9 @@ Responda ESTRITAMENTE em formato JSON:
               }
             ],
             generationConfig: {
-              responseMimeType: 'application/json'
+              responseMimeType: 'application/json',
+              temperature: 0,
+              maxOutputTokens: 300
             }
           }),
           signal: AbortSignal.timeout(30000)

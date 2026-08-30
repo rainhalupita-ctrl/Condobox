@@ -38,6 +38,7 @@ export default function NovaEncomendaPage() {
   const [sendWhatsApp, setSendWhatsApp] = useState<boolean>(true);
   const [customPhone, setCustomPhone] = useState<string>('');
 
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState<any | null>(null);
 
@@ -60,10 +61,12 @@ export default function NovaEncomendaPage() {
   const handleCapturePhoto = async (blob: Blob, previewUrl: string) => {
     setCapturedBlob(blob);
     setCapturedPreview(previewUrl);
-    setStep('PROCESSING');
+    // Transição INSTANTÂNEA para o formulário (0s de espera)
+    setStep('CONFIRM');
+    setIsOcrProcessing(true);
 
     try {
-      // Chama a API Local para salvar a foto e rodar o OCR com Gemini
+      // Processa OCR com Gemini em segundo plano
       const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
       setOcrData(ocrResult);
 
@@ -78,7 +81,7 @@ export default function NovaEncomendaPage() {
         if (rData) { currentResidents = rData; setResidents(rData); }
       }
 
-      // Preenche os campos automaticamente com a extração da IA
+      // Preenche os campos automaticamente com a extração da IA (se o usuário não tiver alterado)
       if (ocrResult.ocr.carrier) setCarrier(ocrResult.ocr.carrier);
       if (ocrResult.ocr.trackingCode) setTrackingCode(ocrResult.ocr.trackingCode);
       if (ocrResult.ocr.recipientName) setRecipientNameOcr(ocrResult.ocr.recipientName);
@@ -114,12 +117,10 @@ export default function NovaEncomendaPage() {
           setCustomPhone(matchByName.phone);
         }
       }
-
-      setStep('CONFIRM');
     } catch (err: any) {
       console.error('Falha no OCR:', err);
-      // Mesmo se o OCR falhar, prossegue para o preenchimento manual
-      setStep('CONFIRM');
+    } finally {
+      setIsOcrProcessing(false);
     }
   };
 
@@ -351,13 +352,22 @@ export default function NovaEncomendaPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
           <div className="flex items-start justify-between pb-4 border-b border-slate-800">
             <div>
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                  Dados Reconhecidos por IA
-                </span>
-              </div>
-              <h2 className="text-xl font-bold text-slate-100 mt-1">Confirmar Dados da Encomenda</h2>
+              {isOcrProcessing ? (
+                <div className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/30 px-3 py-1 rounded-full w-fit animate-pulse mb-1">
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                  <span className="text-xs font-bold text-amber-300">
+                    Lendo etiqueta com IA em 2º plano...
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1 rounded-full w-fit mb-1">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                    Dados Reconhecidos por IA
+                  </span>
+                </div>
+              )}
+              <h2 className="text-xl font-bold text-slate-100">Confirmar Dados da Encomenda</h2>
             </div>
             {capturedPreview && (
               <img
