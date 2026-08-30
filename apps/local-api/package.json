@@ -15,7 +15,7 @@
     "@fastify/static": "^7.0.4",
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "2.48.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.6.1",
     "fastify": "^4.28.1",
     "node-cron": "^3.0.3",
     "pino": "^9.6.0",
