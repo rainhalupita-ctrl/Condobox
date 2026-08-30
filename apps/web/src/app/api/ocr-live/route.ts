@@ -17,12 +17,13 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(bytes).toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    const prompt = 'Analise esta imagem de etiqueta de encomenda. Retorne APENAS um JSON: {"block": "string ou null", "unitNumber": "string ou null", "confidence": 0.0}. REGRAS: Imagem escura/borrada/sem etiqueta retorna {"block":null,"unitNumber":null,"confidence":0}. unitNumber: numero do apartamento/unidade. block: bloco/torre. confidence: 0.0 a 1.0, use 0 se nao encontrou unitNumber. Apenas o JSON.';
+    const prompt = 'Analise esta imagem de etiqueta de encomenda. Retorne APENAS um JSON: {"block": "string ou null", "unitNumber": "string ou null", "confidence": 0.0}. Se identificar ex: A805 ou B102, unitNumber="805", block="Bloco A". REGRAS: Imagem escura/borrada/sem etiqueta retorna {"block":null,"unitNumber":null,"confidence":0}. confidence: 0.0 a 1.0. Apenas o JSON.';
 
     const modelsToTry = [
-      'gemini-2.5-flash-lite',
-      'gemini-2.5-flash',
       'gemini-3.1-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
     ];
 
     for (const modelName of modelsToTry) {

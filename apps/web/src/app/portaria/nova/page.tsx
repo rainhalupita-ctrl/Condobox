@@ -571,7 +571,11 @@ export default function NovaEncomendaPage() {
       {step === 'CAPTURE' ? (
         /* Passo 1: Captura da Foto Imediata */
         <div className="space-y-5 animate-fade-in">
-          <CameraCapture onCapture={handleCapturePhoto} onCancel={() => router.push('/portaria')} />
+          <CameraCapture
+            key={`cam-${step}-${recentSaved.length}`}
+            onCapture={handleCapturePhoto}
+            onCancel={() => router.push('/portaria')}
+          />
 
           {/* Fila de Encomendas Recebidas Recentemente nesta sessão */}
           {recentSaved.length > 0 && (

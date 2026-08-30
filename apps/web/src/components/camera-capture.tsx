@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, Check, X, Upload, Sparkles, Scan, Zap } from 'lucide-react';
-import { LocalApiClient, OCRResponse } from '../lib/local-api';
+import { Camera, RefreshCw, X, Upload, Zap, FlipHorizontal, RotateCw } from 'lucide-react';
+import { OCRResponse } from '../lib/local-api';
 
 interface CameraCaptureProps {
   onCapture: (blob: Blob, previewUrl: string, precalculatedOcr?: OCRResponse) => void;
@@ -14,13 +14,12 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>(() => {
-    if (typeof window !== 'undefined') {
-      const savedFacing = localStorage.getItem('condobox_camera_facing');
-      if (savedFacing === 'user' || savedFacing === 'environment') return savedFacing;
-    }
-    return 'environment';
-  });
+  
+  // Controles de orientação e espelhamento
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [isMirrored, setIsMirrored] = useState(false);
+  const [rotation, setRotation] = useState<number>(0);
+
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -28,6 +27,23 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
   const [isDetected, setIsDetected] = useState(false);
   const autoCaptureFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedFacing = localStorage.getItem('condobox_camera_facing');
+      if (savedFacing === 'user' || savedFacing === 'environment') {
+        setFacingMode(savedFacing);
+      }
+      const savedMirror = localStorage.getItem('condobox_camera_mirror');
+      if (savedMirror !== null) {
+        setIsMirrored(savedMirror === 'true');
+      }
+      const savedRotation = localStorage.getItem('condobox_camera_rotation');
+      if (savedRotation !== null) {
+        setRotation(parseInt(savedRotation, 10) || 0);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     autoCaptureFiredRef.current = false;
@@ -43,20 +59,24 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     autoCaptureFiredRef.current = false;
 
     try {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+
       const constraints: MediaStreamConstraints = {
         video: {
-          facingMode: { ideal: facingMode }
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
-        audio: false
+        audio: false,
       };
 
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       setStream(mediaStream);
 
       if (typeof window !== 'undefined') {
-        localStorage.setItem('condobox_camera_permission', 'granted');
         localStorage.setItem('condobox_camera_facing', facingMode);
-        document.cookie = 'condobox_camera_permission=granted; path=/; max-age=31536000; SameSite=Lax';
       }
 
       if (videoRef.current) {
@@ -73,7 +93,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
   const stopCamera = () => {
     if (stream) {
-      stream.getTracks().forEach(track => {
+      stream.getTracks().forEach((track) => {
         track.stop();
         track.enabled = false;
       });
@@ -87,8 +107,48 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     setFacingMode(nextFacing);
     if (typeof window !== 'undefined') {
       localStorage.setItem('condobox_camera_facing', nextFacing);
-      localStorage.removeItem('condobox_camera_device_id');
     }
+  };
+
+  const toggleMirror = () => {
+    const next = !isMirrored;
+    setIsMirrored(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('condobox_camera_mirror', String(next));
+    }
+  };
+
+  const rotateCamera = () => {
+    const next = (rotation + 90) % 360;
+    setRotation(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('condobox_camera_rotation', String(next));
+    }
+  };
+
+  // Helper para renderizar vídeo com rotação e espelhamento no Canvas
+  const drawTransformedVideo = (
+    ctx: CanvasRenderingContext2D,
+    video: HTMLVideoElement,
+    targetWidth: number,
+    targetHeight: number
+  ) => {
+    ctx.save();
+    ctx.translate(targetWidth / 2, targetHeight / 2);
+    if (rotation !== 0) {
+      ctx.rotate((rotation * Math.PI) / 180);
+    }
+    if (isMirrored) {
+      ctx.scale(-1, 1);
+    }
+    
+    // Se rotacionado em 90 ou 270 graus, as dimensões se invertem
+    const isSideways = rotation === 90 || rotation === 270;
+    const drawW = isSideways ? targetHeight : targetWidth;
+    const drawH = isSideways ? targetWidth : targetHeight;
+
+    ctx.drawImage(video, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
   };
 
   // Captura Manual
@@ -122,30 +182,31 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, width, height);
+    drawTransformedVideo(ctx, video, width, height);
 
-    canvas.toBlob(blob => {
-      if (blob) {
-        const previewUrl = URL.createObjectURL(blob);
-        setCapturedBlob(blob);
-        setCapturedPreview(previewUrl);
-        stopCamera();
-        onCapture(blob, previewUrl);
-      }
-    }, 'image/jpeg', 0.78);
-  }, [onCapture]);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          const previewUrl = URL.createObjectURL(blob);
+          setCapturedBlob(blob);
+          setCapturedPreview(previewUrl);
+          stopCamera();
+          onCapture(blob, previewUrl);
+        }
+      },
+      'image/jpeg',
+      0.82
+    );
+  }, [onCapture, isMirrored, rotation]);
 
   // ─── Análise em Tempo Real em 2 Estágios ───────────────────────────────────
-  // Estágio 1 (rápido): imagem 320px → /api/ocr-live → só bloco+ap+confiança
-  //   → sem lookup Supabase, timeout 4s, ciclo a cada 800ms
-  // Estágio 2 (completo): ao detectar ap, captura frame 720px → /api/upload
-  //   → enriquecimento completo em background enquanto UI já avança
+  // Estágio 1 (rápido): imagem 600px → /api/ocr-live → identifica bloco + apto
+  // Estágio 2 (completo): enriquece em segundo plano com /api/upload
   useEffect(() => {
     if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
 
     let isScanning = false;
 
-    // Captura um frame do vídeo em uma resolução alvo e retorna blob + ctx
     const captureFrame = (
       targetDim: number,
       quality: number
@@ -171,9 +232,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(null);
-        ctx.drawImage(video, 0, 0, width, height);
 
-        // Checagem de brilho — rejeita frames escuros/pretos
+        drawTransformedVideo(ctx, video, width, height);
+
+        // Checagem de brilho — descarta frames pretos/cobertos
         let brightnessSum = 0;
         let count = 0;
         try {
@@ -201,10 +263,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       setIsLiveAnalyzing(true);
 
       try {
-        // ── Estágio 1: Frame leve (320px, q=0.65) → /api/ocr-live ──
-        const fast = await captureFrame(320, 0.65);
+        // Estágio 1: Resolução de 600px para garantir leitura nítida de números pequenos
+        const fast = await captureFrame(600, 0.75);
         if (!fast || fast.avgBrightness < 15) {
-          // Frame escuro/preto — ignora silenciosamente
           return;
         }
 
@@ -229,21 +290,20 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         if (!detected || autoCaptureFiredRef.current) return;
 
-        // ── Estágio 2: Etiqueta encontrada → captura frame completo (720px) ──
+        // Estágio 2: Encontrou unidade/apto com sucesso!
         autoCaptureFiredRef.current = true;
         setIsDetected(true);
         clearInterval(interval);
 
-        try { navigator.vibrate?.([50, 50, 100]); } catch {}
+        try {
+          navigator.vibrate?.([50, 50, 100]);
+        } catch {}
 
-        // Usa o frame leve como preview instantâneo enquanto o upload completo ocorre
         const previewUrl = URL.createObjectURL(fast.blob);
         setCapturedBlob(fast.blob);
         setCapturedPreview(previewUrl);
         stopCamera();
 
-        // Dispara upload completo em background (com Supabase lookup)
-        // O onCapture é chamado primeiro com resultado parcial para UI não bloquear
         const partialOcr = {
           ocr: {
             recipientName: null,
@@ -260,8 +320,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         };
         onCapture(fast.blob, previewUrl, partialOcr as any);
 
-        // Em background: enriquece com frame 720px → /api/upload (nome, morador, rastreio)
-        captureFrame(720, 0.80).then(async (full) => {
+        // Enriquecimento completo em background (720px)
+        captureFrame(720, 0.82).then(async (full) => {
           if (!full) return;
           try {
             const fd2 = new FormData();
@@ -269,10 +329,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd2 });
             if (uploadRes.ok) {
               const fullOcr = await uploadRes.json();
-              // Dispara evento customizado para a página atualizar campos já preenchidos
-              window.dispatchEvent(
-                new CustomEvent('ocr-enriched', { detail: fullOcr })
-              );
+              window.dispatchEvent(new CustomEvent('ocr-enriched', { detail: fullOcr }));
             }
           } catch {}
         });
@@ -284,63 +341,21 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         isScanning = false;
         setIsLiveAnalyzing(false);
       }
-    }, 800);
+    }, 900);
 
     return () => {
       clearInterval(interval);
     };
-  }, [stream, capturedBlob, onCapture]);
+  }, [stream, capturedBlob, onCapture, isMirrored, rotation]);
 
-  const compressImage = (fileOrBlob: Blob | File): Promise<Blob> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(fileOrBlob);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const maxDim = 800;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob((b) => {
-            resolve(b || fileOrBlob);
-          }, 'image/jpeg', 0.78);
-        } else {
-          resolve(fileOrBlob);
-        }
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(fileOrBlob);
-      };
-      img.src = url;
-    });
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const compressed = await compressImage(file);
-      const previewUrl = URL.createObjectURL(compressed);
-      setCapturedBlob(compressed);
+      const previewUrl = URL.createObjectURL(file);
+      setCapturedBlob(file);
       setCapturedPreview(previewUrl);
       stopCamera();
-      onCapture(compressed, previewUrl);
+      onCapture(file, previewUrl);
     }
   };
 
@@ -375,7 +390,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Visualizador da Câmera ou Preview - Otimizado na Vertical */}
+      {/* Visualizador da Câmera ou Preview */}
       <div className={`relative w-full h-[62vh] min-h-[460px] max-h-[620px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border transition-all duration-300 ${isDetected ? 'border-emerald-400 ring-4 ring-emerald-500/30' : 'border-slate-800 shadow-inner'}`}>
         {capturedPreview ? (
           <img
@@ -405,18 +420,17 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               // @ts-ignore
               webkit-playsinline="true"
               x5-playsinline="true"
-              onLoadedMetadata={() => {
-                if (videoRef.current) {
-                  videoRef.current.play().catch(() => {});
-                }
+              style={{
+                transform: `rotate(${rotation}deg) scaleX(${isMirrored ? -1 : 1})`,
+                transition: 'transform 0.2s ease',
               }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
-            {/* Linha Laser Animada de Scanner Contínuo */}
+            {/* Linha Laser Animada de Scanner */}
             <div className="absolute inset-x-6 top-1/3 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#10b981] animate-pulse pointer-events-none" />
 
-            {/* Grid overlay de enquadramento vertical */}
+            {/* Grid overlay */}
             <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
               {/* Badge de Análise em Tempo Real no topo */}
               <div className="self-center flex items-center gap-2 bg-black/85 backdrop-blur-md px-4 py-2 rounded-full border border-emerald-500/40 shadow-xl">
@@ -437,6 +451,39 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
                 )}
               </div>
 
+              {/* Botões Rápidos de Ajuste da Câmera (Espelhar / Girar / Trocar) */}
+              <div className="self-center flex items-center gap-2 bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700 pointer-events-auto shadow-lg">
+                <button
+                  type="button"
+                  onClick={toggleMirror}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${isMirrored ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                  title="Inverter/Espelhar Câmera Horizontalmente"
+                >
+                  <FlipHorizontal className="w-3.5 h-3.5" />
+                  <span>{isMirrored ? 'Espelhado' : 'Normal'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={rotateCamera}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                  title="Girar Câmera 90 Graus"
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                  <span>{rotation}°</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={switchCamera}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                  title="Alternar entre Câmera Traseira e Frontal"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>{facingMode === 'environment' ? 'Traseira' : 'Frontal'}</span>
+                </button>
+              </div>
+
               {/* Rodapé informativo */}
               <span className="text-[11px] text-slate-300 font-mono bg-black/75 px-3 py-1 rounded-full self-center border border-slate-800">
                 Apto • Morador • NF • Rastreio
@@ -446,7 +493,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         )}
       </div>
 
-      {/* Controles */}
+      {/* Controles Principais */}
       <div className="w-full mt-4 flex items-center justify-between gap-3">
         <input
           type="file"
@@ -458,15 +505,13 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         />
 
         {capturedPreview ? (
-          <>
-            <button
-              type="button"
-              onClick={retakePhoto}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-sm transition"
-            >
-              <RefreshCw className="w-4 h-4" /> Tirar Outra Foto
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={retakePhoto}
+            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-sm transition"
+          >
+            <RefreshCw className="w-4 h-4" /> Tirar Outra Foto
+          </button>
         ) : (
           <>
             <button
@@ -475,15 +520,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               className="flex items-center gap-2 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
             >
               <Upload className="w-4 h-4" /> Galeria / Arquivo
-            </button>
-
-            <button
-              type="button"
-              onClick={switchCamera}
-              className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-              title="Alternar Câmera"
-            >
-              <RefreshCw className="w-4 h-4" />
             </button>
 
             <button
