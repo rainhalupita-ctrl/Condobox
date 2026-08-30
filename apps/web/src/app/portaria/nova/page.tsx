@@ -18,9 +18,23 @@ import {
   Phone,
   FileText,
   AlertTriangle,
-  X
+  X,
+  History,
+  Check,
+  Clock,
+  ChevronDown
 } from 'lucide-react';
 import Link from 'next/link';
+
+interface RecentSavedPackage {
+  id: string;
+  pickupCode: string;
+  unitText: string;
+  residentName: string;
+  carrier: string;
+  whatsappStatus: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+  createdAt: Date;
+}
 
 export default function NovaEncomendaPage() {
   const router = useRouter();
@@ -46,7 +60,18 @@ export default function NovaEncomendaPage() {
 
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [savedSuccess, setSavedSuccess] = useState<any | null>(null);
+
+  // Encomendas recém-cadastradas na sessão para monitoramento em tempo real
+  const [recentSaved, setRecentSaved] = useState<RecentSavedPackage[]>([]);
+  const [lastNotificationToast, setLastNotificationToast] = useState<{
+    id: string;
+    pickupCode: string;
+    unitText: string;
+    carrier: string;
+    residentName: string;
+    whatsappStatus: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+  } | null>(null);
+  const [showRecentDrawer, setShowRecentDrawer] = useState(true);
 
   // Modal de Aviso de Duplicidade
   const [duplicateWarning, setDuplicateWarning] = useState<any | null>(null);
@@ -54,6 +79,45 @@ export default function NovaEncomendaPage() {
   useEffect(() => {
     loadUnitsAndResidents();
   }, []);
+
+  // Monitora o status das notificações de WhatsApp em segundo plano a cada 2.5s
+  useEffect(() => {
+    if (recentSaved.length === 0) return;
+    const interval = setInterval(async () => {
+      const supabase = createClient();
+      const pendingIds = recentSaved
+        .filter((p) => p.whatsappStatus === 'QUEUED' || p.whatsappStatus === 'SENDING')
+        .map((p) => p.id);
+
+      if (pendingIds.length === 0) return;
+
+      const { data } = await supabase
+        .from('packages')
+        .select('id, status')
+        .in('id', pendingIds);
+
+      if (data && data.length > 0) {
+        setRecentSaved((prev) =>
+          prev.map((p) => {
+            const match = data.find((d) => d.id === p.id);
+            if (match && (match.status === 'NOTIFIED' || match.status === 'DELIVERED')) {
+              return { ...p, whatsappStatus: 'SENT' };
+            }
+            return p;
+          })
+        );
+
+        if (lastNotificationToast && pendingIds.includes(lastNotificationToast.id)) {
+          const match = data.find((d) => d.id === lastNotificationToast.id);
+          if (match && (match.status === 'NOTIFIED' || match.status === 'DELIVERED')) {
+            setLastNotificationToast((prev) => (prev ? { ...prev, whatsappStatus: 'SENT' } : null));
+          }
+        }
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [recentSaved, lastNotificationToast]);
 
   const loadUnitsAndResidents = async () => {
     const supabase = createClient();
@@ -249,6 +313,8 @@ export default function NovaEncomendaPage() {
     try {
       const selectedUnit = units.find(u => u.id === selectedUnitId);
       const selectedRes = residents.find(r => r.id === selectedResidentId);
+      const unitText = selectedUnit ? `Apto ${selectedUnit.unit_number} - ${selectedUnit.block}` : 'Unidade';
+      const resName = selectedRes?.name || recipientNameOcr || 'Morador';
 
       // Concatena nota fiscal nas notas caso preenchida
       const finalNotes = invoiceNumber
@@ -265,11 +331,44 @@ export default function NovaEncomendaPage() {
         notes: finalNotes,
         sendWhatsApp: sendWhatsApp,
         residentPhone: customPhone || selectedRes?.phone || null,
-        residentName: selectedRes?.name || 'Morador(a)',
-        unitInfo: selectedUnit ? `Apto ${selectedUnit.unit_number} - ${selectedUnit.block}` : undefined
+        residentName: resName,
+        unitInfo: unitText
       });
 
-      setSavedSuccess(res);
+      const pkgId = res.package?.id;
+      const pickupCode = res.package?.pickup_code || '----';
+
+      // Feedback háptico de sucesso
+      try {
+        navigator.vibrate?.([40, 60, 40]);
+      } catch {}
+
+      // Tenta disparar notificação local imediata se disponível
+      if (pkgId) {
+        LocalApiClient.notifyPackage(pkgId, true).catch(() => {});
+      }
+
+      // Adiciona na lista de recentes para acompanhamento em tempo real
+      const newSavedItem: RecentSavedPackage = {
+        id: pkgId,
+        pickupCode,
+        unitText,
+        residentName: resName,
+        carrier,
+        whatsappStatus: res.whatsapp?.sent ? 'SENT' : 'SENDING',
+        createdAt: new Date()
+      };
+
+      setRecentSaved(prev => [newSavedItem, ...prev.slice(0, 9)]);
+      setLastNotificationToast(newSavedItem);
+
+      // Auto-oculta o toast após 6s
+      setTimeout(() => {
+        setLastNotificationToast(prev => (prev?.id === pkgId ? null : prev));
+      }, 6000);
+
+      // Retorna IMEDIATAMENTE para a câmera para ler o próximo pacote sem travar!
+      resetForm();
     } catch (err: any) {
       alert(`Erro ao registrar encomenda: ${err.message}`);
     } finally {
@@ -284,18 +383,18 @@ export default function NovaEncomendaPage() {
     setOcrData(null);
     setSelectedUnitId('');
     setSelectedResidentId('');
+    setSelectedUnitNumber('');
     setCarrier('Mercado Livre');
     setTrackingCode('');
     setInvoiceNumber('');
     setRecipientNameOcr('');
     setNotes('');
     setCustomPhone('');
-    setSavedSuccess(null);
     setDuplicateWarning(null);
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-5">
       {/* Pop-up de Leitura em Andamento */}
       {isOcrProcessing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fade-in">
@@ -385,6 +484,49 @@ export default function NovaEncomendaPage() {
         </div>
       )}
 
+      {/* Toast de Notificação Imediata da Última Encomenda Salva */}
+      {lastNotificationToast && (
+        <div className="bg-slate-900/95 border border-emerald-500/50 rounded-2xl p-4 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-white">
+                  {lastNotificationToast.unitText}
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
+                  Cód: {lastNotificationToast.pickupCode}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                {lastNotificationToast.residentName} • {lastNotificationToast.carrier}
+              </p>
+            </div>
+          </div>
+
+          {/* Status do WhatsApp em Tempo Real */}
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            {lastNotificationToast.whatsappStatus === 'SENT' ? (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
+                <Phone className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp Enviado
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 text-xs font-bold border border-amber-500/30 animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" /> Disparando WhatsApp...
+              </span>
+            )}
+            <button
+              onClick={() => setLastNotificationToast(null)}
+              className="p-1 text-slate-500 hover:text-slate-300 rounded-lg"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header com voltar */}
       <div className="flex items-center justify-between">
         <Link
@@ -393,83 +535,62 @@ export default function NovaEncomendaPage() {
         >
           <ArrowLeft className="w-4 h-4" /> Voltar ao Painel da Portaria
         </Link>
-        <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-3 py-1 rounded-full">
-          Recepção de Encomendas
+        <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-3 py-1 rounded-full flex items-center gap-1.5">
+          <Camera className="w-3.5 h-3.5" /> Recepção Contínua
         </span>
       </div>
 
-      {/* Sucesso após cadastro */}
-      {savedSuccess ? (
-        <div className="bg-slate-900 border border-emerald-500/40 rounded-3xl p-8 text-center space-y-6 shadow-2xl animate-fade-in">
-          <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl flex items-center justify-center mx-auto">
-            <CheckCircle2 className="w-10 h-10" />
-          </div>
+      {step === 'CAPTURE' ? (
+        /* Passo 1: Captura da Foto Imediata */
+        <div className="space-y-5 animate-fade-in">
+          <CameraCapture onCapture={handleCapturePhoto} onCancel={() => router.push('/portaria')} />
 
-          <div className="space-y-2">
-            <h2 className="text-2xl font-black text-slate-100">Encomenda Registrada com Sucesso!</h2>
-            <p className="text-sm text-slate-400">
-              O pacote foi cadastrado e a notificação está pronta.
-            </p>
-          </div>
-
-          {/* Código de Retirada */}
-          <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 inline-block">
-            <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold block mb-1">
-              Código de Retirada do Morador
-            </span>
-            <span className="text-4xl font-black font-mono text-emerald-400 tracking-widest">
-              {savedSuccess.package?.pickup_code || '----'}
-            </span>
-          </div>
-
-          {savedSuccess.whatsapp?.sent ? (
-            <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 font-medium bg-emerald-950/40 border border-emerald-800/40 p-3 rounded-2xl max-w-md mx-auto">
-              <Phone className="w-4 h-4 text-emerald-400" />
-              <span>Mensagem com foto e código enviada com sucesso no WhatsApp do morador!</span>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-2 text-xs text-amber-300 font-medium bg-amber-950/30 border border-amber-800/40 p-3.5 rounded-2xl max-w-md mx-auto">
-              <div className="flex items-center gap-1.5">
-                <AlertCircle className="w-4 h-4 text-amber-400" />
-                <span>WhatsApp ainda não foi disparado para esta encomenda.</span>
+          {/* Fila de Encomendas Recebidas Recentemente nesta sessão */}
+          {recentSaved.length > 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
+                  <History className="w-4 h-4 text-indigo-400" />
+                  <span>Últimas Encomendas Recebidas ({recentSaved.length})</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium">Disparos em segundo plano</span>
               </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (savedSuccess.package?.id) {
-                    const res = await LocalApiClient.notifyPackage(savedSuccess.package.id, true);
-                    if (res.success) {
-                      setSavedSuccess({ ...savedSuccess, whatsapp: { sent: true } });
-                    } else {
-                      alert(`Erro: ${res.error || 'Falha ao enviar mensagem.'}`);
-                    }
-                  }
-                }}
-                className="mt-1 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-950"
-              >
-                <Send className="w-3.5 h-3.5" /> Enviar WhatsApp Agora
-              </button>
+
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                {recentSaved.map((pkg) => (
+                  <div
+                    key={pkg.id}
+                    className="flex items-center justify-between bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3 text-xs hover:border-slate-700 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="px-2.5 py-1 bg-slate-800 border border-slate-700 text-emerald-400 rounded-xl font-black font-mono tracking-wider">
+                        {pkg.pickupCode}
+                      </div>
+                      <div>
+                        <span className="font-bold text-white block">{pkg.unitText}</span>
+                        <span className="text-slate-400 text-[11px]">
+                          {pkg.residentName} • {pkg.carrier}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      {pkg.whatsappStatus === 'SENT' ? (
+                        <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-xl">
+                          <Check className="w-3.5 h-3.5" /> WhatsApp Enviado
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-xl animate-pulse">
+                          <RefreshCw className="w-3 h-3 animate-spin text-amber-400" /> Enviando...
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-            <button
-              onClick={resetForm}
-              className="flex items-center justify-center gap-2 py-3 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-emerald-950 transition"
-            >
-              <Camera className="w-4 h-4" /> Receber Outra Encomenda
-            </button>
-            <button
-              onClick={() => router.push('/portaria')}
-              className="py-3 px-6 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold text-sm transition"
-            >
-              Voltar à Fila da Portaria
-            </button>
-          </div>
         </div>
-      ) : step === 'CAPTURE' ? (
-        /* Passo 1: Captura da Foto Imediata */
-        <CameraCapture onCapture={handleCapturePhoto} onCancel={() => router.push('/portaria')} />
       ) : (
         /* Passo 2: Confirmação e Ajuste dos Dados */
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
