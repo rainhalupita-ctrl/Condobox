@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, Check, X, Upload, Zap, Sparkles } from 'lucide-react';
+import { Camera, RefreshCw, Check, X, Upload, Sparkles, Scan, Zap } from 'lucide-react';
+import { LocalApiClient, OCRResponse } from '../lib/local-api';
 
 interface CameraCaptureProps {
-  onCapture: (blob: Blob, previewUrl: string) => void;
+  onCapture: (blob: Blob, previewUrl: string, precalculatedOcr?: OCRResponse) => void;
   onCancel?: () => void;
 }
 
@@ -23,8 +24,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Estados de Auto-Captura Inteligente
-  const [autoCaptureProgress, setAutoCaptureProgress] = useState(0);
+  // Estados de Análise Contínua em Tempo Real
+  const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
   const [isDetected, setIsDetected] = useState(false);
   const autoCaptureFiredRef = useRef(false);
 
@@ -38,7 +39,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
   const startCamera = async () => {
     setCameraError(null);
-    setAutoCaptureProgress(0);
     setIsDetected(false);
     autoCaptureFiredRef.current = false;
 
@@ -91,6 +91,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
   };
 
+  // Captura Manual
   const takeSnapshot = useCallback(() => {
     if (!videoRef.current || autoCaptureFiredRef.current) return;
     autoCaptureFiredRef.current = true;
@@ -134,52 +135,106 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }, 'image/jpeg', 0.78);
   }, [onCapture]);
 
-  // Loop de Detecção Automática da Etiqueta
+  // Análise em Tempo Real em Segundo Plano enquanto a câmera estiver aberta
   useEffect(() => {
     if (!stream || capturedBlob || autoCaptureFiredRef.current) return;
 
-    let progress = 0;
-    let detector: any = null;
-
-    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-      try {
-        // @ts-ignore
-        detector = new window.BarcodeDetector({
-          formats: ['code_128', 'code_39', 'qr_code', 'data_matrix', 'ean_13', 'itf']
-        });
-      } catch {}
-    }
-
+    let isScanning = false;
     const interval = setInterval(async () => {
-      if (autoCaptureFiredRef.current || !videoRef.current || videoRef.current.readyState < 2) {
+      if (
+        autoCaptureFiredRef.current ||
+        !videoRef.current ||
+        videoRef.current.readyState < 2 ||
+        isScanning
+      ) {
         return;
       }
 
-      // 1. Tenta detecção por código de barras da etiqueta
-      if (detector) {
-        try {
-          const barcodes = await detector.detect(videoRef.current);
-          if (barcodes && barcodes.length > 0) {
-            console.log('⚡ [Auto-Capture] Código detectado na etiqueta:', barcodes[0].rawValue);
-            clearInterval(interval);
-            takeSnapshot();
+      isScanning = true;
+      setIsLiveAnalyzing(true);
+
+      try {
+        const video = videoRef.current;
+        const maxDim = 720;
+        let width = video.videoWidth || 720;
+        let height = video.videoHeight || 480;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          isScanning = false;
+          setIsLiveAnalyzing(false);
+          return;
+        }
+
+        ctx.drawImage(video, 0, 0, width, height);
+
+        canvas.toBlob(async (blob) => {
+          if (!blob || autoCaptureFiredRef.current) {
+            isScanning = false;
+            setIsLiveAnalyzing(false);
             return;
           }
-        } catch {}
+
+          try {
+            const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
+
+            const ocr = ocrResult?.ocr;
+            // Se identificou o morador, unidade, NF ou código de rastreio com sucesso
+            const hasSignificantInfo =
+              ocr &&
+              (
+                (ocr.recipientName && ocr.recipientName.length >= 3) ||
+                (ocr.unitNumber && ocr.unitNumber.length >= 1) ||
+                (ocr.trackingCode && ocr.trackingCode.length >= 5) ||
+                (ocr.invoiceNumber && ocr.invoiceNumber.length >= 4)
+              );
+
+            if (hasSignificantInfo && !autoCaptureFiredRef.current) {
+              autoCaptureFiredRef.current = true;
+              setIsDetected(true);
+              clearInterval(interval);
+
+              try {
+                navigator.vibrate?.([50, 50, 100]);
+              } catch {}
+
+              const previewUrl = URL.createObjectURL(blob);
+              setCapturedBlob(blob);
+              setCapturedPreview(previewUrl);
+              stopCamera();
+              onCapture(blob, previewUrl, ocrResult);
+              return;
+            }
+          } catch (err) {
+            // Silencioso em background enquanto busca foco na etiqueta
+          } finally {
+            isScanning = false;
+            setIsLiveAnalyzing(false);
+          }
+        }, 'image/jpeg', 0.75);
+      } catch {
+        isScanning = false;
+        setIsLiveAnalyzing(false);
       }
+    }, 1500);
 
-      // 2. Progresso de Auto-Captura Contínua (2.2 segundos de enquadramento)
-      progress += 6;
-      setAutoCaptureProgress(Math.min(progress, 100));
-
-      if (progress >= 100) {
-        clearInterval(interval);
-        takeSnapshot();
-      }
-    }, 120);
-
-    return () => clearInterval(interval);
-  }, [stream, capturedBlob, takeSnapshot]);
+    return () => {
+      clearInterval(interval);
+    };
+  }, [stream, capturedBlob, onCapture]);
 
   const compressImage = (fileOrBlob: Blob | File): Promise<Blob> => {
     return new Promise((resolve) => {
@@ -241,8 +296,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     setCapturedPreview(null);
     setCapturedBlob(null);
     autoCaptureFiredRef.current = false;
-    setAutoCaptureProgress(0);
     setIsDetected(false);
+    setIsLiveAnalyzing(false);
     startCamera();
   };
 
@@ -303,23 +358,28 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
-            {/* Linha Laser Animada de Scanner */}
-            <div className="absolute inset-x-8 top-1/4 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#10b981] animate-pulse pointer-events-none" />
+            {/* Linha Laser Animada de Scanner Contínuo */}
+            <div className="absolute inset-x-6 top-1/3 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#10b981] animate-pulse pointer-events-none" />
 
             {/* Grid overlay de enquadramento vertical */}
             <div className="absolute inset-4 sm:inset-6 border-2 border-dashed border-emerald-400/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
-              {/* Badge de Auto-Detecção no topo com progresso */}
-              <div className="self-center flex items-center gap-2 bg-black/85 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-emerald-500/40 shadow-xl">
-                <Zap className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
-                <span className="text-xs font-bold text-emerald-300">
-                  {isDetected ? '⚡ Etiqueta Reconhecida!' : 'Auto-Leitura Ativa... Aponte para a etiqueta'}
-                </span>
-                <div className="w-8 h-1.5 bg-slate-800 rounded-full overflow-hidden ml-1">
-                  <div
-                    className="h-full bg-emerald-400 transition-all duration-150"
-                    style={{ width: `${autoCaptureProgress}%` }}
-                  />
-                </div>
+              {/* Badge de Análise em Tempo Real no topo */}
+              <div className="self-center flex items-center gap-2 bg-black/85 backdrop-blur-md px-4 py-2 rounded-full border border-emerald-500/40 shadow-xl">
+                {isDetected ? (
+                  <>
+                    <Zap className="w-4 h-4 text-emerald-400 animate-bounce" />
+                    <span className="text-xs font-bold text-emerald-300">
+                      ⚡ Etiqueta Identificada com Sucesso!
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span className="text-xs font-semibold text-emerald-300">
+                      {isLiveAnalyzing ? '🔍 Analisando etiqueta ao vivo...' : 'Aponte para a etiqueta...'}
+                    </span>
+                  </>
+                )}
               </div>
 
               {/* Rodapé informativo */}

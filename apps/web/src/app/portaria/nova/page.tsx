@@ -65,64 +65,65 @@ export default function NovaEncomendaPage() {
     }
   };
 
-  const handleCapturePhoto = async (blob: Blob, previewUrl: string) => {
+  const applyOcrData = (ocrResult: OCRResponse) => {
+    setOcrData(ocrResult);
+
+    let currentUnits = units;
+    let currentResidents = residents;
+
+    if (ocrResult.ocr.carrier) setCarrier(ocrResult.ocr.carrier);
+    if (ocrResult.ocr.trackingCode) setTrackingCode(ocrResult.ocr.trackingCode);
+    if ((ocrResult.ocr as any).invoiceNumber) setInvoiceNumber((ocrResult.ocr as any).invoiceNumber);
+    if (ocrResult.ocr.recipientName) setRecipientNameOcr(ocrResult.ocr.recipientName);
+
+    // Match inteligente da unidade
+    let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
+    if (!targetUnitId && ocrResult.ocr.unitNumber) {
+      const cleanNum = ocrResult.ocr.unitNumber.replace(/\D/g, '');
+      const found = currentUnits.find(u => {
+        const uNum = u.unit_number.replace(/\D/g, '');
+        const matchNum = uNum === cleanNum;
+        if (ocrResult.ocr.block) {
+          return matchNum && u.block.toLowerCase().includes(ocrResult.ocr.block.toLowerCase());
+        }
+        return matchNum;
+      }) || currentUnits.find(u => u.unit_number.replace(/\D/g, '') === cleanNum);
+      if (found) targetUnitId = found.id;
+    }
+
+    if (targetUnitId) {
+      setSelectedUnitId(targetUnitId);
+      const unitRes = currentResidents.filter(r => r.unit_id === targetUnitId);
+      if (ocrResult.suggestedMatch?.resident) {
+        setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
+        setCustomPhone(ocrResult.suggestedMatch.resident.phone);
+      } else if (unitRes.length > 0) {
+        const matchByName = unitRes.find(r => 
+          ocrResult.ocr.recipientName && 
+          r.name.toLowerCase().includes(ocrResult.ocr.recipientName.toLowerCase().split(' ')[0])
+        ) || unitRes[0];
+        setSelectedResidentId(matchByName.id);
+        setCustomPhone(matchByName.phone);
+      }
+    }
+  };
+
+  const handleCapturePhoto = async (blob: Blob, previewUrl: string, precalculatedOcr?: OCRResponse) => {
     setCapturedBlob(blob);
     setCapturedPreview(previewUrl);
     setStep('CONFIRM');
+
+    // Se a IA já analisou ao vivo em segundo plano com a câmera aberta
+    if (precalculatedOcr) {
+      applyOcrData(precalculatedOcr);
+      return;
+    }
+
+    // Caso o porteiro tenha clicado manualmente em Fotografar antes da análise automática
     setIsOcrProcessing(true);
-
     try {
-      // Processa OCR com Gemini em alta velocidade
       const ocrResult = await LocalApiClient.uploadLabelAndOCR(blob);
-      setOcrData(ocrResult);
-
-      // Garante que as unidades e moradores estejam carregados
-      let currentUnits = units;
-      let currentResidents = residents;
-      if (currentUnits.length === 0) {
-        const supabase = createClient();
-        const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
-        const { data: rData } = await supabase.from('residents').select('*').eq('active', true);
-        if (uData) { currentUnits = uData; setUnits(uData); }
-        if (rData) { currentResidents = rData; setResidents(rData); }
-      }
-
-      // Preenche os campos da encomenda sem alterar os dados cadastrais do morador
-      if (ocrResult.ocr.carrier) setCarrier(ocrResult.ocr.carrier);
-      if (ocrResult.ocr.trackingCode) setTrackingCode(ocrResult.ocr.trackingCode);
-      if ((ocrResult.ocr as any).invoiceNumber) setInvoiceNumber((ocrResult.ocr as any).invoiceNumber);
-      if (ocrResult.ocr.recipientName) setRecipientNameOcr(ocrResult.ocr.recipientName);
-
-      // Match inteligente da unidade
-      let targetUnitId = ocrResult.suggestedMatch?.unit?.id;
-      if (!targetUnitId && ocrResult.ocr.unitNumber) {
-        const cleanNum = ocrResult.ocr.unitNumber.replace(/\D/g, '');
-        const found = currentUnits.find(u => {
-          const uNum = u.unit_number.replace(/\D/g, '');
-          const matchNum = uNum === cleanNum;
-          if (ocrResult.ocr.block) {
-            return matchNum && u.block.toLowerCase().includes(ocrResult.ocr.block.toLowerCase());
-          }
-          return matchNum;
-        }) || currentUnits.find(u => u.unit_number.replace(/\D/g, '') === cleanNum);
-        if (found) targetUnitId = found.id;
-      }
-
-      if (targetUnitId) {
-        setSelectedUnitId(targetUnitId);
-        const unitRes = currentResidents.filter(r => r.unit_id === targetUnitId);
-        if (ocrResult.suggestedMatch?.resident) {
-          setSelectedResidentId(ocrResult.suggestedMatch.resident.id);
-          setCustomPhone(ocrResult.suggestedMatch.resident.phone);
-        } else if (unitRes.length > 0) {
-          const matchByName = unitRes.find(r => 
-            ocrResult.ocr.recipientName && 
-            r.name.toLowerCase().includes(ocrResult.ocr.recipientName.toLowerCase().split(' ')[0])
-          ) || unitRes[0];
-          setSelectedResidentId(matchByName.id);
-          setCustomPhone(matchByName.phone);
-        }
-      }
+      applyOcrData(ocrResult);
     } catch (err: any) {
       console.error('Falha no OCR:', err);
     } finally {
