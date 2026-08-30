@@ -78,14 +78,9 @@ export class WhatsAppService {
         const webBaseUrl = this.getPublicWebUrl();
         const token = params.qrToken || params.pickupCode;
         const pickupUrl = `${webBaseUrl}/p/${token}`;
-        const portariaPhone = process.env.WHATSAPP_PORTARIA_NUMBER || '557398419901';
-        const waConfirmLink = `https://wa.me/${portariaPhone}?text=${encodeURIComponent(`Estou ciente da encomenda ${params.pickupCode}`)}`;
         const text = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
             `Olá, *${params.residentName}*!\n\n` +
             `Uma encomenda de *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
-            `🔑 *Código de Retirada:* *${params.pickupCode}*\n\n` +
-            `👇 *Toque no link abaixo para responder que está ciente (1 clique):*\n` +
-            `${waConfirmLink}\n\n` +
             `📱 *Link com QR Code de retirada:*\n` +
             `${pickupUrl}\n\n` +
             `_Apresente o QR Code ou informe o código de 4 dígitos na portaria._\n\n` +
