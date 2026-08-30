@@ -1,3 +1,4 @@
+import os from 'os';
 import { env } from '../config/env.js';
 export class WhatsAppService {
     apiUrl;
@@ -7,6 +8,30 @@ export class WhatsAppService {
         this.apiUrl = env.EVOLUTION_API_URL.replace(/\/$/, '');
         this.apiKey = env.EVOLUTION_API_KEY;
         this.instanceName = env.EVOLUTION_INSTANCE_NAME;
+    }
+    /**
+     * Obtém a URL pública ou o IP de rede da máquina para que o celular no Wi-Fi/4G consiga abrir
+     */
+    getPublicWebUrl() {
+        // 1. Se estiver configurado um domínio público no .env (ex: ngrok, cloudflare ou domínio real), usa ele
+        if (env.WEB_APP_URL && !env.WEB_APP_URL.includes('localhost') && !env.WEB_APP_URL.includes('127.0.0.1')) {
+            return env.WEB_APP_URL.replace(/\/$/, '');
+        }
+        // 2. Se for localhost, resolve para o IP real da máquina na rede local (ex: 192.168.0.6)
+        try {
+            const nets = os.networkInterfaces();
+            for (const name of Object.keys(nets)) {
+                for (const net of nets[name] || []) {
+                    if (net.family === 'IPv4' && !net.internal && !net.address.startsWith('172.') && !net.address.startsWith('169.254')) {
+                        return `http://${net.address}:3000`;
+                    }
+                }
+            }
+        }
+        catch {
+            // Fallback para o valor configurado
+        }
+        return (env.WEB_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
     }
     /**
      * Normaliza número de telefone para formato WhatsApp (ex: 5511987654321)
@@ -22,17 +47,22 @@ export class WhatsAppService {
      * Envia notificação de chegada de encomenda
      */
     async notifyPackageArrival(params) {
-        const text = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA*\n\n` +
+        const webBaseUrl = this.getPublicWebUrl();
+        const token = params.qrToken || params.pickupCode;
+        const pickupUrl = `${webBaseUrl}/p/${token}`;
+        const text = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
             `Olá, *${params.residentName}*!\n\n` +
-            `Uma encomenda recebida da *${params.carrier}* acabou de chegar para sua unidade (*${params.unitInfo}*).\n\n` +
-            `🔑 *Código de Retirada:* \`${params.pickupCode}\`\n\n` +
-            `_Você pode apresentar este código numérico ou o QR Code no seu aplicativo na portaria para retirar._\n\n` +
+            `Uma encomenda da *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
+            `🔑 *Código de Retirada:* *${params.pickupCode}*\n\n` +
+            `📱 *Link Direto com QR Code (Sem login necessário):*\n` +
+            `${pickupUrl}\n\n` +
+            `_Abra o link acima para exibir o QR Code direto na portaria ou informe o código numérico de 4 dígitos._\n\n` +
             `🏢 Portaria do Condomínio`;
         return this.sendMessage({
             phone: params.phone,
             message: text,
             mediaUrl: params.labelImageUrl,
-            caption: `Foto da etiqueta da encomenda (${params.carrier})`
+            caption: `📦 Encomenda ${params.carrier} (${params.unitInfo})\n🔑 Código: ${params.pickupCode}\n📱 QR Code: ${pickupUrl}`
         });
     }
     /**
@@ -74,7 +104,8 @@ export class WhatsAppService {
                         'Content-Type': 'application/json',
                         'apikey': this.apiKey
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: AbortSignal.timeout(15000)
                 });
                 if (!response.ok) {
                     // Fallback para texto simples se o envio de media falhar
@@ -103,12 +134,9 @@ export class WhatsAppService {
                 },
                 body: JSON.stringify({
                     number: phone,
-                    text: text,
-                    options: {
-                        delay: 1200,
-                        presence: 'composing'
-                    }
-                })
+                    text: text
+                }),
+                signal: AbortSignal.timeout(10000)
             });
             if (!response.ok) {
                 const errorText = await response.text();
@@ -129,7 +157,8 @@ export class WhatsAppService {
         try {
             const url = `${this.apiUrl}/instance/connectionState/${this.instanceName}`;
             const response = await fetch(url, {
-                headers: { 'apikey': this.apiKey }
+                headers: { 'apikey': this.apiKey },
+                signal: AbortSignal.timeout(5000)
             });
             if (!response.ok)
                 return { state: 'DISCONNECTED', connected: false };

@@ -7,7 +7,9 @@ import { uploadRoutes } from './routes/upload.routes.js';
 import { packageRoutes } from './routes/package.routes.js';
 import { signatureRoutes } from './routes/signature.routes.js';
 import { healthRoutes } from './routes/health.routes.js';
+import { whatsappRoutes } from './routes/whatsapp.routes.js';
 import { setupCleanupCron } from './services/cleanup.cron.js';
+import { whatsAppQueueWorker } from './services/whatsapp-queue.worker.js';
 const fastify = Fastify({
     logger: {
         transport: {
@@ -39,11 +41,13 @@ async function main() {
     });
     // 3. Rotas da API
     await fastify.register(healthRoutes);
+    await fastify.register(whatsappRoutes);
     await fastify.register(uploadRoutes);
     await fastify.register(packageRoutes);
     await fastify.register(signatureRoutes);
-    // 4. Inicializar Cron de Limpeza de Fotos Antigas (90 dias)
+    // 4. Inicializar Cron de Limpeza e Fila de WhatsApp
     setupCleanupCron(90);
+    whatsAppQueueWorker.start();
     // 5. Iniciar Servidor
     try {
         const address = await fastify.listen({ port: env.PORT, host: env.HOST });

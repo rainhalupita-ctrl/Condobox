@@ -24,15 +24,18 @@ export class SupabaseService {
     /**
      * Busca todas as unidades e moradores para auto-complete e match do OCR
      */
-    async getUnitsAndResidents(condoId = env.CONDO_ID) {
+    async getUnitsAndResidents(condoId) {
         if (!this.isConfigured())
             return { units: [], residents: [] };
-        const { data: units, error: unitErr } = await this.getClient()
+        let query = this.getClient()
             .from('units')
             .select('id, block, unit_number')
-            .eq('condo_id', condoId)
             .order('block', { ascending: true })
             .order('unit_number', { ascending: true });
+        if (condoId && condoId.trim() !== '') {
+            query = query.eq('condo_id', condoId);
+        }
+        const { data: units, error: unitErr } = await query;
         if (unitErr) {
             console.error('[SupabaseService] Erro ao buscar unidades:', unitErr);
         }

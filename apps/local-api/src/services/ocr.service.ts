@@ -7,6 +7,7 @@ export interface OCRExtractionResult {
   unitNumber: string | null;
   carrier: string;
   trackingCode: string | null;
+  invoiceNumber?: string | null;
   rawText?: string;
   confidence: number;
 }
