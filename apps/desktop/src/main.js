@@ -124,7 +124,7 @@ function createWindow() {
       }
       mainWindow.show();
       mainWindow.focus();
-    }, 1800);
+    }, 4500);
   });
 
   mainWindow.on("closed", () => {

@@ -3,18 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CondoBox</title>
+  <title>CondoBox Loading</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       width: 100vw;
       height: 100vh;
-      background: radial-gradient(ellipse at 50% 40%, #0c1a24 0%, #081119 50%, #03070b 100%);
+      background: #000;
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
-      font-family: 'Segoe UI', system-ui, sans-serif;
       overflow: hidden;
       user-select: none;
       -webkit-user-select: none;
@@ -22,94 +20,15 @@
       border: 1px solid rgba(22, 163, 74, 0.2);
       border-radius: 28px;
     }
-
-    .logo-wrapper {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 16px;
-      animation: fadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(20px) scale(0.95); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
-    }
-
-    .splash-logo {
-      height: 120px;
-      width: auto;
-      object-contain: contain;
-      filter: drop-shadow(0 15px 35px rgba(16, 185, 129, 0.35));
-    }
-
-    .loader-bar-track {
-      width: 220px;
-      height: 4px;
-      background: rgba(255,255,255,0.06);
-      border-radius: 99px;
-      overflow: hidden;
-      margin-top: 14px;
-      box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
-    }
-
-    .loader-bar-fill {
+    video {
+      width: 100%;
       height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #10b981, #06b6d4, #10b981);
-      background-size: 200% 100%;
-      border-radius: 99px;
-      animation: progress 1.8s ease-in-out forwards, shimmer 1.5s linear infinite;
-    }
-
-    @keyframes progress {
-      0%   { width: 0%; }
-      40%  { width: 55%; }
-      70%  { width: 80%; }
-      90%  { width: 92%; }
-      100% { width: 100%; }
-    }
-
-    @keyframes shimmer {
-      0% { background-position: 100% 0; }
-      100% { background-position: -100% 0; }
-    }
-
-    .loading-text {
-      font-size: 11px;
-      color: #64748b;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      font-weight: 600;
-      animation: blink 1.5s infinite;
-    }
-
-    @keyframes blink {
-      0%, 100% { opacity: 0.6; }
-      50%       { opacity: 1; }
-    }
-
-    .version-tag {
-      position: absolute;
-      bottom: 16px;
-      font-size: 10px;
-      color: #334155;
-      letter-spacing: 1px;
-      font-weight: 600;
+      object-fit: cover;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <div class="logo-wrapper">
-    <img src="./splash_logo.png" alt="CondoBox" class="splash-logo" />
-
-    <div class="loader-bar-track">
-      <div class="loader-bar-fill"></div>
-    </div>
-    <div class="loading-text">Iniciando sistema...</div>
-  </div>
-
-  <div class="version-tag">CONDOBOX PORTARIA v1.0.0</div>
+  <video src="./splash.mp4" autoplay loop muted playsinline></video>
 </body>
 </html>

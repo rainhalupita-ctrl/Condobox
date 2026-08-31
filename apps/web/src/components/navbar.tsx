@@ -41,7 +41,7 @@ export function Navbar() {
           className="flex items-center gap-2.5 shrink-0 group"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <img
-            src="/logo.png?v=2"
+            src="/logo.png?v=3"
             alt="CondoBox"
             className="h-8 w-auto object-contain drop-shadow-md group-hover:scale-105 transition transform"
           />
