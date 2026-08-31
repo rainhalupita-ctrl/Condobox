@@ -1,0 +1,39 @@
+{
+  "name": "condobox-desktop",
+  "version": "1.0.0",
+  "description": "CondoBox Desktop App",
+  "main": "src/main.js",
+  "author": "CondoBox",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "condo-local-api": "*"
+  },
+  "devDependencies": {
+    "electron": "32.0.1",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "appId": "com.condobox.desktop",
+    "productName": "CondoBox",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": ["portable"]
+    },
+    "extraResources": [
+      {
+        "from": "../local-api/.env",
+        "to": ".env",
+        "filter": ["**/*"]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/condo-local-api/**/*"
+    ]
+  }
+}

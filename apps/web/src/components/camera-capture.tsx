@@ -105,8 +105,30 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       }
     } catch (err: any) {
       if (isMountedRef.current) {
-        console.warn('Câmera nativa não disponível:', err);
-        setCameraError('Não foi possível acessar a câmera do dispositivo. Use o botão de upload de foto.');
+        console.warn('Primeira tentativa da câmera falhou, tentando fallback genérico...', err);
+        try {
+          // Fallback: Tenta pegar qualquer câmera disponível sem restrições de resolução/lado
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          if (!isMountedRef.current) {
+            fallbackStream.getTracks().forEach((t) => {
+              try { t.stop(); t.enabled = false; } catch {}
+            });
+            return;
+          }
+          
+          streamRef.current = fallbackStream;
+          setStream(fallbackStream);
+          
+          if (videoRef.current) {
+            videoRef.current.srcObject = fallbackStream;
+            videoRef.current.setAttribute('playsinline', 'true');
+            videoRef.current.setAttribute('webkit-playsinline', 'true');
+            videoRef.current.play().catch(() => {});
+          }
+        } catch (fallbackErr) {
+          console.warn('Fallback da câmera também falhou:', fallbackErr);
+          setCameraError('Não foi possível acessar a câmera do dispositivo. Use o botão de upload de foto.');
+        }
       }
     }
   }, [facingMode, stopCamera]);
