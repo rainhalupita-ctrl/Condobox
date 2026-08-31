@@ -255,6 +255,7 @@ export class LocalApiClient {
     const res = await fetch(`${baseUrl}/api/packages/notify-pending`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: '{}',
       signal: AbortSignal.timeout(30000)
     });
     return await res.json();
