@@ -3,6 +3,9 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
+// Desabilitar aceleração de hardware ANTES do app estar pronto para evitar bugs com webcams antigas/DWM
+app.disableHardwareAcceleration();
+
 // Define App User Model ID no Windows para o ícone fixar corretamente na Barra de Tarefas
 if (process.platform === "win32") {
   app.setAppUserModelId("com.condobox.desktop");
@@ -33,6 +36,7 @@ function createSplash() {
     height: 320,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000', // Forçar fundo transparente nativo no Windows para evitar tela branca
     resizable: false,
     alwaysOnTop: true,
     center: true,
@@ -180,11 +184,12 @@ function startLocalApi() {
 app.whenReady().then(() => {
   // Permissão automática para câmera e microfone
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    callback(permission === "media");
+    // Força aceitação de qualquer mídia (câmera/microfone)
+    callback(true);
   });
 
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    return permission === "media";
+    return true;
   });
 
   startLocalApi();
