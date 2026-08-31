@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder && powershell -Command \"Get-ChildItem release -Recurse -Include *.exe | ForEach-Object { Unblock-File -Path $_.FullName; Write-Host 'Desbloqueado:' $_.Name }\""
   },
   "dependencies": {
     "condo-local-api": "*"
