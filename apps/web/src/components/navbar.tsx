@@ -28,14 +28,13 @@ export function Navbar() {
 
   return (
     <nav 
-      className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 select-none"
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 select-none w-full"
+      style={{ 
+        WebkitAppRegion: 'drag',
+        paddingRight: '140px' // Espaço reservado para os botões do Windows (Minimizar, Fechar)
+      } as React.CSSProperties}
     >
-      {/* 
-        Ajustamos o padding-right para evitar que os controles nativos do Windows (minimizar, fechar) 
-        fiquem em cima do botão de perfil do usuário. No Windows, ocupam aprox 140px.
-      */}
-      <div className="max-w-7xl mx-auto pl-4 pr-[140px] sm:pl-6 h-14 flex items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto pl-4 sm:pl-6 h-14 flex items-center justify-between gap-4">
         {/* Logo Oficial CondoBox */}
         <Link href={isPortaria ? '/portaria' : '/morador'}
           className="flex items-center gap-2.5 shrink-0 group"
