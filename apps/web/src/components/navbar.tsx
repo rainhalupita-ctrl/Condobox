@@ -45,6 +45,7 @@ export function Navbar() {
             alt="CondoBox"
             className="h-8 w-auto object-contain drop-shadow-md group-hover:scale-105 transition transform"
           />
+          <span className="text-white font-bold text-xl tracking-tight">CondoBox</span>
         </Link>
 
         {/* Links de navegação */}
