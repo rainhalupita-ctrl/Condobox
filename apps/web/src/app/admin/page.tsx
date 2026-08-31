@@ -30,16 +30,35 @@ import {
   Terminal,
   FileSpreadsheet,
   Mail,
+  Sparkles,
+  Printer,
+  Volume2,
+  VolumeX,
+  Database,
+  FileText,
+  Cpu,
   X
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
+import { VoiceService } from '../../lib/voice';
 
 export default function AdminPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'METRICS' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM'>('METRICS');
+  const [activeTab, setActiveTab] = useState<'METRICS' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM' | 'AUTOMATIONS'>('METRICS');
+
+  // Automações & Utilidades (Python & JS)
+  const [reportResult, setReportResult] = useState<any>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportPhone, setReportPhone] = useState('');
+  const [reportSendStatus, setReportSendStatus] = useState<string | null>(null);
+  const [backupList, setBackupList] = useState<any[]>([]);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupSuccessMsg, setBackupSuccessMsg] = useState<string | null>(null);
+  const [printerStatus, setPrinterStatus] = useState<string | null>(null);
+  const [voiceActive, setVoiceActive] = useState(true);
 
   // Gerenciamento e Gerador de Unidades/Blocos
   const [batchBlock, setBatchBlock] = useState('Bloco A');
@@ -156,7 +175,7 @@ export default function AdminPage() {
       if (res.qrcode) {
         setWhatsappQrCode(res.qrcode);
       } else if (res.error) {
-        setWhatsappError(res.error + ' — Certifique-se de que o Docker está rodando na porta 8080.');
+        setWhatsappError(res.error);
       }
       if (res.pairingCode) {
         setWhatsappPairingCode(res.pairingCode);
@@ -165,7 +184,7 @@ export default function AdminPage() {
       setWhatsappState(st);
     } catch (err: any) {
       console.error('Erro ao conectar WhatsApp:', err);
-      setWhatsappError('Evolution API indisponível na porta 8080. Inicie o Docker com "npm run docker:up".');
+      setWhatsappError('Motor nativo do WhatsApp em inicialização. Aguarde alguns instantes e tente novamente.');
     } finally {
       setWhatsappLoading(false);
     }
@@ -240,6 +259,111 @@ export default function AdminPage() {
     setStaffPassword('');
     setStaffLoading(false);
     loadStaff();
+  };
+
+  // Funções da Aba Automações & Utilidades
+  const handleGenerateReport = async () => {
+    setReportLoading(true);
+    setReportSendStatus(null);
+    try {
+      const res = await fetch('http://localhost:3001/api/reports/generate').catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        setReportResult(data);
+      } else {
+        // Fallback local caso a API não responda
+        const pending = packages.filter(p => p.status !== 'DELIVERED').length;
+        const delivered = packages.filter(p => p.status === 'DELIVERED').length;
+        const text = `📊 *RELATÓRIO DE FLUXO DA PORTARIA - CONDOBOX*\n🗓️ Data: ${new Date().toLocaleString('pt-BR')}\n\n📦 *ENCOMENDAS:*\n• Total Registradas: ${packages.length}\n• Entregues: ${delivered}\n• Pendentes: ${pending}\n\n🏢 *CADASTROS:*\n• Apartamentos: ${units.length}\n• Moradores: ${residents.length}\n\n_Sistema CondoBox Portaria Inteligente_`;
+        setReportResult({
+          generatedAt: new Date().toLocaleString('pt-BR'),
+          metrics: { totalPackages: packages.length, delivered, pending, units: units.length, residents: residents.length, topCarriers: [] },
+          reportText: text
+        });
+      }
+    } catch {
+      setReportSendStatus('Erro ao gerar relatório.');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleSendReportWhatsApp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reportPhone.trim()) return;
+    setReportLoading(true);
+    setReportSendStatus(null);
+    try {
+      const res = await fetch('http://localhost:3001/api/reports/send-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: reportPhone })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setReportSendStatus('✅ Relatório enviado com sucesso para o WhatsApp informado!');
+      } else {
+        setReportSendStatus(`❌ Falha no envio: ${data.error || 'Verifique a conexão do WhatsApp.'}`);
+      }
+    } catch (err: any) {
+      setReportSendStatus(`❌ Erro: ${err.message}`);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    setBackupLoading(true);
+    setBackupSuccessMsg(null);
+    try {
+      const res = await fetch('http://localhost:3001/api/backup/create', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setBackupSuccessMsg(`✅ Backup gerado com sucesso: ${data.filename} (${data.sizeKb} KB)`);
+        handleLoadBackups();
+      } else {
+        setBackupSuccessMsg(`❌ Falha ao criar backup: ${data.error || 'Erro interno'}`);
+      }
+    } catch (err: any) {
+      setBackupSuccessMsg(`❌ Erro ao conectar com API de backup: ${err.message}`);
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleLoadBackups = async () => {
+    try {
+      const res = await fetch('http://localhost:3001/api/backup/list');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.backups) setBackupList(data.backups);
+      }
+    } catch {}
+  };
+
+  const handleTestPrint = async () => {
+    setPrinterStatus('Enviando etiqueta de teste...');
+    try {
+      const res = await fetch('http://localhost:3001/api/printer/print-label', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pickupCode: '9087',
+          unit: '805',
+          block: 'Bloco A',
+          recipientName: 'Jhen',
+          carrier: 'Mercado Livre',
+          trackingCode: 'ML987654321BR',
+          receivedAt: new Date().toLocaleString('pt-BR')
+        })
+      });
+      const data = await res.json();
+      setPrinterStatus(data.message || 'Comando ESC/POS enviado!');
+      VoiceService.playSuccessBeep();
+      setTimeout(() => setPrinterStatus(null), 4000);
+    } catch (err: any) {
+      setPrinterStatus(`Erro de impressão: ${err.message}`);
+    }
   };
 
   const handleBatchGenerateUnits = async (e: React.FormEvent) => {
@@ -446,6 +570,16 @@ export default function AdminPage() {
             }`}
           >
             <Shield className="w-4 h-4" /> Equipe
+          </button>
+          <button
+            onClick={() => { setActiveTab('AUTOMATIONS'); handleLoadBackups(); }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
+              activeTab === 'AUTOMATIONS'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Cpu className="w-4 h-4" /> Automações & JS/Python
           </button>
           <button
             onClick={() => setActiveTab('SYSTEM')}
@@ -912,14 +1046,14 @@ export default function AdminPage() {
 
               <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200">Evolution API (Porta 8080)</span>
+                  <span className="font-bold text-slate-200">Motor WhatsApp Nativo (Baileys All-in-One)</span>
                   <span className={whatsappState.connected ? 'text-emerald-400 font-semibold flex items-center gap-1' : 'text-amber-400 font-semibold flex items-center gap-1'}>
                     <span className={`w-2 h-2 rounded-full ${whatsappState.connected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
                     {whatsappState.connected ? 'WhatsApp Conectado' : 'Pronto para Pareamento'}
                   </span>
                 </div>
                 <p className="text-slate-400 text-[11px]">
-                  Container Docker rodando localmente para disparo de mensagens com $0 de custo de API.
+                  Motor Baileys 100% integrado ao aplicativo. Zero Docker, zero containers e custo R$0.
                 </p>
               </div>
 
@@ -1035,17 +1169,14 @@ export default function AdminPage() {
                 )}
               </form>
 
-              {/* Caixa de Comandos Docker */}
-              <div className="bg-slate-950/60 border border-slate-800/60 rounded-2xl p-4 text-[11px] text-slate-400 space-y-2">
-                <p className="font-bold text-slate-300 flex items-center gap-1.5">
-                  <Terminal size={13} className="text-amber-400" />
-                  Como iniciar o Docker da Evolution API no Windows:
+              {/* Caixa Informativa do Motor Nativo */}
+              <div className="bg-slate-950/60 border border-emerald-500/20 rounded-2xl p-4 text-[11px] text-slate-400 space-y-2">
+                <p className="font-bold text-slate-200 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-emerald-400" />
+                  Conexão Nativa Direta (Sem Docker):
                 </p>
-                <div className="bg-slate-900 rounded-xl p-3 font-mono text-emerald-400 text-xs select-all">
-                  npm run docker:up
-                </div>
-                <p className="text-slate-500 text-[10px]">
-                  * Certifique-se de que o <strong>Docker Desktop</strong> está aberto no Windows antes de executar o comando acima.
+                <p className="text-slate-300 text-xs leading-relaxed">
+                  O CondoBox utiliza o motor <strong>Baileys Nativo</strong> 100% embutido. Não requer Docker Desktop nem configurações complexas. Basta clicar em <strong>"Gerar QR Code de Conexão"</strong> e apontar a câmera do WhatsApp para autenticar o computador da portaria.
                 </p>
               </div>
             </div>
@@ -1210,6 +1341,230 @@ export default function AdminPage() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== ABA AUTOMAÇÕES & JS/PYTHON ===== */}
+      {activeTab === 'AUTOMATIONS' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Top Banner */}
+          <div className="bg-gradient-to-r from-indigo-900/40 via-purple-900/30 to-slate-900 border border-indigo-500/20 rounded-3xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-wider mb-1">
+                <Cpu size={16} /> Motor Nativo All-in-One
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-white">Automações, Relatórios e Recursos do Sistema</h2>
+              <p className="text-slate-400 text-xs mt-1">Recursos executados diretamente no computador da portaria via Node.js e scripts Python.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                Node.js & Python Ativos
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* 1. RELATÓRIOS INTELIGENTES EM PYTHON */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+                    <FileText size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Relatório de Fluxo da Portaria</h3>
+                    <p className="text-xs text-slate-400">Gera resumo em Python e dispara no WhatsApp</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerateReport}
+                  disabled={reportLoading}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-indigo-950"
+                >
+                  {reportLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  Gerar Resumo
+                </button>
+              </div>
+
+              {reportResult && (
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3 font-mono text-xs text-slate-300">
+                  <pre className="whitespace-pre-wrap font-sans text-xs text-slate-200 leading-relaxed">
+                    {reportResult.reportText}
+                  </pre>
+
+                  {/* Disparo no WhatsApp do Síndico */}
+                  <form onSubmit={handleSendReportWhatsApp} className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={reportPhone}
+                      onChange={(e) => setReportPhone(e.target.value)}
+                      placeholder="WhatsApp do Síndico (Ex: 73981953741)"
+                      className="flex-1 px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500 font-mono"
+                    />
+                    <button
+                      type="submit"
+                      disabled={reportLoading}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-md shadow-emerald-950 whitespace-nowrap"
+                    >
+                      {reportLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                      Enviar no WhatsApp
+                    </button>
+                  </form>
+
+                  {reportSendStatus && (
+                    <p className={`text-xs font-semibold ${reportSendStatus.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {reportSendStatus}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 2. BACKUP AUTOMÁTICO DO BANCO DE DADOS */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                    <Database size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Backups do Sistema</h3>
+                    <p className="text-xs text-slate-400">Cópia compactada do SQLite e Sessão WhatsApp</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCreateBackup}
+                  disabled={backupLoading}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-emerald-950"
+                >
+                  {backupLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Fazer Backup Agora
+                </button>
+              </div>
+
+              {backupSuccessMsg && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs rounded-xl font-semibold">
+                  {backupSuccessMsg}
+                </div>
+              )}
+
+              {/* Lista de backups */}
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {backupList.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-4 text-center">Nenhum arquivo de backup gerado ainda. Clique em "Fazer Backup Agora".</p>
+                ) : (
+                  backupList.map((bkp, i) => (
+                    <div key={i} className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800/80 rounded-xl text-xs">
+                      <div>
+                        <p className="font-semibold text-slate-200 font-mono">{bkp.filename}</p>
+                        <p className="text-[10px] text-slate-500">{new Date(bkp.createdAt).toLocaleString('pt-BR')}</p>
+                      </div>
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono text-[10px]">
+                        {bkp.sizeKb} KB
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* 3. ALERTAS DE VOZ & SINTETIZADOR TEXT-TO-SPEECH */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+                <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                  <Volume2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Alertas Sonoros e Fala em Voz Alta</h3>
+                  <p className="text-xs text-slate-400">Text-to-Speech e bips de confirmação para o porteiro</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+                <div>
+                  <p className="text-xs font-bold text-slate-200">Sintetizador de Voz Nativo</p>
+                  <p className="text-[11px] text-slate-400">Fala em voz alta ao registrar e entregar encomendas</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextState = !voiceActive;
+                    setVoiceActive(nextState);
+                    VoiceService.setVoiceEnabled(nextState);
+                    if (nextState) {
+                      VoiceService.playSuccessBeep();
+                      VoiceService.speak('Alertas de voz ativados no CondoBox');
+                    }
+                  }}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    voiceActive ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {voiceActive ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                  {voiceActive ? 'Ativado' : 'Silenciado'}
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    VoiceService.playSuccessBeep();
+                    VoiceService.speak('Teste do sistema de voz: Encomenda registrada para o Bloco A, Apartamento 805.');
+                  }}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                >
+                  🔊 Testar Fala de Cadastro
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    VoiceService.playSuccessBeep();
+                    VoiceService.speak('Entrega concluída com sucesso para o morador.');
+                  }}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                >
+                  ✅ Testar Fala de Retirada
+                </button>
+              </div>
+            </div>
+
+            {/* 4. IMPRESSÃO TÉRMICA ESC/POS */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+                <div className="p-2.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
+                  <Printer size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Impressora Térmica Direta (ESC/POS)</h3>
+                  <p className="text-xs text-slate-400">Impressão automática de etiquetas de 58mm / 80mm</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Suporta impressoras térmicas conectadas na porta USB ou rede (Bematech, Elgin, Epson). O sistema formata comandos ESC/POS para guilhotina e códigos de barras.
+              </p>
+
+              <button
+                type="button"
+                onClick={handleTestPrint}
+                className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-cyan-950"
+              >
+                <Printer size={15} />
+                Testar Impressão de Etiqueta Térmica
+              </button>
+
+              {printerStatus && (
+                <p className="text-xs text-cyan-300 font-semibold text-center bg-cyan-950/40 p-2.5 rounded-xl border border-cyan-800/40">
+                  {printerStatus}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

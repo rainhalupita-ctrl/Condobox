@@ -8,7 +8,12 @@ export const metadata: Metadata = {
   description: 'Controle de encomendas com OCR Gemini, WhatsApp e Assinatura Digital',
   manifest: '/manifest.json',
   icons: {
-    icon: '/icon.png',
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/icon.png', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico',
+    apple: '/icon.png',
   },
 };
 

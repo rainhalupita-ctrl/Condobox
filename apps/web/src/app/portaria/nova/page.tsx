@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { CameraCapture } from '../../../components/camera-capture';
 import { LocalApiClient, OCRResponse } from '../../../lib/local-api';
+import { VoiceService } from '../../../lib/voice';
 import { createClient } from '../../../lib/supabase/client';
 import { Unit, Resident } from '../../../types/database';
 import {
@@ -517,6 +518,10 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
 
       const pkgId = res.package?.id;
       const pickupCode = res.package?.pickup_code || '----';
+
+      // Feedback auditivo e de voz
+      VoiceService.playSuccessBeep();
+      VoiceService.speak(`Nova encomenda: ${unitText}`);
 
       // Feedback háptico de sucesso
       try {

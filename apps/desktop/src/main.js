@@ -1,15 +1,33 @@
-const { app, BrowserWindow, session } = require("electron");
+const { app, BrowserWindow, session, nativeImage } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+
+// Define App User Model ID no Windows para o ícone fixar corretamente na Barra de Tarefas
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.condobox.desktop");
+}
 
 let apiProcess;
 let splashWindow;
 let mainWindow;
 
-const ICON_PATH = path.join(__dirname, "..", "assets", "icon.ico");
+function getAppIcon() {
+  const icoPath = path.join(__dirname, "..", "assets", "icon.ico");
+  const pngPath = path.join(__dirname, "..", "assets", "icon.png");
+
+  if (fs.existsSync(icoPath)) {
+    return nativeImage.createFromPath(icoPath);
+  }
+  if (fs.existsSync(pngPath)) {
+    return nativeImage.createFromPath(pngPath);
+  }
+  return undefined;
+}
 
 function createSplash() {
+  const icon = getAppIcon();
+
   splashWindow = new BrowserWindow({
     width: 480,
     height: 320,
@@ -18,26 +36,78 @@ function createSplash() {
     resizable: false,
     alwaysOnTop: true,
     center: true,
-    skipTaskbar: true,
-    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    skipTaskbar: false,
+    icon: icon,
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
+
+  if (icon) {
+    splashWindow.setIcon(icon);
+  }
 
   splashWindow.loadFile(path.join(__dirname, "splash.html"));
 }
 
 function createWindow() {
+  const icon = getAppIcon();
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     autoHideMenuBar: true,
-    title: "CondoBox Portaria",
+    title: "CondoBox Portaria - Sistema All-in-One",
     show: false,
-    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    icon: icon,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false // Permite carregar recursos de API e câmeras locais
+    },
   });
 
-  mainWindow.loadURL("https://web-eight-rust-97.vercel.app/portaria");
+  if (icon) {
+    mainWindow.setIcon(icon);
+  }
+
+  // Remove menus de contexto de navegador e desabilita arrasto de links/imagens
+  mainWindow.webContents.on("dom-ready", () => {
+    mainWindow.webContents.insertCSS(`
+      * {
+        -webkit-user-drag: none !important;
+        user-drag: none !important;
+        -webkit-touch-callout: none !important;
+      }
+      body {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+      }
+      input, textarea, [contenteditable="true"] {
+        -webkit-user-select: text !important;
+        user-select: text !important;
+      }
+      a, button, img {
+        -webkit-user-drag: none !important;
+        user-drag: none !important;
+      }
+    `);
+  });
+
+  // Tenta carregar a URL local primeiro ou a URL da Vercel
+  const primaryUrl = "https://web-eight-rust-97.vercel.app/portaria";
+  const localFallbackUrl = "http://localhost:3001/portaria";
+
+  mainWindow.loadURL(primaryUrl).catch(() => {
+    console.log("⚠️ Alternando para porta local:", localFallbackUrl);
+    mainWindow.loadURL(localFallbackUrl).catch(() => {});
+  });
+
+  // Fallback se a internet cair durante o carregamento
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    if (validatedURL !== localFallbackUrl) {
+      console.warn(`[CondoBox] Falha de rede (${errorCode}: ${errorDescription}). Alternando para porta local...`);
+      mainWindow.loadURL(localFallbackUrl).catch(() => {});
+    }
+  });
 
   // Assim que a janela principal termina de carregar, esconde o splash e mostra a principal
   mainWindow.once("ready-to-show", () => {
@@ -48,7 +118,7 @@ function createWindow() {
       }
       mainWindow.show();
       mainWindow.focus();
-    }, 1800); // aguarda 1.8s para o progresso da barra de splash completar visualmente
+    }, 1800);
   });
 
   mainWindow.on("closed", () => {
@@ -78,16 +148,27 @@ function startLocalApi() {
     });
   }
 
-  if (!fs.existsSync(scriptPath)) return;
+  if (!fs.existsSync(scriptPath)) {
+    console.warn("[CondoBox] Script da API local não encontrado em:", scriptPath);
+    return;
+  }
+
+  console.log("[CondoBox] Iniciando API Local em:", scriptPath);
 
   apiProcess = spawn("node", [scriptPath], {
     env: envVars,
-    stdio: "ignore",
+    stdio: "inherit",
     windowsHide: true,
     detached: false,
   });
 
-  apiProcess.on("error", () => {});
+  apiProcess.on("error", (err) => {
+    console.error("[CondoBox] Erro no processo da API local:", err);
+  });
+
+  apiProcess.on("exit", (code) => {
+    console.log(`[CondoBox] Processo da API local finalizado com código ${code}`);
+  });
 }
 
 app.whenReady().then(() => {

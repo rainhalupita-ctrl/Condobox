@@ -25,7 +25,6 @@ export async function GET(
       .from('packages')
       .select('*, unit:units(block, unit_number), resident:residents(name, phone)');
 
-    // Se for UUID
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
     if (isUUID) {
       query = query.eq('id', token);
@@ -42,56 +41,41 @@ export async function GET(
       );
     }
 
-    // Se o morador abriu o link e ainda não estava marcado como CIENTE
-    if (!pkg.notes?.includes('CIENTE') && pkg.status !== 'DELIVERED') {
-      const nowIso = new Date().toISOString();
-      const updatedNotes = pkg.notes ? `${pkg.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`;
+    // 2. Busca anúncio patrocinado ativo caso o condomínio esteja no Plano BASIC (ou houver anúncio ativo)
+    let activeAd = null;
+    try {
+      const { data: sub } = await supabase
+        .from('condo_subscriptions')
+        .select('plan_id, status, plan:subscription_plans(has_ads)')
+        .eq('condo_id', pkg.condo_id)
+        .maybeSingle();
 
-      // Atualiza no Supabase
-      try {
-        await supabase
-          .from('packages')
-          .update({ notes: updatedNotes, status: pkg.status === 'RECEIVED' ? 'NOTIFIED' : pkg.status })
-          .eq('id', pkg.id);
-      } catch {}
+      const shouldShowAds = !sub || sub.plan_id === 'BASIC' || (sub.plan as any)?.has_ads === true;
 
-      // Envia confirmação pelo WhatsApp
-      let phone = pkg.resident?.phone;
-      if (phone) {
-        let cleanPhone = phone.replace(/\D/g, '');
-        if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10) cleanPhone = `55${cleanPhone}`;
+      if (shouldShowAds) {
+        const { data: ads } = await supabase
+          .from('ads_campaigns')
+          .select('*')
+          .eq('active', true)
+          .order('priority', { ascending: false })
+          .limit(3);
 
-        const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-        const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
-        const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
-
-        const name = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador';
-        const confirmMsg = `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-          `Olá, *${name}*!\n\n` +
-          `Registramos que você acessou os dados da sua encomenda (*${pkg.carrier}*).\n\n` +
-          `🏢 A portaria já sabe que você está ciente da chegada!\n\n` +
-          `🔑 Apresente o código *${pkg.pickup_code}* ou o QR Code ao retirar.`;
-
-        fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': evolutionKey
-          },
-          body: JSON.stringify({
-            number: cleanPhone,
-            text: confirmMsg
-          }),
-          signal: AbortSignal.timeout(6000)
-        }).catch(() => {});
+        if (ads && ads.length > 0) {
+          activeAd = ads[Math.floor(Math.random() * ads.length)];
+          // Incrementa visualização
+          supabase
+            .from('ads_campaigns')
+            .update({ views_count: (activeAd.views_count || 0) + 1 })
+            .eq('id', activeAd.id)
+            .then(() => {});
+        }
       }
-
-      pkg.notes = updatedNotes;
-    }
+    } catch {}
 
     return NextResponse.json({
       package: {
         id: pkg.id,
+        condo_id: pkg.condo_id,
         pickup_code: pkg.pickup_code,
         qr_token: pkg.qr_token,
         carrier: pkg.carrier,
@@ -108,7 +92,8 @@ export async function GET(
           block: pkg.unit.block,
           unit_number: pkg.unit.unit_number
         } : null
-      }
+      },
+      ad: activeAd
     });
   } catch (err: any) {
     return NextResponse.json(

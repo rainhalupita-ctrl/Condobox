@@ -1,7 +1,7 @@
 {
   "name": "condobox-desktop",
   "version": "1.0.0",
-  "description": "CondoBox Desktop App",
+  "description": "CondoBox Desktop App - Sistema All-in-One de Portaria",
   "main": "src/main.js",
   "author": "CondoBox",
   "scripts": {
@@ -19,8 +19,10 @@
     "png-to-ico": "^3.0.2"
   },
   "build": {
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
     "appId": "com.condobox.desktop",
-    "productName": "CondoBox",
+    "productName": "CondoBox Portaria",
     "icon": "assets/icon.ico",
     "files": [
       "src/**/*",
@@ -30,7 +32,9 @@
       "output": "release"
     },
     "win": {
-      "target": ["portable"],
+      "target": [
+        "portable"
+      ],
       "icon": "assets/icon.ico"
     },
     "extraResources": [

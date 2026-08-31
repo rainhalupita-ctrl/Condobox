@@ -47,6 +47,7 @@ export default function PublicPackagePage() {
   const token = params?.token as string;
 
   const [pkg, setPkg] = useState<PublicPackageData | null>(null);
+  const [ad, setAd] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -67,6 +68,9 @@ export default function PublicPackagePage() {
       const data = await res.json();
       if (res.ok && data.package) {
         setPkg(data.package);
+        if (data.ad) {
+          setAd(data.ad);
+        }
         // Verifica se o usuário já desbloqueou este QR code localmente
         if (typeof window !== 'undefined' && localStorage.getItem(`unlocked_${data.package.pickup_code}`) === 'true') {
           setIsUnlocked(true);
@@ -116,17 +120,13 @@ export default function PublicPackagePage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-4 sm:p-6 selection:bg-emerald-500 selection:text-slate-950">
-      {/* Topo / Marca */}
+      {/* Topo / Marca Oficial */}
       <div className="w-full max-w-md flex items-center justify-between py-4 mb-2">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-950">
-            <Package className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-base font-black tracking-tight text-slate-100">CondoBox</h1>
-            <p className="text-[10px] uppercase font-bold tracking-widest text-emerald-400">Retirada de Encomenda</p>
-          </div>
-        </div>
+        <img
+          src="/logo.png"
+          alt="CondoBox"
+          className="h-10 w-auto object-contain drop-shadow-md"
+        />
         <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-full text-[11px] text-slate-300 font-medium">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           Portaria 24h
@@ -273,6 +273,49 @@ export default function PublicPackagePage() {
                 </div>
               )}
             </div>
+
+            {/* CARD DE PATROCÍNIO / PROPAGANDA (Plano Basic) */}
+            {ad && (
+              <div className="bg-gradient-to-br from-indigo-950/40 via-slate-900/90 to-purple-950/30 border border-indigo-500/30 rounded-3xl p-5 shadow-xl relative overflow-hidden">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                    📢 Patrocínio Portaria
+                  </span>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                </div>
+                
+                {ad.banner_url && (
+                  <img
+                    src={ad.banner_url}
+                    alt={ad.title}
+                    className="w-full h-32 object-cover rounded-2xl mb-3 border border-slate-800"
+                  />
+                )}
+
+                <h4 className="text-sm font-bold text-white mb-1">
+                  {ad.title}
+                </h4>
+                <p className="text-xs text-slate-300 mb-3 leading-relaxed">
+                  {ad.description}
+                </p>
+
+                {ad.cta_url && (
+                  <a
+                    href={ad.cta_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      if (ad.id) {
+                        fetch(`/api/ads/${ad.id}/click`, { method: 'POST' }).catch(() => {});
+                      }
+                    }}
+                    className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-lg shadow-indigo-600/30"
+                  >
+                    <span>{ad.cta_text || 'Aproveitar Oferta'}</span>
+                  </a>
+                )}
+              </div>
+            )}
 
             {/* DETALHES DA ENCOMENDA */}
             <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3.5 text-xs text-slate-300">

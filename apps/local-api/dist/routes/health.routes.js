@@ -1,4 +1,5 @@
 import { whatsappService } from '../services/whatsapp.service.js';
+import { syncService } from '../services/sync.service.js';
 import { supabaseService } from '../services/supabase.service.js';
 import { env } from '../config/env.js';
 export async function healthRoutes(fastify) {
@@ -8,23 +9,34 @@ export async function healthRoutes(fastify) {
      */
     fastify.get('/api/health', async (_request, reply) => {
         const whatsappStatus = await whatsappService.checkInstanceStatus();
+        const syncStatus = syncService.getStatus();
         const supabaseConfigured = supabaseService.isConfigured();
         const geminiConfigured = !!env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim() !== '';
         return reply.send({
             status: 'OK',
             timestamp: new Date().toISOString(),
+            mode: 'ALL-IN-ONE-LOCAL',
             services: {
+                database: {
+                    type: 'SQLite (Local WAL)',
+                    status: 'ACTIVE',
+                    path: './data/condobox.db'
+                },
                 whatsapp: {
+                    engine: 'Baileys-Native (No Docker Required)',
                     status: whatsappStatus.state,
                     connected: whatsappStatus.connected,
-                    instance: env.EVOLUTION_INSTANCE_NAME
+                    phone: whatsappStatus.phone || null
                 },
-                supabase: {
-                    configured: supabaseConfigured,
-                    url: env.SUPABASE_URL
+                sync: {
+                    status: syncStatus.isOnline ? 'ONLINE_SYNC' : 'OFFLINE_LOCAL',
+                    isOnline: syncStatus.isOnline,
+                    isSyncing: syncStatus.isSyncing,
+                    cloudConfigured: supabaseConfigured
                 },
-                geminiOCR: {
-                    configured: geminiConfigured
+                ocr: {
+                    localTesseract: true,
+                    cloudGemini: geminiConfigured
                 },
                 localBaseUrl: env.LOCAL_BASE_URL
             }

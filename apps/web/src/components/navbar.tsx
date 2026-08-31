@@ -29,13 +29,14 @@ export function Navbar() {
   return (
     <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-        {/* Logo */}
+        {/* Logo Oficial CondoBox */}
         <Link href={isPortaria ? '/portaria' : '/morador'}
-          className="flex items-center gap-2 text-white font-bold text-lg shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-green-600 flex items-center justify-center">
-            <Building2 size={18} className="text-white" />
-          </div>
-          CondoBox
+          className="flex items-center gap-2.5 shrink-0 group">
+          <img
+            src="/logo.png"
+            alt="CondoBox"
+            className="h-8 w-auto object-contain drop-shadow-md group-hover:scale-105 transition transform"
+          />
         </Link>
 
         {/* Links de navegação */}

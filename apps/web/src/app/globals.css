@@ -7,14 +7,38 @@
   --foreground: #f8fafc;
 }
 
-body {
+/* Desabilita comportamento de arrastar elementos e seleção de texto web para parecer 100% aplicativo nativo */
+* {
+  -webkit-user-drag: none !important;
+  user-drag: none !important;
+  -webkit-touch-callout: none;
+}
+
+html, body {
   color: var(--foreground);
   background: var(--background);
   min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
-/* Custom scrollbar */
+/* Permite selecionar texto apenas dentro de inputs, textareas e campos editáveis */
+input, textarea, [contenteditable="true"], .selectable {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Links e botões não arrastáveis */
+a, button, img, svg {
+  -webkit-user-drag: none !important;
+  user-drag: none !important;
+  cursor: pointer;
+}
+
+/* Custom scrollbar moderna e discreta */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
