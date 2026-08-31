@@ -15,10 +15,19 @@ export interface UserProfile {
   condo_id: string | null;
 }
 
+export interface LicenseInfo {
+  id: string;
+  plan: 'TRIAL' | 'BASIC' | 'PRO' | 'PRO_MAX';
+  status: 'ACTIVE' | 'EXPIRED' | 'BLOCKED';
+  expires_at: string | null;
+  max_apartments: number;
+}
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: UserProfile | null;
+  license: LicenseInfo | null;
   loading: boolean;
   isPortaria: boolean;
   isAdmin: boolean;
@@ -32,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [license, setLicense] = useState<LicenseInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const supabase = createClient();
@@ -42,7 +52,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select('id, name, phone, role, condo_id')
       .eq('id', userId)
       .single();
-    if (data) setProfile(data as UserProfile);
+    if (data) {
+      setProfile(data as UserProfile);
+      
+      // Fetch license se tiver condo_id
+      if (data.condo_id) {
+        const { data: licData } = await supabase
+          .from('licenses')
+          .select('*')
+          .eq('condo_id', data.condo_id)
+          .single();
+        if (licData) setLicense(licData as LicenseInfo);
+      }
+    }
   };
 
   useEffect(() => {
@@ -76,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setSession(null);
     setProfile(null);
+    setLicense(null);
     router.push('/login');
   };
 
@@ -85,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isMorador = role === 'RESIDENT';
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, isPortaria, isAdmin, isMorador, signOut }}>
+    <AuthContext.Provider value={{ user, session, profile, license, loading, isPortaria, isAdmin, isMorador, signOut }}>
       {children}
     </AuthContext.Provider>
   );

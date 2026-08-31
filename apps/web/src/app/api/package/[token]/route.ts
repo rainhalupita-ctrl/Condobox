@@ -41,33 +41,42 @@ export async function GET(
       );
     }
 
-    // 2. Busca anúncio patrocinado ativo caso o condomínio esteja no Plano BASIC (ou houver anúncio ativo)
+    // 2. Busca anúncio patrocinado ativo caso o condomínio esteja no Plano BASIC (ou não tiver plano)
     let activeAd = null;
     try {
       const { data: sub } = await supabase
-        .from('condo_subscriptions')
-        .select('plan_id, status, plan:subscription_plans(has_ads)')
+        .from('licenses')
+        .select('plan, status')
         .eq('condo_id', pkg.condo_id)
         .maybeSingle();
 
-      const shouldShowAds = !sub || sub.plan_id === 'BASIC' || (sub.plan as any)?.has_ads === true;
+      const shouldShowAds = !sub || sub.plan === 'BASIC';
 
       if (shouldShowAds) {
-        const { data: ads } = await supabase
-          .from('ads_campaigns')
+        const { data: adsList } = await supabase
+          .from('ads')
           .select('*')
           .eq('active', true)
-          .order('priority', { ascending: false })
-          .limit(3);
+          .limit(10);
 
-        if (ads && ads.length > 0) {
-          activeAd = ads[Math.floor(Math.random() * ads.length)];
+        if (adsList && adsList.length > 0) {
+          activeAd = adsList[Math.floor(Math.random() * adsList.length)];
           // Incrementa visualização
           supabase
-            .from('ads_campaigns')
-            .update({ views_count: (activeAd.views_count || 0) + 1 })
+            .from('ads')
+            .update({ views: (activeAd.views || 0) + 1 })
             .eq('id', activeAd.id)
             .then(() => {});
+          
+          // Mapeia para o frontend existente
+          activeAd = {
+            id: activeAd.id,
+            title: 'Oferta Especial',
+            description: 'Aproveite essa promoção de parceiros locais do seu condomínio.',
+            banner_url: activeAd.image_url,
+            cta_url: activeAd.link_url,
+            cta_text: 'Saber Mais'
+          };
         }
       }
     } catch {}
