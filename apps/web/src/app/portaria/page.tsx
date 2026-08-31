@@ -118,19 +118,23 @@ export default function PortariaDashboardPage() {
           setSuccessToast(`✅ ${res.sentCount} notificação(ões) de WhatsApp enviada(s) com sucesso!`);
         } else if (res.alreadySentCount > 0) {
           setSuccessToast(`ℹ️ Todas as encomendas pendentes já haviam sido notificadas.`);
+        } else if (res.failedCount > 0) {
+          setSuccessToast(`⚠️ ${res.failedCount} notificação(ões) falharam. Verifique os telefones dos moradores e a conexão com o WhatsApp.`);
         } else {
           setSuccessToast(`⚠️ Nenhuma mensagem nova enviada. Verifique os telefones cadastrados dos moradores.`);
         }
         loadPackages();
       } else {
-        alert(`Erro ao disparar notificações: ${res.error || 'Falha na comunicação.'}`);
+        // Mostra o erro como toast em vez de alert() nativo que bloqueia o Electron
+        setSuccessToast(`❌ Erro: ${res.error || 'Falha na comunicação com a portaria.'}`);
       }
     } catch (err: any) {
-      alert(`Erro ao comunicar com a portaria: ${err.message}`);
+      setSuccessToast(`❌ Erro ao comunicar com a portaria: ${err.message}`);
     } finally {
       setIsNotifyingPending(false);
     }
   };
+
 
   const filteredPackages = packages.filter(pkg => {
     // Filtro de status

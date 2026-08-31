@@ -154,10 +154,10 @@ export class WhatsAppService {
         const url = `${this.apiUrl}/message/sendMedia/${this.instanceName}`;
         const body = {
           number: phone,
-          media: options.mediaUrl,
           mediatype: 'image',
           mimetype: 'image/jpeg',
           caption: options.message,
+          media: options.mediaUrl,
           fileName: 'etiqueta.jpg'
         };
 
@@ -173,7 +173,8 @@ export class WhatsAppService {
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
-          console.warn('[WhatsAppService] Falha no sendMedia da Evolution API, tentando fallback text:', errorText);
+          console.warn('[WhatsAppService] Falha no sendMedia, tentando só texto:', errorText);
+          // Fallback: envia só o texto sem imagem
           return this.sendTextMessage(phone, options.message);
         }
 
@@ -206,8 +207,13 @@ export class WhatsAppService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.warn('[WhatsAppService] Resposta não-OK da Evolution API:', errorText);
-        return { success: false, error: errorText };
+        let readable = errorText;
+        try {
+          const parsed = JSON.parse(errorText);
+          readable = parsed?.message || parsed?.error || parsed?.response?.message || errorText;
+        } catch {}
+        console.warn('[WhatsAppService] Resposta não-OK da Evolution API:', readable);
+        return { success: false, error: readable };
       }
 
       const data = await response.json();
