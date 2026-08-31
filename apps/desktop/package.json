@@ -13,17 +13,25 @@
     "condo-local-api": "*"
   },
   "devDependencies": {
+    "@electron/asar": "^4.3.0",
     "electron": "32.0.1",
-    "electron-builder": "24.13.3"
+    "electron-builder": "24.13.3",
+    "png-to-ico": "^3.0.2"
   },
   "build": {
     "appId": "com.condobox.desktop",
     "productName": "CondoBox",
+    "icon": "assets/icon.ico",
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
     "directories": {
       "output": "release"
     },
     "win": {
-      "target": ["portable"]
+      "target": ["portable"],
+      "icon": "assets/icon.ico"
     },
     "extraResources": [
       {

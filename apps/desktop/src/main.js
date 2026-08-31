@@ -4,27 +4,62 @@ const path = require("path");
 const fs = require("fs");
 
 let apiProcess;
+let splashWindow;
+let mainWindow;
+
+const ICON_PATH = path.join(__dirname, "..", "assets", "icon.ico");
+
+function createSplash() {
+  splashWindow = new BrowserWindow({
+    width: 480,
+    height: 320,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    center: true,
+    skipTaskbar: true,
+    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+
+  splashWindow.loadFile(path.join(__dirname, "splash.html"));
+}
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     autoHideMenuBar: true,
     title: "CondoBox Portaria",
-    // icon: path.join(__dirname, "icon.ico")
+    show: false,
+    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
 
-  win.loadURL("https://web-eight-rust-97.vercel.app/portaria");
-  
-  win.on("closed", () => {
+  mainWindow.loadURL("https://web-eight-rust-97.vercel.app/portaria");
+
+  // Assim que a janela principal termina de carregar, esconde o splash e mostra a principal
+  mainWindow.once("ready-to-show", () => {
+    setTimeout(() => {
+      if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.close();
+        splashWindow = null;
+      }
+      mainWindow.show();
+      mainWindow.focus();
+    }, 1800); // aguarda 1.8s para o progresso da barra de splash completar visualmente
+  });
+
+  mainWindow.on("closed", () => {
     app.quit();
   });
 }
 
 function startLocalApi() {
   const isDev = !app.isPackaged;
-  
-  const scriptPath = isDev 
+
+  const scriptPath = isDev
     ? path.join(__dirname, "../../local-api/dist/server.js")
     : path.join(process.resourcesPath, "app.asar.unpacked/node_modules/condo-local-api/dist/server.js");
 
@@ -32,10 +67,8 @@ function startLocalApi() {
     ? path.join(__dirname, "../../local-api/.env")
     : path.join(process.resourcesPath, ".env");
 
-  // Read .env into an object so we can pass it to spawn
   let envVars = { ...process.env, PORT: "3001" };
   if (fs.existsSync(envPath)) {
-    console.log("Carregando variáveis do .env:", envPath);
     const envContent = fs.readFileSync(envPath, "utf-8");
     envContent.split("\n").forEach(line => {
       const match = line.match(/^([^=]+)=(.*)$/);
@@ -45,52 +78,44 @@ function startLocalApi() {
     });
   }
 
-  console.log("Iniciando Local API em:", scriptPath);
+  if (!fs.existsSync(scriptPath)) return;
 
   apiProcess = spawn("node", [scriptPath], {
     env: envVars,
-    stdio: "inherit"
+    stdio: "ignore",
+    windowsHide: true,
+    detached: false,
   });
 
-  apiProcess.on("error", (err) => {
-    console.error("Falha ao iniciar a API Local:", err);
-  });
+  apiProcess.on("error", () => {});
 }
 
 app.whenReady().then(() => {
-  // Conceder permissão automática para câmera/microfone
+  // Permissão automática para câmera e microfone
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    if (permission === 'media') {
-      callback(true);
-    } else {
-      callback(false);
-    }
+    callback(permission === "media");
   });
 
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    if (permission === 'media') {
-      return true;
-    }
-    return false;
+    return permission === "media";
   });
 
   startLocalApi();
+  createSplash();
   createWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    if (apiProcess) apiProcess.kill();
+    if (apiProcess) { try { apiProcess.kill(); } catch {} }
     app.quit();
   }
 });
 
 app.on("before-quit", () => {
-  if (apiProcess) apiProcess.kill();
+  if (apiProcess) { try { apiProcess.kill(); } catch {} }
 });

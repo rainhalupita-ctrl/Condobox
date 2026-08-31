@@ -33,3 +33,5 @@ yarn-error.log*
 
 # Vercel build output e config local
 .vercel/
+
+apps/desktop/release/
