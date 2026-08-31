@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "CondoBox Desktop App - Sistema All-in-One de Portaria",
   "main": "src/main.js",
-  "author": "CondoBox",
+  "author": "CondoBox Tecnologia Condominial",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder && powershell -Command \"Get-ChildItem release -Recurse -Include *.exe | ForEach-Object { Unblock-File -Path $_.FullName; Write-Host 'Desbloqueado:' $_.Name }\""
+    "dist": "electron-builder && powershell -ExecutionPolicy Bypass -File ./scripts/sign_and_configure.ps1"
   },
   "dependencies": {
     "condo-local-api": "*"
@@ -23,6 +23,7 @@
     "nodeGypRebuild": false,
     "appId": "com.condobox.desktop",
     "productName": "CondoBox Portaria",
+    "copyright": "Copyright © 2026 CondoBox Tecnologia Condominial",
     "icon": "assets/icon.ico",
     "files": [
       "src/**/*",
@@ -35,7 +36,10 @@
       "target": [
         "portable"
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "legalTrademarks": "CondoBox",
+      "requestedExecutionLevel": "asInvoker",
+      "publisherName": "CondoBox Tecnologia Condominial"
     },
     "extraResources": [
       {
