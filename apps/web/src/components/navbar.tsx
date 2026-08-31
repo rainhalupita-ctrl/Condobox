@@ -27,11 +27,19 @@ export function Navbar() {
       ];
 
   return (
-    <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+    <nav 
+      className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 select-none"
+      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+    >
+      {/* 
+        Ajustamos o padding-right para evitar que os controles nativos do Windows (minimizar, fechar) 
+        fiquem em cima do botão de perfil do usuário. No Windows, ocupam aprox 140px.
+      */}
+      <div className="max-w-7xl mx-auto pl-4 pr-[140px] sm:pl-6 h-14 flex items-center justify-between gap-4">
         {/* Logo Oficial CondoBox */}
         <Link href={isPortaria ? '/portaria' : '/morador'}
-          className="flex items-center gap-2.5 shrink-0 group">
+          className="flex items-center gap-2.5 shrink-0 group"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <img
             src="/logo.png"
             alt="CondoBox"
@@ -50,6 +58,7 @@ export function Navbar() {
                   ? 'bg-green-600/20 text-green-400'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
               <Icon size={15} />
               {label}
@@ -63,6 +72,7 @@ export function Navbar() {
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 transition-all"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
               <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center">
                 <User size={14} className="text-slate-300" />
@@ -89,6 +99,7 @@ export function Navbar() {
                   <button
                     onClick={() => { setMenuOpen(false); signOut(); }}
                     className="w-full flex items-center gap-2 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                    style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                   >
                     <LogOut size={15} />
                     Sair
@@ -112,6 +123,7 @@ export function Navbar() {
                   ? 'text-green-400 bg-green-600/10'
                   : 'text-slate-500 hover:text-white'
               }`}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
               <Icon size={18} />
               {label}

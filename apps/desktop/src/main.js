@@ -55,6 +55,12 @@ function createWindow() {
     width: 1280,
     height: 800,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#020617', // Cor de fundo combinando com bg-slate-950
+      symbolColor: '#cbd5e1', // Cor dos botões
+      height: 40 // Altura da barra
+    },
     title: "CondoBox Portaria - Sistema All-in-One",
     show: false,
     icon: icon,
