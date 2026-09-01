@@ -171,8 +171,24 @@ export class WhatsAppEngineService {
   private cleanSessionDir() {
     try {
       if (fs.existsSync(this.sessionDir)) {
-        fs.rmSync(this.sessionDir, { recursive: true, force: true });
-        fs.mkdirSync(this.sessionDir, { recursive: true });
+        const files = fs.readdirSync(this.sessionDir);
+        for (const file of files) {
+          const filePath = path.join(this.sessionDir, file);
+          try {
+            if (fs.statSync(filePath).isDirectory()) {
+              fs.rmSync(filePath, { recursive: true, force: true });
+            } else {
+              if (file.startsWith('creds')) {
+                fs.writeFileSync(filePath, '{}', 'utf-8');
+              }
+              fs.unlinkSync(filePath);
+            }
+          } catch (fileErr: any) {
+            try {
+              fs.writeFileSync(filePath, '', 'utf-8');
+            } catch {}
+          }
+        }
       }
     } catch (err: any) {
       console.error('[WhatsApp Engine] Erro ao limpar diretório de sessão:', err.message);
@@ -180,17 +196,32 @@ export class WhatsAppEngineService {
   }
 
   public async logout(): Promise<void> {
-    try {
-      if (this.socket) {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 999;
+    this.isInitializing = false;
+
+    if (this.socket) {
+      try {
+        this.socket.ev.removeAllListeners('connection.update');
+        this.socket.ev.removeAllListeners('creds.update');
+        this.socket.ev.removeAllListeners('messages.upsert');
         await this.socket.logout().catch(() => {});
         this.socket.end(new Error('Logout manual'));
-        this.socket = null;
+      } catch (err: any) {
+        console.warn('[WhatsApp Engine] Aviso ao finalizar socket:', err.message);
       }
-    } catch {}
+      this.socket = null;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 500));
     this.cleanSessionDir();
     this.currentStatus = 'DISCONNECTED';
     this.connectedPhone = null;
     this.qrCodeBase64 = null;
+    this.reconnectAttempts = 0;
     console.log('🔓 [WhatsApp Engine] Sessão encerrada manualmente.');
   }
 

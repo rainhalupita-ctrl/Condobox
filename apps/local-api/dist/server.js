@@ -32,8 +32,10 @@ const fastify = Fastify({
 async function main() {
     // 1. Plugins
     await fastify.register(cors, {
-        origin: '*',
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+        origin: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        credentials: true,
+        allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin']
     });
     await fastify.register(multipart, {
         limits: {
