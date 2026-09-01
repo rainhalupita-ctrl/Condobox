@@ -37,6 +37,7 @@ import {
   Database,
   FileText,
   Cpu,
+  LogOut,
   X
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
@@ -87,7 +88,7 @@ export default function AdminPage() {
   const [healthStatus, setHealthStatus] = useState<any | null>(null);
 
   // WhatsApp Evolution API State
-  const [whatsappState, setWhatsappState] = useState<{ state: string; connected: boolean }>({ state: 'OFFLINE', connected: false });
+  const [whatsappState, setWhatsappState] = useState<{ state?: string; status?: string; connected: boolean; phone?: string | null }>({ state: 'OFFLINE', connected: false });
   const [whatsappQrCode, setWhatsappQrCode] = useState<string | null>(null);
   const [whatsappPairingCode, setWhatsappPairingCode] = useState<string | null>(null);
   const [whatsappLoading, setWhatsappLoading] = useState(false);
@@ -185,6 +186,27 @@ export default function AdminPage() {
     } catch (err: any) {
       console.error('Erro ao conectar WhatsApp:', err);
       setWhatsappError('Motor nativo do WhatsApp em inicialização. Aguarde alguns instantes e tente novamente.');
+    } finally {
+      setWhatsappLoading(false);
+    }
+  };
+
+  const handleLogoutWhatsApp = async () => {
+    if (!confirm('Deseja realmente desconectar e deslogar o WhatsApp da Portaria? Será necessário escanear o QR Code novamente.')) {
+      return;
+    }
+    setWhatsappLoading(true);
+    setWhatsappQrCode(null);
+    setWhatsappPairingCode(null);
+    setWhatsappError(null);
+    try {
+      const res = await LocalApiClient.logoutWhatsApp();
+      const st = await LocalApiClient.getWhatsAppStatus();
+      setWhatsappState(st);
+      alert(res?.message || 'Sessão do WhatsApp desconectada com sucesso!');
+    } catch (err: any) {
+      console.error('Erro ao desconectar WhatsApp:', err);
+      setWhatsappError('Erro ao desconectar WhatsApp.');
     } finally {
       setWhatsappLoading(false);
     }
@@ -1092,20 +1114,42 @@ export default function AdminPage() {
                     <MessageSquare size={16} className="text-emerald-400" />
                     Conexão do WhatsApp da Portaria
                   </h4>
-                  <p className="text-slate-400 text-xs mt-0.5">
-                    Instância: <code className="text-emerald-300 font-mono">portaria</code> | Status: <span className={whatsappState.connected ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{whatsappState.connected ? 'CONECTADO' : 'AGUARDANDO CONEXÃO'}</span>
+                  <p className="text-slate-400 text-xs mt-0.5 flex items-center gap-2 flex-wrap">
+                    <span>Instância: <code className="text-emerald-300 font-mono">portaria</code></span>
+                    <span>|</span>
+                    <span>Status: <span className={whatsappState.connected ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{whatsappState.connected ? '● CONECTADO' : '○ DESCONECTADO'}</span></span>
+                    {whatsappState.phone && (
+                      <span className="text-slate-300 font-mono text-[11px] bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-md">
+                        📱 +{whatsappState.phone}
+                      </span>
+                    )}
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleConnectWhatsApp}
-                  disabled={whatsappLoading}
-                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition disabled:opacity-50"
-                >
-                  {whatsappLoading ? <Loader2 size={14} className="animate-spin" /> : <QrCode size={14} />}
-                  {whatsappLoading ? 'Buscando QR Code...' : 'Gerar QR Code de Conexão'}
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Botão de Conectar / Gerar QR Code (Logar) */}
+                  <button
+                    type="button"
+                    onClick={handleConnectWhatsApp}
+                    disabled={whatsappLoading}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition disabled:opacity-50"
+                  >
+                    {whatsappLoading ? <Loader2 size={14} className="animate-spin" /> : <QrCode size={14} />}
+                    {whatsappLoading ? 'Buscando...' : whatsappState.connected ? 'Reconectar / QR Code' : 'Logar / Gerar QR Code'}
+                  </button>
+
+                  {/* Botão de Desconectar / Deslogar */}
+                  <button
+                    type="button"
+                    onClick={handleLogoutWhatsApp}
+                    disabled={whatsappLoading}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition disabled:opacity-50"
+                    title="Desconectar e limpar a sessão do WhatsApp da portaria para conectar outro número"
+                  >
+                    <LogOut size={14} />
+                    Deslogar
+                  </button>
+                </div>
               </div>
 
               {/* Erro de conexão com Docker / Evolution */}

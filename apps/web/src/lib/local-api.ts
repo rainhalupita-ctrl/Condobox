@@ -220,6 +220,18 @@ export class LocalApiClient {
   }
 
   /**
+   * Desconecta o WhatsApp e limpa a sessão para permitir novo pareamento
+   */
+  static async logoutWhatsApp() {
+    const baseUrl = this.getBaseUrl();
+    const res = await fetch(`${baseUrl}/api/whatsapp/logout`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000)
+    });
+    return await res.json();
+  }
+
+  /**
    * Envia mensagem de teste para validar o canal
    */
   static async sendTestWhatsApp(phone: string) {
