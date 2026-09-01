@@ -41,13 +41,6 @@
       "requestedExecutionLevel": "asInvoker",
       "publisherName": "CondoBox Tecnologia Condominial"
     },
-    "extraResources": [
-      {
-        "from": "../local-api/.env",
-        "to": ".env",
-        "filter": ["**/*"]
-      }
-    ],
     "asarUnpack": [
       "node_modules/condo-local-api/**/*"
     ]

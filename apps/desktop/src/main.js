@@ -143,19 +143,27 @@ function startLocalApi() {
     ? path.join(__dirname, "../../local-api/dist/server.js")
     : path.join(process.resourcesPath, "app.asar.unpacked/node_modules/condo-local-api/dist/server.js");
 
+  // Configuração segura embutida (protegida dentro do ASAR binário)
+  let embeddedEnv = {};
+  try {
+    embeddedEnv = require("./embedded-env.js");
+  } catch {}
+
   const envPath = isDev
     ? path.join(__dirname, "../../local-api/.env")
     : path.join(process.resourcesPath, ".env");
 
-  let envVars = { ...process.env, PORT: "3001" };
+  let envVars = { ...process.env, ...embeddedEnv, PORT: "3001" };
   if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, "utf-8");
-    envContent.split("\n").forEach(line => {
-      const match = line.match(/^([^=]+)=(.*)$/);
-      if (match) {
-        envVars[match[1].trim()] = match[2].trim();
-      }
-    });
+    try {
+      const envContent = fs.readFileSync(envPath, "utf-8");
+      envContent.split("\n").forEach(line => {
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match) {
+          envVars[match[1].trim()] = match[2].trim();
+        }
+      });
+    } catch {}
   }
 
   if (!fs.existsSync(scriptPath)) {
