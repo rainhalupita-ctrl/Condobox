@@ -6,6 +6,11 @@ const fs = require("fs");
 // Desabilitar aceleração de hardware ANTES do app estar pronto para evitar bugs com webcams antigas/DWM
 app.disableHardwareAcceleration();
 
+// Permite requisições de HTTPS para API local (localhost:3001) sem bloqueio do Chromium
+app.commandLine.appendSwitch('allow-running-insecure-content');
+app.commandLine.appendSwitch('disable-web-security');
+app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests,BlockInsecurePrivateNetworkRequestsFromPrivate,BlockInsecurePrivateNetworkRequestsFromUnknown');
+
 // Define App User Model ID no Windows para o ícone fixar corretamente na Barra de Tarefas
 if (process.platform === "win32") {
   app.setAppUserModelId("com.condobox.desktop");

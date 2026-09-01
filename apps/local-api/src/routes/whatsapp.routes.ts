@@ -23,6 +23,14 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
   fastify.post('/api/whatsapp/connect', async (request, reply) => {
     try {
       await whatsAppEngineService.initialize();
+
+      // Aguarda até o QR Code ser gerado pelo Baileys (ou conexão ser restabelecida)
+      let attempts = 0;
+      while (!whatsAppEngineService.getStatus().qrcode && !whatsAppEngineService.getStatus().connected && attempts < 15) {
+        await new Promise(r => setTimeout(r, 200));
+        attempts++;
+      }
+
       const status = whatsAppEngineService.getStatus();
 
       return reply.send({

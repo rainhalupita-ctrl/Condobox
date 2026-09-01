@@ -173,19 +173,40 @@ export default function AdminPage() {
     setWhatsappError(null);
     try {
       const res = await LocalApiClient.connectWhatsApp();
-      if (res.qrcode) {
+      if (res?.qrcode) {
         setWhatsappQrCode(res.qrcode);
-      } else if (res.error) {
+      } else if (res?.pairingCode) {
+        setWhatsappPairingCode(res.pairingCode);
+      } else if (res?.connected) {
+        // Já está conectado
+      } else if (res?.error && !res?.qrcode) {
+        // Tenta checar status imediatamente antes de reportar erro
+        const fallbackSt = await LocalApiClient.getWhatsAppStatus();
+        if (fallbackSt?.qrcode) {
+          setWhatsappQrCode(fallbackSt.qrcode);
+          setWhatsappState(fallbackSt);
+          return;
+        }
         setWhatsappError(res.error);
       }
-      if (res.pairingCode) {
-        setWhatsappPairingCode(res.pairingCode);
-      }
+
       const st = await LocalApiClient.getWhatsAppStatus();
       setWhatsappState(st);
+      if (st?.qrcode && !res?.qrcode) {
+        setWhatsappQrCode(st.qrcode);
+      }
     } catch (err: any) {
       console.error('Erro ao conectar WhatsApp:', err);
-      setWhatsappError('Motor nativo do WhatsApp em inicialização. Aguarde alguns instantes e tente novamente.');
+      // Tenta fallback rápido de status
+      try {
+        const st = await LocalApiClient.getWhatsAppStatus();
+        setWhatsappState(st);
+        if (st?.qrcode) {
+          setWhatsappQrCode(st.qrcode);
+          return;
+        }
+      } catch {}
+      setWhatsappError('Motor do WhatsApp em inicialização. Aguarde 2 segundos e tente novamente.');
     } finally {
       setWhatsappLoading(false);
     }

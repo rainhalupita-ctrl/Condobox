@@ -38,7 +38,13 @@ async function main() {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'Access-Control-Request-Private-Network']
+  });
+
+  fastify.addHook('onRequest', async (request, reply) => {
+    if (request.headers['access-control-request-private-network']) {
+      reply.header('Access-Control-Allow-Private-Network', 'true');
+    }
   });
 
   await fastify.register(multipart, {
