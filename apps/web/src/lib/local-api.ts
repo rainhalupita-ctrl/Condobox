@@ -227,19 +227,22 @@ export class LocalApiClient {
   }
 
   /**
-   * Status de conexão da Evolution API
+   * Status de conexão do WhatsApp (Baileys Nativo)
    */
   static async getWhatsAppStatus() {
-    try {
-      const baseUrl = this.getBaseUrl();
-      if (baseUrl && !baseUrl.includes('localhost')) {
+    const baseUrl = this.getBaseUrl();
+
+    // 1. Tenta diretamente na API local (computador da portaria / Electron)
+    if (baseUrl) {
+      try {
         const res = await fetch(`${baseUrl}/api/whatsapp/status`, {
           signal: AbortSignal.timeout(3000)
         });
         if (res.ok) return await res.json();
-      }
-    } catch {}
+      } catch {}
+    }
 
+    // 2. Fallback: rota Next.js na nuvem
     try {
       const res = await fetch('/api/whatsapp/status', {
         signal: AbortSignal.timeout(4000)
@@ -255,24 +258,19 @@ export class LocalApiClient {
    */
   static async connectWhatsApp() {
     const baseUrl = this.getBaseUrl();
-    try {
-      if (baseUrl && !baseUrl.includes('localhost')) {
-        const res = await fetch(`${baseUrl}/api/whatsapp/connect`, {
+
+    // 1. Tenta diretamente na API local
+    if (baseUrl) {
+      try {
+        const directRes = await fetch(`${baseUrl}/api/whatsapp/connect`, {
           method: 'POST',
           signal: AbortSignal.timeout(10000)
         });
-        if (res.ok) return await res.json();
-      }
-    } catch {}
+        if (directRes.ok) return await directRes.json();
+      } catch {}
+    }
 
-    try {
-      const directRes = await fetch(`${baseUrl}/api/whatsapp/connect`, {
-        method: 'POST',
-        signal: AbortSignal.timeout(8000)
-      });
-      if (directRes.ok) return await directRes.json();
-    } catch {}
-
+    // 2. Fallback: rota Next.js
     const fallbackRes = await fetch('/api/whatsapp/connect', {
       method: 'POST',
       signal: AbortSignal.timeout(12000)
@@ -285,24 +283,19 @@ export class LocalApiClient {
    */
   static async logoutWhatsApp() {
     const baseUrl = this.getBaseUrl();
-    try {
-      if (baseUrl && !baseUrl.includes('localhost')) {
-        const res = await fetch(`${baseUrl}/api/whatsapp/logout`, {
+
+    // 1. Tenta diretamente na API local
+    if (baseUrl) {
+      try {
+        const directRes = await fetch(`${baseUrl}/api/whatsapp/logout`, {
           method: 'POST',
           signal: AbortSignal.timeout(8000)
         });
-        if (res.ok) return await res.json();
-      }
-    } catch {}
+        if (directRes.ok) return await directRes.json();
+      } catch {}
+    }
 
-    try {
-      const directRes = await fetch(`${baseUrl}/api/whatsapp/logout`, {
-        method: 'POST',
-        signal: AbortSignal.timeout(6000)
-      });
-      if (directRes.ok) return await directRes.json();
-    } catch {}
-
+    // 2. Fallback: rota Next.js
     const fallbackRes = await fetch('/api/whatsapp/logout', {
       method: 'POST',
       signal: AbortSignal.timeout(10000)
@@ -315,16 +308,21 @@ export class LocalApiClient {
    */
   static async sendTestWhatsApp(phone: string) {
     const baseUrl = this.getBaseUrl();
-    try {
-      const directRes = await fetch(`${baseUrl}/api/whatsapp/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-        signal: AbortSignal.timeout(8000)
-      });
-      if (directRes.ok) return await directRes.json();
-    } catch {}
 
+    // 1. Tenta diretamente na API local
+    if (baseUrl) {
+      try {
+        const directRes = await fetch(`${baseUrl}/api/whatsapp/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone }),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (directRes.ok) return await directRes.json();
+      } catch {}
+    }
+
+    // 2. Fallback: rota Next.js
     const fallbackRes = await fetch('/api/whatsapp/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

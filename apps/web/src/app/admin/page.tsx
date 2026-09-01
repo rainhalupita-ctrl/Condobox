@@ -1136,11 +1136,13 @@ export default function AdminPage() {
                     Conexão do WhatsApp da Portaria
                   </h4>
                   <p className="text-slate-400 text-xs mt-0.5 flex items-center gap-2 flex-wrap">
-                    <span>Instância: <code className="text-emerald-300 font-mono">portaria</code></span>
+                    <span>Motor: <code className="text-emerald-300 font-mono">Baileys Nativo</code></span>
                     <span>|</span>
-                    <span>Status: <span className={whatsappState.connected ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{whatsappState.connected ? '● CONECTADO' : '○ DESCONECTADO'}</span></span>
+                    <span>Status: <span className={whatsappState.connected ? 'text-emerald-400 font-bold' : (whatsappState.status === 'CONNECTING' ? 'text-amber-300 font-bold' : 'text-rose-400 font-bold')}>
+                      {whatsappState.connected ? '● CONECTADO' : (whatsappState.status === 'CONNECTING' ? '⏳ CONECTANDO...' : '○ DESCONECTADO')}
+                    </span></span>
                     {whatsappState.phone && (
-                      <span className="text-slate-300 font-mono text-[11px] bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-md">
+                      <span className="text-slate-200 font-mono text-[11px] bg-slate-800 border border-emerald-500/30 px-2 py-0.5 rounded-md font-semibold">
                         📱 +{whatsappState.phone}
                       </span>
                     )}
