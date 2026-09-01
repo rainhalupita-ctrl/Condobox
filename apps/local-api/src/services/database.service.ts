@@ -442,8 +442,24 @@ export class DatabaseService {
       }
     });
 
-    transaction();
+      transaction();
     console.log(`🔄 [Database Service] Atualizados ${units.length} unidades e ${residents.length} moradores do Supabase.`);
+  }
+
+  public getResidentById(residentId: string): LocalResident | null {
+    return (this.db.prepare('SELECT * FROM residents WHERE id = ?').get(residentId) as LocalResident) || null;
+  }
+
+  public getResidentsByUnit(unitId: string): LocalResident[] {
+    return this.db.prepare('SELECT * FROM residents WHERE unit_id = ? AND active = 1 ORDER BY is_primary DESC').all(unitId) as LocalResident[];
+  }
+
+  public getUnitById(unitId: string): LocalUnit | null {
+    return (this.db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as LocalUnit) || null;
+  }
+
+  public updatePackageStatus(packageId: string, status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED'): void {
+    this.db.prepare('UPDATE packages SET status = ? WHERE id = ?').run(status, packageId);
   }
 }
 

@@ -17,6 +17,7 @@ import { whatsAppQueueWorker } from './services/whatsapp-queue.worker.js';
 import { whatsAppEngineService } from './services/whatsapp-engine.service.js';
 import { syncService } from './services/sync.service.js';
 import { BackupService } from './services/backup.service.js';
+import { queueConsumerService } from './services/queue-consumer.service.js';
 const fastify = Fastify({
     logger: {
         transport: {
@@ -73,8 +74,11 @@ async function main() {
     // 5. Inicializar Serviços em Segundo Plano
     setupCleanupCron(90);
     BackupService.init();
-    whatsAppQueueWorker.start();
-    syncService.start();
+    whatsAppQueueWorker.start(); // Worker legado (polling packages existentes)
+    syncService.start(); // Sincronização de unidades/moradores
+    // Novo: Consumidor de Fila (Supabase → SQLite → WhatsApp)
+    // Escuta fila_encomendas e fila_mensagens via Realtime
+    queueConsumerService.start();
     // Inicia motor de WhatsApp nativo em background
     whatsAppEngineService.initialize().catch((e) => {
         console.warn('[Server] Inicialização do WhatsApp em background:', e.message);

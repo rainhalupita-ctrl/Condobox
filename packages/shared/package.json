@@ -1,0 +1,27 @@
+{
+  "name": "@condobox/shared",
+  "version": "1.0.0",
+  "description": "Tipos compartilhados, cliente Supabase e componentes do CondoBox",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/queue.d.ts",
+      "default": "./dist/types/queue.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

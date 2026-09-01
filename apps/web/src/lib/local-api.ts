@@ -107,29 +107,72 @@ export class LocalApiClient {
     unitInfo?: string | null;
   }) {
     const baseUrl = this.getBaseUrl();
+
+    // 1. Tenta diretamente na API local (computador da portaria — mais rápido e completo)
     try {
-      const targetUrl = baseUrl ? `${baseUrl}/api/packages` : '/api/packages';
-      const res = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const targetUrl = baseUrl ? `${baseUrl}/api/packages` : null;
+      if (targetUrl) {
+        const res = await fetch(targetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (res.ok) return await res.json();
+      }
+    } catch {
+      console.info('[LocalApiClient] API local offline — publicando na fila do Supabase...');
+    }
 
-      if (res.ok) return await res.json();
-    } catch {}
-
-    const fallbackRes = await fetch('/api/packages', {
+    // 2. Fallback: publica na fila do Supabase (o local-api vai consumir via Realtime)
+    const queueRes = await fetch('/api/packages/queue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
-    if (!fallbackRes.ok) {
-      const err = await fallbackRes.json().catch(() => ({ error: 'Erro ao salvar' }));
-      throw new Error(err.details || err.error || 'Falha ao registrar encomenda');
+    if (!queueRes.ok) {
+      // 3. Último fallback: rota padrão Next.js
+      const fallbackRes = await fetch('/api/packages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!fallbackRes.ok) {
+        const err = await fallbackRes.json().catch(() => ({ error: 'Erro ao salvar' }));
+        throw new Error(err.details || err.error || 'Falha ao registrar encomenda');
+      }
+      return fallbackRes.json();
     }
 
-    return fallbackRes.json();
+    return queueRes.json();
+  }
+
+  /**
+   * Publica diretamente na fila do Supabase (para uso no PWA mobile sem API local)
+   * O local-api vai consumir via Realtime, processar e disparar o WhatsApp
+   */
+  static async publishToQueue(payload: {
+    unitId: string;
+    residentId?: string | null;
+    carrier: string;
+    trackingCode?: string | null;
+    recipientNameOcr?: string | null;
+    labelImagePath?: string | null;
+    phone?: string | null;
+    sendWhatsApp?: boolean;
+    notes?: string | null;
+  }) {
+    const res = await fetch('/api/packages/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erro na fila' }));
+      throw new Error(err.error || 'Falha ao publicar encomenda na fila');
+    }
+    return res.json();
   }
 
   /**

@@ -67,6 +67,10 @@ export class WhatsAppEngineService {
     };
   }
 
+  public isConnected(): boolean {
+    return this.currentStatus === 'CONNECTED' && this.socket !== null;
+  }
+
   public async initialize(): Promise<void> {
     if (this.isInitializing || (this.socket && this.currentStatus === 'CONNECTED')) {
       return;

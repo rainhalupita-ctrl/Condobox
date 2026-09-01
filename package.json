@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "npm run dev:all",
@@ -16,7 +17,9 @@
     "build": "npm run build --prefix apps/web",
     "build:all": "npm run build --prefix apps/web && npm run build --prefix apps/local-api",
     "build:web": "npm run build --prefix apps/web",
-    "build:api": "npm run build --prefix apps/local-api"
+    "build:api": "npm run build --prefix apps/local-api",
+    "build:shared": "npm run build --prefix packages/shared",
+    "build:desktop": "npm run dist --prefix apps/desktop"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1"
