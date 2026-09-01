@@ -34,12 +34,26 @@
     },
     "win": {
       "target": [
-        "portable"
+        "nsis"
       ],
       "icon": "assets/icon.ico",
       "legalTrademarks": "CondoBox",
       "requestedExecutionLevel": "asInvoker",
       "publisherName": "CondoBox Tecnologia Condominial"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "CondoBox Portaria",
+      "uninstallDisplayName": "CondoBox Portaria - Sistema de Gestão Condominial",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
     },
     "asarUnpack": [
       "node_modules/condo-local-api/**/*"
