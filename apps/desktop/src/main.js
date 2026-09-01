@@ -176,10 +176,24 @@ function startLocalApi() {
     return;
   }
 
-  console.log("[CondoBox] Iniciando API Local em:", scriptPath);
+  const cwd = isDev
+    ? path.join(__dirname, "../../local-api")
+    : path.join(process.resourcesPath, "app.asar.unpacked/node_modules/condo-local-api");
 
-  apiProcess = spawn("node", [scriptPath], {
-    env: envVars,
+  const nodeModulesPath = isDev
+    ? path.join(__dirname, "../../local-api/node_modules")
+    : path.join(process.resourcesPath, "app.asar.unpacked/node_modules");
+
+  const nodeExecutable = isDev ? "node" : process.execPath;
+  const childEnv = isDev
+    ? { ...envVars, NODE_PATH: nodeModulesPath }
+    : { ...envVars, NODE_PATH: nodeModulesPath, ELECTRON_RUN_AS_NODE: "1" };
+
+  console.log("[CondoBox] Iniciando API Local em:", scriptPath, "via", nodeExecutable);
+
+  apiProcess = spawn(nodeExecutable, [scriptPath], {
+    cwd: cwd,
+    env: childEnv,
     stdio: "inherit",
     windowsHide: true,
     detached: false,

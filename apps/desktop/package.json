@@ -56,7 +56,7 @@
       "deleteAppDataOnUninstall": false
     },
     "asarUnpack": [
-      "node_modules/condo-local-api/**/*"
+      "node_modules/**/*"
     ]
   }
 }

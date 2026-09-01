@@ -337,13 +337,29 @@ export class LocalApiClient {
    */
   static async notifyPackage(packageId: string, force = false) {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/packages/${packageId}/notify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force }),
-      signal: AbortSignal.timeout(15000)
-    });
-    return await res.json();
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/packages/${packageId}/notify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force }),
+          signal: AbortSignal.timeout(15000)
+        });
+        if (res.ok) return await res.json();
+      } catch {}
+    }
+
+    try {
+      const fallbackRes = await fetch(`/api/package/${packageId}/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+        signal: AbortSignal.timeout(15000)
+      });
+      if (fallbackRes.ok) return await fallbackRes.json();
+    } catch {}
+
+    return { success: false, error: 'API local da portaria não conectada' };
   }
 
   /**
@@ -351,12 +367,18 @@ export class LocalApiClient {
    */
   static async notifyPendingPackages() {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/packages/notify-pending`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-      signal: AbortSignal.timeout(30000)
-    });
-    return await res.json();
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/packages/notify-pending`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          signal: AbortSignal.timeout(30000)
+        });
+        if (res.ok) return await res.json();
+      } catch {}
+    }
+
+    return { success: false, error: 'API local da portaria não conectada' };
   }
 }
