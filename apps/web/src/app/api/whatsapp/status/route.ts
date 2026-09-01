@@ -15,12 +15,36 @@ export async function GET() {
     }
   } catch {}
 
-  // Fallback padrão se API local ainda estiver iniciando
+  // 2. Se Evolution API estiver configurada na nuvem
+  const evolutionUrl = process.env.EVOLUTION_API_URL;
+  const evolutionKey = process.env.EVOLUTION_API_KEY;
+  const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
+
+  if (evolutionUrl && evolutionKey) {
+    try {
+      const res = await fetch(`${evolutionUrl}/instance/connectionState/${instanceName}`, {
+        headers: { apikey: evolutionKey },
+        signal: AbortSignal.timeout(3000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const isOpen = data.instance?.state === 'open';
+        return NextResponse.json({
+          engine: 'Evolution API',
+          instance: instanceName,
+          state: isOpen ? 'open' : 'close',
+          connected: isOpen
+        });
+      }
+    } catch {}
+  }
+
+  // 3. Se nada estiver conectado
   return NextResponse.json({
     engine: 'Baileys WhatsApp Nativo',
     instance: 'portaria',
-    state: 'open',
-    connected: true,
-    mode: 'NATIVE_ALL_IN_ONE'
+    state: 'close',
+    connected: false,
+    mode: 'LOCAL_DESKTOP_STANDALONE'
   });
 }

@@ -204,7 +204,7 @@ export class LocalApiClient {
       if (res.ok) return await res.json();
     } catch {}
 
-    return { state: 'open', connected: true, instance: 'portaria' };
+    return { status: 'DISCONNECTED', connected: false, instance: 'portaria' };
   }
 
   /**
@@ -212,11 +212,29 @@ export class LocalApiClient {
    */
   static async connectWhatsApp() {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/whatsapp/connect`, {
+    try {
+      if (baseUrl && !baseUrl.includes('localhost')) {
+        const res = await fetch(`${baseUrl}/api/whatsapp/connect`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(10000)
+        });
+        if (res.ok) return await res.json();
+      }
+    } catch {}
+
+    try {
+      const directRes = await fetch(`${baseUrl}/api/whatsapp/connect`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(8000)
+      });
+      if (directRes.ok) return await directRes.json();
+    } catch {}
+
+    const fallbackRes = await fetch('/api/whatsapp/connect', {
       method: 'POST',
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(12000)
     });
-    return await res.json();
+    return await fallbackRes.json();
   }
 
   /**
@@ -224,11 +242,29 @@ export class LocalApiClient {
    */
   static async logoutWhatsApp() {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/whatsapp/logout`, {
+    try {
+      if (baseUrl && !baseUrl.includes('localhost')) {
+        const res = await fetch(`${baseUrl}/api/whatsapp/logout`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(8000)
+        });
+        if (res.ok) return await res.json();
+      }
+    } catch {}
+
+    try {
+      const directRes = await fetch(`${baseUrl}/api/whatsapp/logout`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(6000)
+      });
+      if (directRes.ok) return await directRes.json();
+    } catch {}
+
+    const fallbackRes = await fetch('/api/whatsapp/logout', {
       method: 'POST',
       signal: AbortSignal.timeout(10000)
     });
-    return await res.json();
+    return await fallbackRes.json();
   }
 
   /**
@@ -236,13 +272,23 @@ export class LocalApiClient {
    */
   static async sendTestWhatsApp(phone: string) {
     const baseUrl = this.getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/whatsapp/test`, {
+    try {
+      const directRes = await fetch(`${baseUrl}/api/whatsapp/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+        signal: AbortSignal.timeout(8000)
+      });
+      if (directRes.ok) return await directRes.json();
+    } catch {}
+
+    const fallbackRes = await fetch('/api/whatsapp/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone }),
       signal: AbortSignal.timeout(12000)
     });
-    return await res.json();
+    return await fallbackRes.json();
   }
 
   /**
