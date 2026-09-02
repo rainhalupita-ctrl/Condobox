@@ -59,7 +59,7 @@ export default function PublicPackagePage() {
     if (token) {
       loadPackage();
       
-      // Auto-refresh a cada 15 segundos se a encomenda ainda não foi entregue
+      // Auto-refresh a cada 2.5 segundos se a encomenda ainda não foi entregue (para atualização "instantânea" ao ler o QR Code)
       const interval = setInterval(() => {
         setPkg((currentPkg) => {
           if (currentPkg && currentPkg.status !== 'DELIVERED') {
@@ -74,7 +74,7 @@ export default function PublicPackagePage() {
           }
           return currentPkg;
         });
-      }, 15000);
+      }, 2500);
 
       return () => clearInterval(interval);
     }
