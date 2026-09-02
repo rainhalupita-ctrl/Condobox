@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .from('licenses')
           .select('*')
           .eq('condo_id', data.condo_id)
-          .single();
+          .maybeSingle();
         if (licData) setLicense(licData as LicenseInfo);
       }
     }
