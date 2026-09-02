@@ -135,6 +135,14 @@ export default function RetiradaPage() {
         sendWhatsAppConfirmation: true
       });
 
+      // Dispara broadcast em tempo real para o site do morador
+      const supabase = createClient();
+      await supabase.channel(`public-package-${scannedPackage.id}`).send({
+        type: 'broadcast',
+        event: 'status-updated',
+        payload: { status: 'DELIVERED' }
+      });
+
       setReceiptData(res);
       setStep('SUCCESS');
     } catch (err: any) {

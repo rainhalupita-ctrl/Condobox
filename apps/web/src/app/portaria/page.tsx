@@ -111,6 +111,13 @@ export default function PortariaDashboardPage() {
         sendWhatsAppConfirmation: true
       });
 
+      // Dispara broadcast em tempo real para o site do morador
+      await supabase.channel(`public-package-${selectedForDelivery.id}`).send({
+        type: 'broadcast',
+        event: 'status-updated',
+        payload: { status: 'DELIVERED' }
+      });
+
       VoiceService.playSuccessBeep();
       VoiceService.speak(`Entrega concluída para ${deliveredToName || 'o morador'}`);
 

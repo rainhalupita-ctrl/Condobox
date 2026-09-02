@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { LocalApiClient } from '../../../lib/local-api';
+import { createClient } from '../../../lib/supabase/client';
 import {
   Package,
   Building2,
@@ -58,27 +59,27 @@ export default function PublicPackagePage() {
   useEffect(() => {
     if (token) {
       loadPackage();
-      
-      // Auto-refresh a cada 2.5 segundos se a encomenda ainda não foi entregue (para atualização "instantânea" ao ler o QR Code)
-      const interval = setInterval(() => {
-        setPkg((currentPkg) => {
-          if (currentPkg && currentPkg.status !== 'DELIVERED') {
-            fetch(`/api/package/${token}`)
-              .then(res => res.json())
-              .then(data => {
-                if (data.package && data.package.status === 'DELIVERED') {
-                  setPkg(data.package);
-                }
-              })
-              .catch(() => {});
-          }
-          return currentPkg;
-        });
-      }, 2500);
-
-      return () => clearInterval(interval);
     }
   }, [token]);
+
+  // Real-time Push Subscription
+  useEffect(() => {
+    if (!pkg?.id || pkg.status === 'DELIVERED') return;
+
+    const supabase = createClient();
+    const channel = supabase.channel(`public-package-${pkg.id}`)
+      .on('broadcast', { event: 'status-updated' }, (payload) => {
+        if (payload.payload?.status === 'DELIVERED') {
+          // Atualiza a página imediatamente ao receber o evento de "entregue"
+          loadPackage();
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [pkg?.id, pkg?.status]);
 
   const loadPackage = async () => {
     setLoading(true);
@@ -391,10 +392,9 @@ export default function PublicPackagePage() {
                       <button
                         type="button"
                         onClick={() => setModalImage(signatureUrl)}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-2xl font-bold transition border border-slate-700 shadow-sm"
+                        className="w-full flex items-center justify-center py-4 px-4 bg-white hover:bg-gray-100 text-black rounded-full font-bold text-[15px] transition shadow-md"
                       >
-                        <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                        <span>Ver assinatura</span>
+                        Ver assinatura
                       </button>
                     )}
                     
@@ -402,7 +402,7 @@ export default function PublicPackagePage() {
                       href={`https://wa.me/${pkg?.condo_phone?.replace(/\D/g, '') || ''}?text=Ol%C3%A1%2C+consta+no+sistema+que+minha+encomenda+%28c%C3%B3digo+${pkg?.pickup_code}%29+foi+retirada%2C+mas+eu+n%C3%A3o+fiz+a+retirada.`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-bold transition border border-red-500/30 shadow-sm"
+                      className="w-full flex items-center justify-center py-4 px-4 bg-[#FF3B30] hover:bg-[#FF453A] text-white rounded-full font-bold text-[15px] transition shadow-md mt-2"
                     >
                       Não fiz a retirada
                     </a>
