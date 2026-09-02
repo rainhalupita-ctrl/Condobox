@@ -13,6 +13,7 @@ import { whatsappRoutes } from './routes/whatsapp.routes.js';
 import { licenseRoutes } from './routes/license.routes.js';
 import { utilitiesRoutes } from './routes/utilities.routes.js';
 import { setupCleanupCron } from './services/cleanup.cron.js';
+import { setupReminderCron } from './services/reminder.cron.js';
 import { whatsAppQueueWorker } from './services/whatsapp-queue.worker.js';
 import { whatsAppEngineService } from './services/whatsapp-engine.service.js';
 import { syncService } from './services/sync.service.js';
@@ -82,6 +83,7 @@ async function main() {
 
   // 5. Inicializar Serviços em Segundo Plano
   setupCleanupCron(90);
+  setupReminderCron();           // Lembretes autônomos diários (10h e 18h para encomendas > 24h)
   BackupService.init();
   whatsAppQueueWorker.start();  // Worker legado (polling packages existentes)
   syncService.start();           // Sincronização de unidades/moradores

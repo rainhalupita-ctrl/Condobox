@@ -458,6 +458,47 @@ export class DatabaseService {
     return (this.db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as LocalUnit) || null;
   }
 
+  public getAllPackages(): LocalPackage[] {
+    return this.db.prepare('SELECT * FROM packages ORDER BY received_at DESC').all() as LocalPackage[];
+  }
+
+  public getNotificationsLogByPackageId(packageId: string): any[] {
+    try {
+      return this.db.prepare('SELECT * FROM notifications_log WHERE package_id = ? ORDER BY sent_at DESC').all(packageId) as any[];
+    } catch {
+      return [];
+    }
+  }
+
+  public logNotification(params: {
+    packageId: string;
+    residentId?: string | null;
+    channel: string;
+    recipient: string;
+    status: string;
+    sentAt?: string;
+  }): void {
+    try {
+      this.db.prepare(`
+        INSERT INTO notifications_log (
+          id, package_id, resident_id, channel, recipient, status, sent_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?
+        )
+      `).run(
+        uuidv4(),
+        params.packageId,
+        params.residentId || null,
+        params.channel || 'WHATSAPP',
+        params.recipient,
+        params.status || 'SENT',
+        params.sentAt || new Date().toISOString()
+      );
+    } catch (err: any) {
+      console.warn('[Database Service] Erro ao gravar notifications_log:', err.message);
+    }
+  }
+
   public updatePackageStatus(packageId: string, status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED'): void {
     this.db.prepare('UPDATE packages SET status = ? WHERE id = ?').run(status, packageId);
   }

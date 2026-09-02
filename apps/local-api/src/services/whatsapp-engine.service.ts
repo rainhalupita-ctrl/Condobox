@@ -395,6 +395,31 @@ export class WhatsAppEngineService {
     return this.sendTextMessage(params.phone, text);
   }
 
+  public async notifyPackageReminder(params: {
+    phone: string;
+    residentName: string;
+    unitInfo: string;
+    carrier: string;
+    pickupCode: string;
+    receivedAt: string;
+    qrToken?: string;
+  }): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const webBaseUrl = this.getPublicWebUrl();
+    const token = params.qrToken || params.pickupCode;
+    const pickupUrl = `${webBaseUrl}/p/${token}`;
+
+    const text =
+      `⏰ *LEMBRETE: ENCOMENDA AGUARDANDO RETIRADA*\n\n` +
+      `Olá, *${params.residentName}*!\n\n` +
+      `Lembramos que sua encomenda de *${params.carrier}* (recebida em ${params.receivedAt}) ainda está disponível para retirada na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
+      `🔑 *Código de Retirada:* *${params.pickupCode}*\n` +
+      `📱 *Link do QR Code:*\n${pickupUrl}\n\n` +
+      `_Por favor, passe na portaria para retirar sua encomenda quando puder._\n\n` +
+      `🏢 Portaria do Condomínio`;
+
+    return this.sendTextMessage(params.phone, text);
+  }
+
   private async handleIncomingMessage(msg: WAMessage): Promise<void> {
     try {
       if (msg.key.fromMe) return;
