@@ -229,11 +229,46 @@ export class WhatsAppEngineService {
     console.log('🔓 [WhatsApp Engine] Sessão encerrada manualmente.');
   }
 
-  private formatJid(phone: string): string {
+  public async resolveJid(phone: string): Promise<string> {
     let clean = phone.replace(/\D/g, '');
     if (!clean.startsWith('55') && clean.length >= 10) {
       clean = `55${clean}`;
     }
+
+    if (!this.socket) {
+      return `${clean}@s.whatsapp.net`;
+    }
+
+    try {
+      // 1. Tenta consulta direta no WhatsApp
+      const check1 = await this.socket.onWhatsApp(clean);
+      if (check1 && check1.length > 0 && check1[0]?.exists && check1[0]?.jid) {
+        return check1[0].jid;
+      }
+
+      // 2. Para números brasileiros com 13 dígitos (55 + DDD + 9 + 8 dígitos): tenta sem o 9
+      if (clean.startsWith('55') && clean.length === 13) {
+        const ddd = clean.slice(2, 4);
+        const withoutNine = `55${ddd}${clean.slice(5)}`;
+        const check2 = await this.socket.onWhatsApp(withoutNine);
+        if (check2 && check2.length > 0 && check2[0]?.exists && check2[0]?.jid) {
+          return check2[0].jid;
+        }
+      }
+
+      // 3. Para números brasileiros com 12 dígitos (55 + DDD + 8 dígitos): tenta com o 9
+      if (clean.startsWith('55') && clean.length === 12) {
+        const ddd = clean.slice(2, 4);
+        const withNine = `55${ddd}9${clean.slice(4)}`;
+        const check3 = await this.socket.onWhatsApp(withNine);
+        if (check3 && check3.length > 0 && check3[0]?.exists && check3[0]?.jid) {
+          return check3[0].jid;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[WhatsApp Engine] Erro ao consultar onWhatsApp (usando fallback padrão):', err.message);
+    }
+
     return `${clean}@s.whatsapp.net`;
   }
 
@@ -243,7 +278,8 @@ export class WhatsAppEngineService {
     }
 
     try {
-      const jid = this.formatJid(phone);
+      const jid = await this.resolveJid(phone);
+      console.log(`📱 [WhatsApp Engine] Enviando mensagem de texto para JID: ${jid} (telefone: ${phone})`);
       const sent = await this.socket.sendMessage(jid, { text });
       return { success: true, messageId: sent?.key?.id || 'ok' };
     } catch (err: any) {
@@ -262,7 +298,8 @@ export class WhatsAppEngineService {
     }
 
     try {
-      const jid = this.formatJid(phone);
+      const jid = await this.resolveJid(phone);
+      console.log(`🖼️ [WhatsApp Engine] Enviando imagem para JID: ${jid} (telefone: ${phone})`);
       let imageBuffer: Buffer;
 
       if (Buffer.isBuffer(imageSource)) {
