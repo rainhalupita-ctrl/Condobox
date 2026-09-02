@@ -43,8 +43,10 @@ import {
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { VoiceService } from '../../lib/voice';
 import { QRCodeSVG } from 'qrcode.react';
+import { useAuth } from '@/contexts/auth-context';
 
 export default function AdminPage() {
+  const { isAdmin } = useAuth();
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
@@ -654,26 +656,30 @@ export default function AdminPage() {
           >
             <Users className="w-4 h-4" /> Moradores ({residents.length})
           </button>
-          <button
-            onClick={() => { setActiveTab('STAFF'); loadStaff(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
-              activeTab === 'STAFF'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Shield className="w-4 h-4" /> Equipe
-          </button>
-          <button
-            onClick={() => { setActiveTab('AUTOMATIONS'); handleLoadBackups(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
-              activeTab === 'AUTOMATIONS'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Cpu className="w-4 h-4" /> Automações & JS/Python
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => { setActiveTab('STAFF'); loadStaff(); }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
+                  activeTab === 'STAFF'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Shield className="w-4 h-4" /> Equipe
+              </button>
+              <button
+                onClick={() => { setActiveTab('AUTOMATIONS'); handleLoadBackups(); }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
+                  activeTab === 'AUTOMATIONS'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Cpu className="w-4 h-4" /> Automações & JS/Python
+              </button>
+            </>
+          )}
           <button
             onClick={() => setActiveTab('SYSTEM')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${

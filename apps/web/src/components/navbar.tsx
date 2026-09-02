@@ -20,7 +20,7 @@ export function Navbar() {
   const navLinks = isPortaria
     ? [
         { href: '/portaria', label: 'Portaria', icon: Shield },
-        ...(isAdmin ? [{ href: '/admin', label: 'Administração', icon: LayoutDashboard }] : []),
+        { href: '/admin', label: 'Painel de Gestão', icon: LayoutDashboard },
       ]
     : [
         { href: '/morador', label: 'Minhas Encomendas', icon: Package },
