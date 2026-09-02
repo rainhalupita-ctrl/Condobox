@@ -245,6 +245,19 @@ export class WhatsAppQueueWorker {
       if (res.success) {
         console.log(`✅ [WhatsApp Worker] Notificação de Chegada enviada para ${phone}!`);
         this.processedArrivalIds.add(packageId);
+        
+        // Atualiza no banco local e, por tabela, no Supabase
+        const { databaseService } = await import('./database.service.js');
+        databaseService.updatePackageStatus(packageId, 'NOTIFIED');
+        
+        // Também atualiza direto no Supabase para evitar race conditions com outros workers
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          await supabaseService.getClient()
+            .from('packages')
+            .update({ status: 'NOTIFIED' })
+            .eq('id', packageId);
+        }
       }
     } catch (err: any) {
       console.error(`❌ [WhatsApp Worker] Erro na notificação de chegada do pacote ${packageId}:`, err.message);

@@ -133,6 +133,10 @@ export async function packageRoutes(fastify: FastifyInstance) {
 
           whatsappSent = notifyRes.success;
           whatsappError = notifyRes.error;
+
+          if (whatsappSent) {
+            databaseService.updatePackageStatus(newPackage.id, 'NOTIFIED');
+          }
         }
       }
 
