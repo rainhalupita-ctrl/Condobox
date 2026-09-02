@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Building2, User, ShieldCheck, Eye, EyeOff, Lock, Mail, Loader2 } from 'lucide-react';
+import { Building2, User, ShieldCheck, Eye, EyeOff, Lock, Mail, Loader2, QrCode, LogIn } from 'lucide-react';
+import { QRLoginScanner } from '@/components/qr-login-scanner';
 import Link from 'next/link';
 
 type Tab = 'portaria' | 'morador';
@@ -23,6 +24,7 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [portariaMode, setPortariaMode] = useState<'form' | 'qr'>('form');
 
   const supabase = createClient();
 
@@ -81,6 +83,14 @@ export default function LoginPage() {
     }
   };
 
+  const handleQRScanSuccess = (url: string) => {
+    // Redireciona o usuário para o Magic Link escaneado
+    // Como é um URL, basta atribuir a window.location.href
+    // Exemplo do URL escaneado: https://isurnvsehvjdslpnxirn.supabase.co/auth/v1/verify?token=...&type=magiclink
+    setLoading(true);
+    window.location.href = url;
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{
       background: 'radial-gradient(ellipse at top left, #0f2027, #203a43, #2c5364)',
@@ -129,64 +139,95 @@ export default function LoginPage() {
             : '🛡️ Acesso restrito a porteiros, síndicos e administradores'}
         </p>
 
-        {/* Formulário */}
-        <form onSubmit={handleLogin}
-          className="rounded-2xl border border-slate-700 bg-slate-900/70 backdrop-blur-md p-6 space-y-4 shadow-2xl">
-
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-xl">
-              {error}
-            </div>
-          )}
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">E-mail</label>
-            <div className="relative">
-              <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="seu@email.com"
-                className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition"
-              />
-            </div>
+        {/* Modo Portaria / Síndico com opção QR Code */}
+        {tab === 'portaria' && (
+          <div className="flex gap-2 mb-6">
+            <button
+              onClick={() => setPortariaMode('form')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition ${
+                portariaMode === 'form' ? 'bg-slate-700 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <LogIn size={16} /> E-mail
+            </button>
+            <button
+              onClick={() => setPortariaMode('qr')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition ${
+                portariaMode === 'qr' ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <QrCode size={16} /> Ler QR Code
+            </button>
           </div>
+        )}
 
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Senha</label>
-            <div className="relative">
-              <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type={showPass ? 'text' : 'password'}
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full pl-9 pr-10 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPass(!showPass)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
-              >
-                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
+        {/* Formulário ou Leitor */}
+        {tab === 'portaria' && portariaMode === 'qr' ? (
+          <div className="animate-fade-in">
+            <QRLoginScanner
+              onScanSuccess={handleQRScanSuccess}
+              onClose={() => setPortariaMode('form')}
+            />
           </div>
+        ) : (
+          <form onSubmit={handleLogin}
+            className="rounded-2xl border border-slate-700 bg-slate-900/70 backdrop-blur-md p-6 space-y-4 shadow-2xl animate-fade-in">
 
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-3 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all ${
-              loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110 active:scale-[0.98]'
-            } ${tab === 'portaria' ? 'bg-blue-600' : 'bg-green-600'}`}
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : null}
-            {loading ? 'Entrando...' : 'Entrar'}
-          </button>
-        </form>
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-xl">
+                {error}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">E-mail</label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Senha</label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-9 pr-10 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                >
+                  {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full py-3 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all ${
+                loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110 active:scale-[0.98]'
+              } ${tab === 'portaria' ? 'bg-blue-600' : 'bg-green-600'}`}
+            >
+              {loading ? <Loader2 size={18} className="animate-spin" /> : null}
+              {loading ? 'Entrando...' : 'Entrar'}
+            </button>
+          </form>
+        )}
 
         {/* Rodapé */}
         {tab === 'morador' ? (

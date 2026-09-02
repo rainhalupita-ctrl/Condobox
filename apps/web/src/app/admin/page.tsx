@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { VoiceService } from '../../lib/voice';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function AdminPage() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -85,6 +86,9 @@ export default function AdminPage() {
   const [staffSuccess, setStaffSuccess] = useState('');
   const [staffError, setStaffError] = useState('');
   const [staffList, setStaffList] = useState<any[]>([]);
+  const [staffDeleteLoading, setStaffDeleteLoading] = useState<string | null>(null);
+  const [staffQrLoading, setStaffQrLoading] = useState<string | null>(null);
+  const [staffQrData, setStaffQrData] = useState<{link: string, name: string} | null>(null);
   const [healthStatus, setHealthStatus] = useState<any | null>(null);
 
   // WhatsApp Evolution API State
@@ -304,6 +308,49 @@ export default function AdminPage() {
       setStaffError('Falha de conexão ao criar a conta.');
     } finally {
       setStaffLoading(false);
+    }
+  };
+
+  const handleDeleteStaff = async (userId: string, userName: string) => {
+    if (!confirm(`Tem certeza que deseja remover ${userName} da equipe?`)) {
+      return;
+    }
+    
+    setStaffDeleteLoading(userId);
+    try {
+      const res = await fetch(`/api/staff?userId=${userId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        alert(data.error || 'Erro ao excluir membro da equipe.');
+      } else {
+        alert(data.message || 'Membro removido com sucesso!');
+        loadStaff();
+      }
+    } catch (err) {
+      alert('Erro de conexão ao excluir membro.');
+    } finally {
+      setStaffDeleteLoading(null);
+    }
+  };
+
+  const handleGenerateQR = async (userId: string, userName: string) => {
+    setStaffQrLoading(userId);
+    try {
+      const res = await fetch(`/api/staff/qr?userId=${userId}`);
+      const data = await res.json();
+      
+      if (!res.ok) {
+        alert(data.error || 'Erro ao gerar o QR Code de acesso.');
+      } else {
+        setStaffQrData({ link: data.actionLink, name: userName });
+      }
+    } catch (err) {
+      alert('Erro de conexão ao gerar o QR Code.');
+    } finally {
+      setStaffQrLoading(null);
     }
   };
 
@@ -1400,17 +1447,72 @@ export default function AdminPage() {
                       <p className="text-white text-sm font-medium">{member.name}</p>
                       <p className="text-slate-500 text-xs">{member.phone || 'Sem telefone'}</p>
                     </div>
-                    <span className={`text-xs px-2.5 py-1 rounded-lg font-bold ${
-                      member.role === 'ADMIN' ? 'bg-red-500/20 text-red-400' :
-                      member.role === 'SYNDIC' ? 'bg-purple-500/20 text-purple-400' :
-                      'bg-blue-500/20 text-blue-400'
-                    }`}>
-                      {member.role === 'ADMIN' ? 'Admin' : member.role === 'SYNDIC' ? 'Síndico' : 'Porteiro'}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs px-2.5 py-1 rounded-lg font-bold ${
+                        member.role === 'ADMIN' ? 'bg-red-500/20 text-red-400' :
+                        member.role === 'SYNDIC' ? 'bg-purple-500/20 text-purple-400' :
+                        'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {member.role === 'ADMIN' ? 'Admin' : member.role === 'SYNDIC' ? 'Síndico' : 'Porteiro'}
+                      </span>
+                      {member.role !== 'ADMIN' && (
+                        <>
+                          <button
+                            onClick={() => handleGenerateQR(member.id, member.name)}
+                            disabled={staffQrLoading === member.id}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+                            title="Gerar QR Code de Acesso"
+                          >
+                            {staffQrLoading === member.id ? <Loader2 size={16} className="animate-spin" /> : <QrCode size={16} />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStaff(member.id, member.name)}
+                            disabled={staffDeleteLoading === member.id}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                            title="Remover membro"
+                          >
+                            {staffDeleteLoading === member.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de QR Code do Staff */}
+      {staffQrData && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl relative">
+            <button 
+              onClick={() => setStaffQrData(null)}
+              className="absolute top-4 right-4 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full transition-colors z-10"
+            >
+              <X size={20} />
+            </button>
+            <div className="p-6 text-center pt-10">
+              <QrCode size={40} className="mx-auto text-blue-400 mb-3" />
+              <h2 className="text-xl font-bold text-white mb-2">QR Code de Login</h2>
+              <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                Acesse a tela de login no celular do porteiro, escolha <strong>Login via QR Code</strong> e aponte a câmera para esta tela.
+              </p>
+              <div className="bg-white p-4 rounded-xl inline-block shadow-lg mx-auto mb-4">
+                <QRCodeSVG value={staffQrData.link} size={200} level="H" includeMargin={false} />
+              </div>
+              <p className="text-white font-medium mt-2">{staffQrData.name}</p>
+            </div>
+            <div className="bg-slate-800 p-4 border-t border-slate-700 flex justify-center">
+              <button 
+                onClick={() => setStaffQrData(null)}
+                className="w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-2 rounded-xl transition"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -69,15 +69,16 @@ export async function POST(request: Request) {
     let userId = authData?.user?.id;
 
     if (authError) {
-      if (authError.message.includes('already registered') || authError.message.includes('already exists') || authError.message.includes('email_address_invalid')) {
+      const msg = (authError.message || '').toLowerCase();
+      if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('email_address_invalid') || msg.includes('unique')) {
         return NextResponse.json(
-          { error: 'Este e-mail já está cadastrado ou é inválido.' },
+          { error: 'Este e-mail já está em uso por outra conta no sistema.' },
           { status: 409 }
         );
       }
       console.error('[Staff API] Erro no auth admin:', authError);
       return NextResponse.json(
-        { error: authError.message || 'Erro ao criar credenciais de acesso.' },
+        { error: 'Erro no servidor: ' + (authError.message || 'Falha ao criar credenciais.') },
         { status: 400 }
       );
     }
@@ -106,6 +107,71 @@ export async function POST(request: Request) {
     console.error('[Staff API] Erro interno:', error);
     return NextResponse.json(
       { error: error.message || 'Erro interno no servidor ao processar o cadastro.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const supabase = await createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Não autorizado. Você precisa estar logado.' }, { status: 401 });
+    }
+
+    const { data: adminProfile } = await supabase
+      .from('profiles')
+      .select('condo_id, role')
+      .eq('id', session.user.id)
+      .single();
+
+    if (!adminProfile || (adminProfile.role !== 'ADMIN' && adminProfile.role !== 'SYNDIC')) {
+      return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou admins podem gerenciar equipe.' }, { status: 403 });
+    }
+
+    const url = new URL(request.url);
+    const userIdToDelete = url.searchParams.get('userId');
+
+    if (!userIdToDelete) {
+      return NextResponse.json({ error: 'ID do usuário não fornecido.' }, { status: 400 });
+    }
+
+    // Não permitir deletar a própria conta
+    if (userIdToDelete === session.user.id) {
+      return NextResponse.json({ error: 'Você não pode excluir sua própria conta.' }, { status: 400 });
+    }
+
+    // Verificar se o usuário a ser deletado pertence ao mesmo condomínio
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: userToDelete } = await supabaseAdmin
+      .from('profiles')
+      .select('condo_id, role')
+      .eq('id', userIdToDelete)
+      .single();
+
+    if (!userToDelete || userToDelete.condo_id !== adminProfile.condo_id) {
+      return NextResponse.json({ error: 'Usuário não encontrado ou não pertence ao seu condomínio.' }, { status: 404 });
+    }
+
+    // Deletar o usuário do Auth (isso deve disparar exclusão em cascata nas profiles se houver fk configurada com ON DELETE CASCADE, caso contrário deletamos manualmente)
+    // Deletar do profiles primeiro para garantir
+    await supabaseAdmin.from('profiles').delete().eq('id', userIdToDelete);
+
+    // Deletar do auth.users
+    const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userIdToDelete);
+
+    if (deleteError) {
+      console.error('[Staff API] Erro ao deletar usuário no auth admin:', deleteError);
+      return NextResponse.json({ error: 'Erro ao excluir credenciais do usuário.' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, message: 'Conta excluída com sucesso.' });
+  } catch (error: any) {
+    console.error('[Staff API] Erro interno no DELETE:', error);
+    return NextResponse.json(
+      { error: error.message || 'Erro interno no servidor ao excluir a conta.' },
       { status: 500 }
     );
   }
