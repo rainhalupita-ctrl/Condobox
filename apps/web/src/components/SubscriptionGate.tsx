@@ -49,9 +49,14 @@ export function SubscriptionGate({ children }: Props) {
       let realUnitsCount = 0;
       try {
         const supabase = createClient();
-        const { count } = await supabase.from('units').select('*', { count: 'exact', head: true });
-        if (typeof count === 'number') {
-          realUnitsCount = count;
+        const { data: unitsData } = await supabase.from('units').select('block, unit_number');
+        if (unitsData) {
+          const uniqueMap = new Map<string, boolean>();
+          unitsData.forEach((u: any) => {
+            const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
+            uniqueMap.set(key, true);
+          });
+          realUnitsCount = uniqueMap.size;
         }
       } catch {}
 

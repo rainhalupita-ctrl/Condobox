@@ -15,7 +15,17 @@ export async function licenseRoutes(fastify: FastifyInstance) {
       const { condoId } = (request.query as { condoId?: string }) || {};
       const subscription = await licenseService.getSubscription(condoId);
       let { units } = databaseService.getUnitsAndResidents(condoId);
-      let currentCount = units.length;
+      
+      const getUniqueCount = (unitsArray: any[]) => {
+        const uniqueMap = new Map<string, boolean>();
+        unitsArray.forEach(u => {
+          const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
+          uniqueMap.set(key, true);
+        });
+        return uniqueMap.size;
+      };
+      
+      let currentCount = getUniqueCount(units);
 
       // Se SQLite não tiver unidades mas Supabase tiver, sincroniza agora
       if (currentCount === 0 && supabaseService.isConfigured()) {
@@ -23,7 +33,7 @@ export async function licenseRoutes(fastify: FastifyInstance) {
           const cloudData = await supabaseService.getUnitsAndResidents(condoId);
           if (cloudData.units.length > 0) {
             databaseService.upsertUnitsAndResidents(cloudData.units, cloudData.residents);
-            currentCount = cloudData.units.length;
+            currentCount = getUniqueCount(cloudData.units);
           }
         } catch {}
       }
