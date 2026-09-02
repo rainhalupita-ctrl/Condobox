@@ -1,0 +1,11 @@
+# Ignora todas as pastas de sessão do WhatsApp, bancos de dados locais e uploads
+data/
+data/*
+data/**
+*.db
+*.db-shm
+*.db-wal
+whatsapp_session/
+dist/
+node_modules/
+.env

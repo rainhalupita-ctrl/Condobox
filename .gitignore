@@ -19,11 +19,15 @@ dist/
 **/embedded-env.js
 apps/desktop/src/embedded-env.js
 
-# Storage data (fotos e uploads temporários)
-data/packages/labels/
-data/packages/signatures/
-data/packages/*.jpg
-data/packages/*.png
+# Storage & Local Database (Ignora bancos SQLite e sessões do WhatsApp)
+data/
+**/data/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/whatsapp_session/
+**/data/whatsapp_session/**
+**/data/packages/**
 
 # System & IDE
 .DS_Store
