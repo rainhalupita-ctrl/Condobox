@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
   ADMIN:    ['/portaria', '/admin', '/morador'],
   SYNDIC:   ['/portaria', '/admin', '/morador'],
-  GUARD:    ['/portaria', '/morador'],
+  GUARD:    ['/portaria', '/admin', '/morador'],
   RESIDENT: ['/morador'],
 };
 
