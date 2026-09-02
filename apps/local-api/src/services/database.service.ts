@@ -218,7 +218,8 @@ export class DatabaseService {
 
   public createPackage(input: CreatePackageLocalInput): LocalPackage {
     const id = uuidv4();
-    const pickupCode = Math.floor(1000 + Math.random() * 9000).toString();
+    // Gera código alfanumérico de 6 caracteres e token único
+    const pickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
     const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const nowIso = new Date().toISOString();
 

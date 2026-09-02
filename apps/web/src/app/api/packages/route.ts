@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-    // 1. Gera código de 4 dígitos e token único
-    const pickupCode = Math.floor(1000 + Math.random() * 9000).toString();
+    // Gera código alfanumérico de 6 caracteres
+    const pickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
     const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // 2. Insere a encomenda no Supabase
