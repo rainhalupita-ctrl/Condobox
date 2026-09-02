@@ -54,6 +54,13 @@ export class LocalApiClient {
     return `${base}/images/${path}`;
   }
 
+  public static getLocalFallbackUrl(path?: string | null): string {
+    if (!path) return '';
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) return path;
+    const base = this.getBaseUrl() || 'http://localhost:3001';
+    return `${base}/images/${path}`;
+  }
+
   /**
    * Envia a foto da etiqueta para processar e extrair com Gemini OCR (com fallback nuvem automático)
    */

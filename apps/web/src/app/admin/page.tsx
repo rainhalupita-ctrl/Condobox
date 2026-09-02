@@ -272,36 +272,39 @@ export default function AdminPage() {
     }
 
     setStaffLoading(true);
-    const supabase = createClient();
+    // Criar via API Server-side (usando service_role key para ignorar RLS e garantir condo_id)
+    try {
+      const res = await fetch('/api/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: staffName,
+          email: staffEmail,
+          phone: staffPhone,
+          password: staffPassword,
+          role: staffRole
+        })
+      });
 
-    // Criar via Auth (anon key só pode se email confirmation estiver desligado no Supabase)
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: staffEmail,
-      password: staffPassword,
-      options: {
-        data: { name: staffName, phone: staffPhone.replace(/\D/g, ''), role: staffRole },
-      },
-    });
+      const data = await res.json();
 
-    if (authError || !authData.user) {
-      setStaffError(authError?.message || 'Erro ao criar conta. Tente novamente.');
+      if (!res.ok) {
+        setStaffError(data.error || 'Erro ao criar conta. Tente novamente.');
+        setStaffLoading(false);
+        return;
+      }
+
+      setStaffSuccess(data.message || `Conta de ${staffRole === 'GUARD' ? 'Porteiro' : 'Síndico'} criada para ${staffName}!`);
+      setStaffName('');
+      setStaffEmail('');
+      setStaffPhone('');
+      setStaffPassword('');
+      loadStaff();
+    } catch (err: any) {
+      setStaffError('Falha de conexão ao criar a conta.');
+    } finally {
       setStaffLoading(false);
-      return;
     }
-
-    // Atualizar role no profile (o trigger cria com RESIDENT por padrão, atualizamos)
-    await supabase
-      .from('profiles')
-      .update({ role: staffRole })
-      .eq('id', authData.user.id);
-
-    setStaffSuccess(`Conta de ${staffRole === 'GUARD' ? 'Porteiro' : 'Síndico'} criada para ${staffName}!`);
-    setStaffName('');
-    setStaffEmail('');
-    setStaffPhone('');
-    setStaffPassword('');
-    setStaffLoading(false);
-    loadStaff();
   };
 
   // Funções da Aba Automações & Utilidades

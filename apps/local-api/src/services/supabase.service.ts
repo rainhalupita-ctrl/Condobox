@@ -238,6 +238,21 @@ export class SupabaseService {
       console.error('[SupabaseService] Erro ao gravar notification log:', e);
     }
   }
+
+  /**
+   * Remove arquivo do Storage no Supabase
+   */
+  async deleteFile(bucket: string, path: string) {
+    if (!this.isConfigured()) return;
+    try {
+      const { error } = await this.getClient().storage.from(bucket).remove([path]);
+      if (error) {
+        console.error(`[SupabaseService] Erro ao deletar ${path} de ${bucket}:`, error.message);
+      }
+    } catch (e: any) {
+      console.error(`[SupabaseService] Exceção ao deletar ${path} de ${bucket}:`, e.message);
+    }
+  }
 }
 
 export const supabaseService = new SupabaseService();

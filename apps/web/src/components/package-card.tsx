@@ -285,6 +285,24 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
               src={modalImage}
               alt="Visualização"
               className="max-h-[75vh] w-auto object-contain rounded-xl"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (!target.dataset.triedFallback) {
+                  target.dataset.triedFallback = 'true';
+                  target.src = LocalApiClient.getLocalFallbackUrl(
+                    modalImage.includes('signature') ? pkg.signature_image_path : pkg.label_image_path
+                  );
+                } else {
+                  target.style.display = 'none';
+                  const parent = target.parentElement;
+                  if (parent && !parent.querySelector('.img-error')) {
+                    const span = document.createElement('span');
+                    span.className = 'img-error text-slate-400 font-medium py-12 block text-center';
+                    span.innerHTML = '🚫<br/>Imagem não encontrada<br/><span class="text-xs text-slate-500 font-normal mt-2 block">Pode ter sido apagada na limpeza automática.</span>';
+                    parent.insertBefore(span, target);
+                  }
+                }
+              }}
             />
             <button
               onClick={() => setModalImage(null)}
