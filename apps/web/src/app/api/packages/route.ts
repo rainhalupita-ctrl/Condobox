@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
           `Uma encomenda de *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
           `📱 *Link com QR Code de retirada:*\n` +
           `${pickupUrl}\n\n` +
-          `_Apresente o QR Code ou informe o código de 4 dígitos na portaria._\n\n` +
+          `_Apresente o QR Code ou informe o código de 6 dígitos na portaria._\n\n` +
           `🏢 Portaria do Condomínio`;
 
         const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';

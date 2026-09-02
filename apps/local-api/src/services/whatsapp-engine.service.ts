@@ -363,9 +363,8 @@ export class WhatsAppEngineService {
       `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
       `Olá, *${params.residentName}*!\n\n` +
       `Uma encomenda de *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
-      `🔑 *Código de Retirada:* *${params.pickupCode}*\n` +
       `📱 *Link do QR Code:*\n${pickupUrl}\n\n` +
-      `_Apresente o QR Code ou informe o código de 4 dígitos na portaria ao retirar._\n\n` +
+      `_Apresente o QR Code ou informe o código de 6 dígitos na portaria ao retirar._\n\n` +
       `🏢 Portaria do Condomínio${adFooter}`;
 
     if (params.labelImageUrl) {
