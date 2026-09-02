@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createClient } from '../lib/supabase/client';
 import {
   Lock,
   KeyRound,
@@ -45,33 +46,51 @@ export function SubscriptionGate({ children }: Props) {
   const checkLicense = async () => {
     setLoading(true);
     try {
+      let realUnitsCount = 0;
+      try {
+        const supabase = createClient();
+        const { count } = await supabase.from('units').select('*', { count: 'exact', head: true });
+        if (typeof count === 'number') {
+          realUnitsCount = count;
+        }
+      } catch {}
+
       const res = await fetch('http://localhost:3001/api/license/status').catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
         if (data.subscription) {
+          const currentCount = Math.max(data.unitsUsage?.current || 0, realUnitsCount);
+          const maxUnits = data.unitsUsage?.max || data.subscription.plan?.max_units || 250;
           setSub(data.subscription);
-          setUnitsUsage(data.unitsUsage);
+          setUnitsUsage({
+            current: currentCount,
+            max: maxUnits,
+            canAddMore: currentCount < maxUnits,
+            percentage: Math.min(100, Math.round((currentCount / maxUnits) * 100))
+          });
           return;
         }
       }
 
       // Fallback padrão se API local não responder: Trial Ativo
       const fallbackDate = new Date(Date.now() + 25 * 86400000).toISOString();
+      const maxUnits = 250;
+      const currentCount = realUnitsCount;
       setSub({
         plan_id: 'TRIAL',
         status: 'TRIAL',
         current_period_ends_at: fallbackDate,
         plan: {
           name: 'Teste Grátis 30 Dias',
-          max_units: 250,
+          max_units: maxUnits,
           has_ads: false
         }
       });
       setUnitsUsage({
-        current: 42,
-        max: 250,
-        canAddMore: true,
-        percentage: 17
+        current: currentCount,
+        max: maxUnits,
+        canAddMore: currentCount < maxUnits,
+        percentage: Math.min(100, Math.round((currentCount / maxUnits) * 100))
       });
     } catch {
       // Permitir uso caso de erro transitório
