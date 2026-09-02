@@ -33,7 +33,7 @@ export function Navbar() {
         className="border-b border-slate-800 bg-slate-950/90 backdrop-blur-md sticky top-0 z-40 select-none w-full"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 sm:pr-36 h-14 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="w-full px-3 sm:px-6 sm:pr-36 h-14 flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo Oficial CondoBox */}
           <Link 
             href={isPortaria ? '/portaria' : '/morador'}
