@@ -148,19 +148,7 @@ export function KeyboardShortcuts() {
 
   return (
     <>
-      {/* Botão flutuante discreto no canto inferior para abrir o guia de atalhos */}
-      <button
-        type="button"
-        onClick={() => setIsOpen(true)}
-        title="Atalhos do Teclado (Pressione ?)"
-        className="fixed bottom-3 right-3 sm:bottom-4 sm:right-4 z-40 p-2.5 bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 border border-slate-800 rounded-xl shadow-lg backdrop-blur-md transition-all flex items-center gap-1.5 text-xs font-semibold group"
-      >
-        <Keyboard className="w-4 h-4 text-slate-400 group-hover:text-emerald-400 transition" />
-        <span className="hidden md:inline">Atalhos</span>
-        <kbd className="hidden md:inline px-1.5 py-0.5 bg-slate-800 text-[10px] text-slate-300 rounded border border-slate-700">?</kbd>
-      </button>
-
-      {/* Modal de Guia de Atalhos */}
+      {/* Modal de Guia de Atalhos (Ativado via teclado com ?) */}
       {isOpen && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
