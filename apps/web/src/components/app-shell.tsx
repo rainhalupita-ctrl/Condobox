@@ -21,7 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col min-h-screen">
       {showNavbar && <Navbar />}
-      <main className={`flex-1 w-full ${showNavbar ? 'max-w-7xl mx-auto p-4 sm:p-6 md:p-8' : ''}`}>
+      <main className={`flex-1 w-full pb-20 sm:pb-6 ${showNavbar ? 'max-w-7xl mx-auto p-3 sm:p-6 md:p-8' : ''}`}>
         {shouldBlock ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <h1 className="text-3xl font-bold text-red-500 mb-4">Acesso Bloqueado</h1>
