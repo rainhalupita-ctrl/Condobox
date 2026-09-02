@@ -40,6 +40,7 @@ interface PublicPackageData {
     block: string;
     unit_number: string;
   } | null;
+  condo_phone?: string | null;
 }
 
 export default function PublicPackagePage() {
@@ -57,6 +58,25 @@ export default function PublicPackagePage() {
   useEffect(() => {
     if (token) {
       loadPackage();
+      
+      // Auto-refresh a cada 15 segundos se a encomenda ainda não foi entregue
+      const interval = setInterval(() => {
+        setPkg((currentPkg) => {
+          if (currentPkg && currentPkg.status !== 'DELIVERED') {
+            fetch(`/api/package/${token}`)
+              .then(res => res.json())
+              .then(data => {
+                if (data.package && data.package.status === 'DELIVERED') {
+                  setPkg(data.package);
+                }
+              })
+              .catch(() => {});
+          }
+          return currentPkg;
+        });
+      }, 15000);
+
+      return () => clearInterval(interval);
     }
   }, [token]);
 
@@ -363,29 +383,45 @@ export default function PublicPackagePage() {
                   <Truck className="w-4 h-4 text-slate-500" />
                 </div>
               )}
-
-              {/* Botão de Ver Foto da Etiqueta */}
-              {labelUrl && (
-                <button
-                  type="button"
-                  onClick={() => setModalImage(labelUrl)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold transition border border-slate-700"
-                >
-                  <Eye className="w-4 h-4 text-emerald-400" />
-                  <span>Ver Foto da Etiqueta da Encomenda</span>
-                </button>
-              )}
-
-              {isDelivered && signatureUrl && (
-                <button
-                  type="button"
-                  onClick={() => setModalImage(signatureUrl)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-xl font-semibold transition border border-slate-700"
-                >
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Ver Assinatura Digital de Entrega</span>
-                </button>
-              )}
+              {/* Botões - Ajustados conforme o status */}
+              <div className="flex flex-col gap-3 mt-4 w-full">
+                {isDelivered ? (
+                  <>
+                    {signatureUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setModalImage(signatureUrl)}
+                        className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-2xl font-bold transition border border-slate-700 shadow-sm"
+                      >
+                        <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                        <span>Ver assinatura</span>
+                      </button>
+                    )}
+                    
+                    <a
+                      href={`https://wa.me/${pkg?.condo_phone?.replace(/\D/g, '') || ''}?text=Ol%C3%A1%2C+consta+no+sistema+que+minha+encomenda+%28c%C3%B3digo+${pkg?.pickup_code}%29+foi+retirada%2C+mas+eu+n%C3%A3o+fiz+a+retirada.`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl font-bold transition border border-red-500/30 shadow-sm"
+                    >
+                      Não fiz a retirada
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    {labelUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setModalImage(labelUrl)}
+                        className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-2xl font-semibold transition border border-slate-700"
+                      >
+                        <Eye className="w-5 h-5 text-emerald-400" />
+                        <span>Ver Foto da Etiqueta da Encomenda</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Rodapé Informativo */}

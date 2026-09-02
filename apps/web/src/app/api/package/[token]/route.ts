@@ -23,7 +23,7 @@ export async function GET(
     // 1. Busca por qr_token, id (uuid) ou pickup_code
     let query = supabase
       .from('packages')
-      .select('*, unit:units(block, unit_number), resident:residents(name, phone)');
+      .select('*, unit:units(block, unit_number), resident:residents(name, phone), condo:condos(phone)');
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
     if (isUUID) {
@@ -100,7 +100,8 @@ export async function GET(
         unit: pkg.unit ? {
           block: pkg.unit.block,
           unit_number: pkg.unit.unit_number
-        } : null
+        } : null,
+        condo_phone: pkg.condo?.phone || null
       },
       ad: activeAd
     });
