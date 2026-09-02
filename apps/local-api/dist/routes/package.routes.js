@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { databaseService } from '../services/database.service.js';
 import { supabaseService } from '../services/supabase.service.js';
 import { whatsappService } from '../services/whatsapp.service.js';
+import { whatsAppEngineService } from '../services/whatsapp-engine.service.js';
 const createPackageSchema = z.object({
     unitId: z.string().min(1),
     residentId: z.string().optional().nullable(),
@@ -184,5 +185,157 @@ export async function packageRoutes(fastify) {
             return codeMatch || nameMatch || carrierMatch || trackingMatch || residentMatch || unitMatch;
         });
         return reply.send({ packages: filtered });
+    });
+    /**
+     * POST /api/packages/:id/notify
+     * Reenvia notificação de chegada de encomenda via WhatsApp (Baileys Nativo)
+     */
+    fastify.post('/api/packages/:id/notify', async (request, reply) => {
+        const { id } = request.params;
+        try {
+            // 1. Busca pacote no SQLite local
+            let pkg = databaseService.getPackageById(id) || databaseService.getPackageByQrTokenOrCode(id);
+            // 2. Fallback: busca no Supabase
+            if (!pkg && supabaseService.isConfigured()) {
+                try {
+                    const client = supabaseService.getClient();
+                    const { data: cloudPkg } = await client
+                        .from('packages')
+                        .select('*, unit:units(*), resident:residents(*)')
+                        .or(`id.eq.${id},pickup_code.eq.${id}`)
+                        .limit(1)
+                        .maybeSingle();
+                    if (cloudPkg)
+                        pkg = cloudPkg;
+                }
+                catch { }
+            }
+            if (!pkg) {
+                return reply.status(404).send({ success: false, error: 'Encomenda não encontrada no sistema' });
+            }
+            // 3. Resolve telefone e dados do destinatário
+            let phone = pkg.resident?.phone;
+            let residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
+            let unitInfo = pkg.unit ? `Apto ${pkg.unit.unit_number} - ${pkg.unit.block}` : 'sua unidade';
+            if (!phone && pkg.resident_id) {
+                const res = databaseService.getResidentById(pkg.resident_id);
+                if (res?.phone) {
+                    phone = res.phone;
+                    residentName = res.name;
+                }
+            }
+            if (!phone && pkg.unit_id) {
+                const residents = databaseService.getResidentsByUnit(pkg.unit_id);
+                const primary = residents.find(r => r.is_primary) || residents[0];
+                if (primary?.phone) {
+                    phone = primary.phone;
+                    if (!pkg.recipient_name_ocr)
+                        residentName = primary.name;
+                }
+            }
+            if (!phone) {
+                return reply.status(400).send({
+                    success: false,
+                    error: 'Nenhum telefone de morador cadastrado para esta unidade.'
+                });
+            }
+            // 4. Dispara mensagem via Baileys Nativo
+            const notifyRes = await whatsAppEngineService.notifyPackageArrival({
+                phone,
+                residentName,
+                unitInfo,
+                carrier: pkg.carrier || 'Transportadora',
+                pickupCode: pkg.pickup_code,
+                qrToken: pkg.qr_token || pkg.pickup_code,
+                labelImageUrl: pkg.label_image_path || undefined
+            });
+            if (notifyRes.success) {
+                try {
+                    databaseService.updatePackageStatus(pkg.id, 'NOTIFIED');
+                }
+                catch { }
+                return reply.send({
+                    success: true,
+                    message: `Notificação enviada com sucesso para ${phone}!`,
+                    phone
+                });
+            }
+            else {
+                return reply.status(500).send({
+                    success: false,
+                    error: notifyRes.error || 'WhatsApp desconectado ou falha no envio.'
+                });
+            }
+        }
+        catch (err) {
+            return reply.status(500).send({
+                success: false,
+                error: `Erro ao enviar notificação: ${err.message}`
+            });
+        }
+    });
+    /**
+     * POST /api/packages/notify-pending
+     * Dispara notificações para todas as encomendas recebidas pendentes
+     */
+    fastify.post('/api/packages/notify-pending', async (request, reply) => {
+        try {
+            const recent = databaseService.listRecentPackages(100);
+            const pending = recent.filter(p => p.status === 'RECEIVED');
+            let sentCount = 0;
+            let alreadySentCount = recent.filter(p => p.status !== 'RECEIVED').length;
+            let failedCount = 0;
+            for (const pkg of pending) {
+                let phone = pkg.resident?.phone;
+                let residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
+                let unitInfo = pkg.unit ? `Apto ${pkg.unit.unit_number} - ${pkg.unit.block}` : 'sua unidade';
+                if (!phone && pkg.resident_id) {
+                    const res = databaseService.getResidentById(pkg.resident_id);
+                    if (res?.phone)
+                        phone = res.phone;
+                }
+                if (!phone && pkg.unit_id) {
+                    const residents = databaseService.getResidentsByUnit(pkg.unit_id);
+                    const primary = residents.find(r => r.is_primary) || residents[0];
+                    if (primary?.phone)
+                        phone = primary.phone;
+                }
+                if (phone) {
+                    const res = await whatsAppEngineService.notifyPackageArrival({
+                        phone,
+                        residentName,
+                        unitInfo,
+                        carrier: pkg.carrier || 'Transportadora',
+                        pickupCode: pkg.pickup_code,
+                        qrToken: pkg.qr_token || pkg.pickup_code
+                    });
+                    if (res.success) {
+                        sentCount++;
+                        try {
+                            databaseService.updatePackageStatus(pkg.id, 'NOTIFIED');
+                        }
+                        catch { }
+                    }
+                    else {
+                        failedCount++;
+                    }
+                }
+                else {
+                    failedCount++;
+                }
+            }
+            return reply.send({
+                success: true,
+                sentCount,
+                alreadySentCount,
+                failedCount
+            });
+        }
+        catch (err) {
+            return reply.status(500).send({
+                success: false,
+                error: err.message
+            });
+        }
     });
 }
