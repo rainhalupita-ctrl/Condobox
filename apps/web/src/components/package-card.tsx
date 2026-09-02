@@ -179,21 +179,23 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
       </div>
 
       {/* Detalhes */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300 bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
-        <div>
-          <span className="text-slate-500 block">Destinatário:</span>
-          <span className="font-medium text-slate-200 truncate block">
+      <div className="grid grid-cols-2 gap-3 text-xs text-slate-300 bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
+        <div className="min-w-0">
+          <span className="text-slate-500 block text-[11px] font-medium">Destinatário:</span>
+          <span className="font-semibold text-slate-200 truncate block text-xs mt-0.5">
             {pkg.resident?.name || pkg.recipient_name_ocr || 'Não identificado'}
           </span>
         </div>
-        <div>
-          <span className="text-slate-500 block">Recebido em:</span>
-          <span className="font-medium text-slate-200">{formattedDate}</span>
+        <div className="min-w-0">
+          <span className="text-slate-500 block text-[11px] font-medium">Recebido em:</span>
+          <span className="font-semibold text-slate-200 block text-xs mt-0.5 whitespace-nowrap">
+            {formattedDate}
+          </span>
         </div>
         {pkg.tracking_code && (
-          <div className="col-span-full">
-            <span className="text-slate-500 block">Rastreio:</span>
-            <span className="font-mono text-slate-300">{pkg.tracking_code}</span>
+          <div className="col-span-2 pt-1 border-t border-slate-900">
+            <span className="text-slate-500 text-[11px] font-medium">Rastreio: </span>
+            <span className="font-mono text-slate-300 font-semibold">{pkg.tracking_code}</span>
           </div>
         )}
       </div>
