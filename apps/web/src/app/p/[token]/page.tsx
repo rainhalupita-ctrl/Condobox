@@ -62,22 +62,35 @@ export default function PublicPackagePage() {
     }
   }, [token]);
 
-  // Real-time Push Subscription
+  // Real-time Push Subscription + Fallback Polling
   useEffect(() => {
     if (!pkg?.id || pkg.status === 'DELIVERED') return;
 
+    // Supabase Realtime Broadcast para atualização instantânea
     const supabase = createClient();
     const channel = supabase.channel(`public-package-${pkg.id}`)
       .on('broadcast', { event: 'status-updated' }, (payload) => {
         if (payload.payload?.status === 'DELIVERED') {
-          // Atualiza a página imediatamente ao receber o evento de "entregue"
           loadPackage();
         }
       })
       .subscribe();
 
+    // Fallback de polling a cada 5 segundos (garantia caso o broadcast falhe ou websocket caia)
+    const interval = setInterval(() => {
+      fetch(`/api/package/${token}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.package && data.package.status === 'DELIVERED') {
+            loadPackage();
+          }
+        })
+        .catch(() => {});
+    }, 5000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }, [pkg?.id, pkg?.status]);
 
@@ -207,8 +220,9 @@ export default function PublicPackagePage() {
             </div>
 
             {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
-              <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            {!isDelivered && (
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
+                <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
               {/* Bloco de Conteúdo (Desfocado se não confirmado) */}
               <div className={`transition-all duration-700 ${!isUnlocked && !isDelivered ? 'blur-md opacity-40 select-none pointer-events-none' : ''}`}>
@@ -294,6 +308,7 @@ export default function PublicPackagePage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* CARD DE PATROCÍNIO / PROPAGANDA (Plano Basic) */}
             {ad && (
@@ -376,7 +391,7 @@ export default function PublicPackagePage() {
               </div>
 
               {pkg.tracking_code && (
-                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 flex items-center justify-between mt-3">
                   <div>
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">Rastreio / NF</span>
                     <span className="font-mono text-slate-200 font-semibold">{pkg.tracking_code}</span>
@@ -384,45 +399,42 @@ export default function PublicPackagePage() {
                   <Truck className="w-4 h-4 text-slate-500" />
                 </div>
               )}
-              {/* Botões - Ajustados conforme o status */}
-              <div className="flex flex-col gap-3 mt-4 w-full">
-                {isDelivered ? (
-                  <>
-                    {signatureUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setModalImage(signatureUrl)}
-                        className="w-full flex items-center justify-center py-4 px-4 bg-white hover:bg-gray-100 text-black rounded-full font-bold text-[15px] transition shadow-md"
-                      >
-                        Ver assinatura
-                      </button>
-                    )}
-                    
-                    <a
-                      href={`https://wa.me/${pkg?.condo_phone?.replace(/\D/g, '') || ''}?text=Ol%C3%A1%2C+consta+no+sistema+que+minha+encomenda+%28c%C3%B3digo+${pkg?.pickup_code}%29+foi+retirada%2C+mas+eu+n%C3%A3o+fiz+a+retirada.`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full flex items-center justify-center py-4 px-4 bg-[#FF3B30] hover:bg-[#FF453A] text-white rounded-full font-bold text-[15px] transition shadow-md mt-2"
-                    >
-                      Não fiz a retirada
-                    </a>
-                  </>
-                ) : (
-                  <>
-                    {labelUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setModalImage(labelUrl)}
-                        className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-2xl font-semibold transition border border-slate-700"
-                      >
-                        <Eye className="w-5 h-5 text-emerald-400" />
-                        <span>Ver Foto da Etiqueta da Encomenda</span>
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
+
+              {labelUrl && (
+                <button
+                  type="button"
+                  onClick={() => setModalImage(labelUrl)}
+                  className="w-full mt-4 flex items-center justify-center gap-2 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-2xl font-semibold transition border border-slate-700"
+                >
+                  <Eye className="w-5 h-5 text-emerald-400" />
+                  <span>Ver Foto da Etiqueta da Encomenda</span>
+                </button>
+              )}
             </div>
+
+            {/* Botões - Exibidos fora do card DADOS DE ENTREGA para destaque quando entregue */}
+            {isDelivered && (
+              <div className="flex flex-col gap-3 mt-4 w-full">
+                {signatureUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setModalImage(signatureUrl)}
+                    className="w-full flex items-center justify-center py-4 px-4 bg-white hover:bg-gray-100 text-black rounded-full font-bold text-[15px] transition shadow-md"
+                  >
+                    Ver assinatura
+                  </button>
+                )}
+                
+                <a
+                  href={`https://wa.me/${pkg?.condo_phone?.replace(/\D/g, '') || ''}?text=Ol%C3%A1%2C+consta+no+sistema+que+minha+encomenda+%28c%C3%B3digo+${pkg?.pickup_code}%29+foi+retirada%2C+mas+eu+n%C3%A3o+fiz+a+retirada.`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center py-4 px-4 bg-[#FF3B30] hover:bg-[#FF453A] text-white rounded-full font-bold text-[15px] transition shadow-md mt-2"
+                >
+                  Não fiz a retirada
+                </a>
+              </div>
+            )}
 
             {/* Rodapé Informativo */}
             <div className="text-center py-4 text-[11px] text-slate-500">
