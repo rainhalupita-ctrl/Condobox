@@ -54,6 +54,10 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     };
 
     checkNotification();
+
+    const onCloseModals = () => setModalImage(null);
+    window.addEventListener('condobox:close-modals', onCloseModals);
+    return () => window.removeEventListener('condobox:close-modals', onCloseModals);
   }, [pkg.id, pkg.status]);
 
   const getCarrierColor = (carrier: string) => {

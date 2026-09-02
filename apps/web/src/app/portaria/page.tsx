@@ -66,6 +66,28 @@ export default function PortariaDashboardPage() {
 
   useEffect(() => {
     loadPackages();
+
+    const onSetFilter = (e: any) => {
+      if (e.detail) setStatusFilter(e.detail);
+    };
+    const onRefresh = () => loadPackages();
+    const onNotify = () => handleNotifyPending();
+    const onCloseModals = () => {
+      setSelectedForDelivery(null);
+      setDeliveredToName('');
+    };
+
+    window.addEventListener('condobox:set-filter', onSetFilter);
+    window.addEventListener('condobox:refresh-packages', onRefresh);
+    window.addEventListener('condobox:notify-pending', onNotify);
+    window.addEventListener('condobox:close-modals', onCloseModals);
+
+    return () => {
+      window.removeEventListener('condobox:set-filter', onSetFilter);
+      window.removeEventListener('condobox:refresh-packages', onRefresh);
+      window.removeEventListener('condobox:notify-pending', onNotify);
+      window.removeEventListener('condobox:close-modals', onCloseModals);
+    };
   }, []);
 
   const handleStartDelivery = (pkg: PackageType) => {
