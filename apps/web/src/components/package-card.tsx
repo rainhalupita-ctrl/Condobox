@@ -190,7 +190,7 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
             {pkg.resident?.name || pkg.recipient_name_ocr || 'Não identificado'}
           </span>
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 text-right">
           <span className="text-slate-500 block text-[11px] font-medium">Recebido em:</span>
           <span className="font-semibold text-slate-200 block text-xs mt-0.5 whitespace-nowrap">
             {formattedDate}
