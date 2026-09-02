@@ -5,7 +5,6 @@ import { Cookie, ShieldCheck, Camera, Check, X, Smartphone, Info } from 'lucide-
 
 export function CookieConsent() {
   const [showBanner, setShowBanner] = useState(false);
-  const [showIosGuide, setShowIosGuide] = useState(false);
 
   useEffect(() => {
     // Verifica se já aceitou os cookies/permissões permanentes
@@ -35,13 +34,6 @@ export function CookieConsent() {
       localStorage.setItem('condobox_cache_enabled', 'true');
 
       setShowBanner(false);
-
-      // Detecta se é iPhone/iOS Safari para oferecer a dica de fixar permanente na tela inicial
-      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-      const isStandalone = (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
-      if (isIos && !isStandalone) {
-        setShowIosGuide(true);
-      }
     }
   };
 
@@ -97,43 +89,6 @@ export function CookieConsent() {
         </div>
       )}
 
-      {/* Modal / Dica para Fixar Permanente no iPhone (iOS) */}
-      {showIosGuide && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl text-center">
-            <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl flex items-center justify-center mx-auto">
-              <Smartphone className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-white">Fixar Câmera Permanente no iPhone</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Para o iPhone nunca mais pedir permissão:
-              </p>
-            </div>
-            <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 text-left space-y-2 text-xs text-slate-300">
-              <div className="flex items-start gap-2">
-                <span className="font-bold text-emerald-400">1.</span>
-                <span>Toque no botão <strong>Compartilhar</strong> (quadrado com seta para cima) no Safari.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="font-bold text-emerald-400">2.</span>
-                <span>Selecione <strong>Adicionar à Tela de Início</strong>.</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="font-bold text-emerald-400">3.</span>
-                <span>Pronto! O app abre direto com a câmera autorizada para sempre.</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowIosGuide(false)}
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-950"
-            >
-              Entendi
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 }
