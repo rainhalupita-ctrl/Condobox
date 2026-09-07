@@ -1,6 +1,15 @@
-export default async function handler(req, res) {
-  const host = req.headers.host || 'condobox-local-api.vercel.app';
-  const url = new URL(req.url, `https://${host}`);
+export default function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    return res.end();
+  }
+
+  const host = (req.headers && req.headers['host']) || 'condobox-local-api.vercel.app';
+  const url = new URL(req.url || '/', `https://${host}`);
   const path = url.pathname;
 
   // 1. Favicon
@@ -39,25 +48,25 @@ export default async function handler(req, res) {
     }));
   }
 
-  // 4. Se for rota de API desconhecida
+  // 4. Outras rotas de API
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
     res.statusCode = 200;
     return res.end(JSON.stringify({
       status: 'OK',
       path: path,
-      message: 'CondoBox Cloud API Gateway Ativo',
+      message: 'CondoBox Cloud Gateway Ativo',
       webApp: 'https://web-eight-rust-97.vercel.app'
     }));
   }
 
-  // 5. Rota Principal (HTML com redirecionamento amigável para o App Web)
+  // 5. Rota Principal - Página visual elegante com redirecionamento para o Web App
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CondoBox — API & Gateway</title>
+  <title>CondoBox — Portaria Inteligente</title>
   <meta http-equiv="refresh" content="2; url=https://web-eight-rust-97.vercel.app">
   <link rel="icon" href="https://web-eight-rust-97.vercel.app/favicon.ico">
   <style>
@@ -127,10 +136,10 @@ export default async function handler(req, res) {
 </head>
 <body>
   <div class="card">
-    <div class="badge">API Cloud Online &bull; Vercel</div>
+    <div class="badge">Sistema Online &bull; Vercel</div>
     <h1>CondoBox Portaria</h1>
-    <p>O gateway da API está operando normalmente. Redirecionando para o aplicativo web do condomínio em 2 segundos...</p>
-    <a class="btn" href="https://web-eight-rust-97.vercel.app">Entrar no Sistema CondoBox &rarr;</a>
+    <p>O gateway da API está operando normalmente. Redirecionando para o aplicativo do condomínio em 2 segundos...</p>
+    <a class="btn" href="https://web-eight-rust-97.vercel.app">Acessar Sistema CondoBox &rarr;</a>
     <div class="footer">Redirecionamento automático ativo</div>
   </div>
 </body>

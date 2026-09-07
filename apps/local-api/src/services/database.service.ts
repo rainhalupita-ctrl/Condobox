@@ -82,7 +82,7 @@ export interface CreatePackageLocalInput {
 }
 
 export class DatabaseService {
-  private db: Database.Database | null = null;
+  private db!: Database.Database;
   private dbPath: string = '';
 
   constructor() {
