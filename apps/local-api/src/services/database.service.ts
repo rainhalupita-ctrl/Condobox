@@ -46,6 +46,8 @@ export interface LocalPackage {
   notes?: string | null;
   sync_status?: 'PENDING' | 'SYNCED' | 'FAILED';
   last_synced_at?: string | null;
+  unit?: { id: string; block: string; unit_number: string } | null;
+  resident?: { id: string; name: string; phone: string } | null;
 }
 
 export interface LocalNotificationLog {
