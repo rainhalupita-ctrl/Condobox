@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { env } from '../config/env.js';
+import { env, ABSOLUTE_STORAGE_DIR } from '../config/env.js';
 
 export interface LocalUnit {
   id: string;
@@ -72,7 +72,7 @@ export class DatabaseService {
     
     // ABSOLUTE_STORAGE_DIR = apps/local-api/data/packages
     // ../.. = apps/local-api
-    const rootDir = path.resolve(env.ABSOLUTE_STORAGE_DIR || process.cwd(), '../..');
+    const rootDir = path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../..');
     const dataDir = path.resolve(rootDir, 'data');
 
     if (!fs.existsSync(dataDir)) {
