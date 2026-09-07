@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import os from 'os';
 import { z } from 'zod';
 
 dotenv.config();
@@ -23,10 +24,14 @@ const envSchema = z.object({
 
 export const env = envSchema.parse(process.env);
 
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
 // Garante que a raiz seja sempre resolvida corretamente, mesmo se rodado do root do monorepo
 const cwd = process.cwd();
 const localApiRoot = cwd.endsWith('local-api') ? cwd : path.join(cwd, 'apps', 'local-api');
 
-export const ABSOLUTE_STORAGE_DIR = path.isAbsolute(env.STORAGE_DIR)
-  ? env.STORAGE_DIR
-  : path.resolve(localApiRoot, env.STORAGE_DIR);
+export const ABSOLUTE_STORAGE_DIR = isServerless
+  ? path.join(os.tmpdir(), 'condobox', 'packages')
+  : (path.isAbsolute(env.STORAGE_DIR)
+      ? env.STORAGE_DIR
+      : path.resolve(localApiRoot, env.STORAGE_DIR));

@@ -13,8 +13,16 @@ export class BackupService {
   private static backupsDir = path.join(process.cwd(), 'data', 'backups');
 
   public static init() {
-    if (!fs.existsSync(this.backupsDir)) {
-      fs.mkdirSync(this.backupsDir, { recursive: true });
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      return;
+    }
+
+    try {
+      if (!fs.existsSync(this.backupsDir)) {
+        fs.mkdirSync(this.backupsDir, { recursive: true });
+      }
+    } catch (err: any) {
+      console.warn('[BackupService] Diretório de backup ignorado:', err?.message);
     }
 
     // Executa verificação diária de backup

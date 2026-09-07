@@ -33,9 +33,17 @@ export class WhatsAppEngineService {
   private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.sessionDir = path.resolve(process.cwd(), 'data', 'whatsapp_session');
-    if (!fs.existsSync(this.sessionDir)) {
-      fs.mkdirSync(this.sessionDir, { recursive: true });
+    const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    this.sessionDir = isServerless
+      ? path.join(os.tmpdir(), 'condobox', 'whatsapp_session')
+      : path.resolve(process.cwd(), 'data', 'whatsapp_session');
+
+    try {
+      if (!fs.existsSync(this.sessionDir)) {
+        fs.mkdirSync(this.sessionDir, { recursive: true });
+      }
+    } catch (err: any) {
+      console.warn('[WhatsAppEngineService] Sessão em modo memória/somente-leitura:', err?.message);
     }
   }
 

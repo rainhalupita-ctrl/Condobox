@@ -16,11 +16,15 @@ export class StorageService {
   }
 
   private ensureDirectories() {
-    if (!fsSync.existsSync(this.labelsDir)) {
-      fsSync.mkdirSync(this.labelsDir, { recursive: true });
-    }
-    if (!fsSync.existsSync(this.signaturesDir)) {
-      fsSync.mkdirSync(this.signaturesDir, { recursive: true });
+    try {
+      if (!fsSync.existsSync(this.labelsDir)) {
+        fsSync.mkdirSync(this.labelsDir, { recursive: true });
+      }
+      if (!fsSync.existsSync(this.signaturesDir)) {
+        fsSync.mkdirSync(this.signaturesDir, { recursive: true });
+      }
+    } catch (err: any) {
+      console.warn('[StorageService] Diretórios ignorados ou em ambiente somente-leitura:', err?.message);
     }
   }
 
