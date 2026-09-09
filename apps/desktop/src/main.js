@@ -184,28 +184,51 @@ function startLocalApi() {
     ? path.join(__dirname, "../../local-api/node_modules")
     : path.join(process.resourcesPath, "app.asar.unpacked/node_modules");
 
-  const nodeExecutable = isDev ? "node" : process.execPath;
-  const childEnv = isDev
-    ? { ...envVars, NODE_PATH: nodeModulesPath }
-    : { ...envVars, NODE_PATH: nodeModulesPath, ELECTRON_RUN_AS_NODE: "1" };
+  const runWithExecutable = (executable, isElectronNode) => {
+    const childEnv = isElectronNode
+      ? { ...envVars, NODE_PATH: nodeModulesPath, ELECTRON_RUN_AS_NODE: "1" }
+      : { ...envVars, NODE_PATH: nodeModulesPath };
 
-  console.log("[CondoBox] Iniciando API Local em:", scriptPath, "via", nodeExecutable);
+    console.log("[CondoBox] Iniciando API Local em:", scriptPath, "via", executable);
 
-  apiProcess = spawn(nodeExecutable, [scriptPath], {
-    cwd: cwd,
-    env: childEnv,
-    stdio: "inherit",
-    windowsHide: true,
-    detached: false,
-  });
+    const proc = spawn(executable, [scriptPath], {
+      cwd: cwd,
+      env: childEnv,
+      stdio: "inherit",
+      windowsHide: true,
+      detached: false,
+    });
 
-  apiProcess.on("error", (err) => {
-    console.error("[CondoBox] Erro no processo da API local:", err);
-  });
+    proc.on("error", (err) => {
+      console.error(`[CondoBox] Erro ao iniciar via ${executable}:`, err?.message);
+      if (executable !== "node") {
+        console.log("[CondoBox] Tentando fallback para 'node' do sistema...");
+        apiProcess = runWithExecutable("node", false);
+      }
+    });
 
-  apiProcess.on("exit", (code) => {
-    console.log(`[CondoBox] Processo da API local finalizado com código ${code}`);
-  });
+    proc.on("exit", (code) => {
+      console.log(`[CondoBox] Processo da API local (${executable}) finalizado com código ${code}`);
+      if (code !== null && code !== 0 && executable !== "node") {
+        console.log("[CondoBox] Falha no binário empacotado. Tentando fallback para 'node'...");
+        apiProcess = runWithExecutable("node", false);
+      }
+    });
+
+    return proc;
+  };
+
+  // Se node do sistema estiver disponível, prefere node nativo para evitar conflito com Electron fuses
+  let preferredExe = "node";
+  try {
+    const { execSync } = require("child_process");
+    execSync("node -v", { stdio: "ignore" });
+    preferredExe = "node";
+  } catch {
+    preferredExe = isDev ? "node" : process.execPath;
+  }
+
+  apiProcess = runWithExecutable(preferredExe, preferredExe === process.execPath);
 }
 
 app.whenReady().then(() => {

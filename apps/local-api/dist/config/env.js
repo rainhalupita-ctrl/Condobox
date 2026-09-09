@@ -19,6 +19,9 @@ const envSchema = z.object({
     WEB_APP_URL: z.string().default('http://localhost:3000'),
 });
 export const env = envSchema.parse(process.env);
+// Garante que a raiz seja sempre resolvida corretamente, mesmo se rodado do root do monorepo
+const cwd = process.cwd();
+const localApiRoot = cwd.endsWith('local-api') ? cwd : path.join(cwd, 'apps', 'local-api');
 export const ABSOLUTE_STORAGE_DIR = path.isAbsolute(env.STORAGE_DIR)
     ? env.STORAGE_DIR
-    : path.resolve(process.cwd(), env.STORAGE_DIR);
+    : path.resolve(localApiRoot, env.STORAGE_DIR);

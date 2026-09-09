@@ -131,14 +131,15 @@ export class StorageService {
         let deletedCount = 0;
         const now = Date.now();
         const maxAgeMs = retentionDays * 24 * 60 * 60 * 1000;
-        async function walkAndClean(dir) {
+        const self = this;
+        async function walkAndClean(dir, bucket, baseDir) {
             if (!fsSync.existsSync(dir))
                 return;
             const entries = await fs.readdir(dir, { withFileTypes: true });
             for (const entry of entries) {
                 const fullPath = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
-                    await walkAndClean(fullPath);
+                    await walkAndClean(fullPath, bucket, baseDir);
                     // Remove pasta vazia se aplicável
                     const subEntries = await fs.readdir(fullPath);
                     if (subEntries.length === 0) {
@@ -150,11 +151,21 @@ export class StorageService {
                     if (now - stats.mtimeMs > maxAgeMs) {
                         await fs.unlink(fullPath);
                         deletedCount++;
+                        // Também remove do Supabase se aplicável
+                        try {
+                            // Exemplo de relative: "2026-08/arquivo.jpg"
+                            const supabaseRelativePath = fullPath.replace(baseDir + path.sep, '').replace(/\\/g, '/');
+                            await supabaseService.deleteFile(bucket, supabaseRelativePath);
+                        }
+                        catch (err) {
+                            console.warn(`[StorageService] Não foi possível excluir do Supabase: ${fullPath}`);
+                        }
                     }
                 }
             }
         }
-        await walkAndClean(this.labelsDir);
+        await walkAndClean(this.labelsDir, 'labels', this.labelsDir);
+        await walkAndClean(this.signaturesDir, 'signatures', this.signaturesDir);
         return { deletedCount };
     }
 }

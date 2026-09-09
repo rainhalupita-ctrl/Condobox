@@ -2,10 +2,11 @@
   "name": "condo-local-api",
   "version": "1.0.0",
   "description": "API Local de Portaria para Gestão de Encomendas, OCR Gemini e WhatsApp",
+  "main": "dist/server.js",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc || true",
+    "build": "tsc",
     "start": "node dist/server.js"
   },
   "dependencies": {

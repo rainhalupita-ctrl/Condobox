@@ -271,6 +271,8 @@ export class LocalApiClient {
       try {
         const directRes = await fetch(`${baseUrl}/api/whatsapp/connect`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
           signal: AbortSignal.timeout(10000)
         });
         if (directRes.ok) return await directRes.json();
@@ -280,6 +282,8 @@ export class LocalApiClient {
     // 2. Fallback: rota Next.js
     const fallbackRes = await fetch('/api/whatsapp/connect', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(12000)
     });
     return await fallbackRes.json();
@@ -296,6 +300,8 @@ export class LocalApiClient {
       try {
         const directRes = await fetch(`${baseUrl}/api/whatsapp/logout`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
           signal: AbortSignal.timeout(8000)
         });
         if (directRes.ok) return await directRes.json();
@@ -305,6 +311,8 @@ export class LocalApiClient {
     // 2. Fallback: rota Next.js
     const fallbackRes = await fetch('/api/whatsapp/logout', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(10000)
     });
     return await fallbackRes.json();

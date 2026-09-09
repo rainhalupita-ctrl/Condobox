@@ -33,17 +33,9 @@ export class WhatsAppEngineService {
   private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-    this.sessionDir = isServerless
-      ? path.join(os.tmpdir(), 'condobox', 'whatsapp_session')
-      : path.resolve(process.cwd(), 'data', 'whatsapp_session');
-
-    try {
-      if (!fs.existsSync(this.sessionDir)) {
-        fs.mkdirSync(this.sessionDir, { recursive: true });
-      }
-    } catch (err: any) {
-      console.warn('[WhatsAppEngineService] Sessão em modo memória/somente-leitura:', err?.message);
+    this.sessionDir = path.resolve(process.cwd(), 'data', 'whatsapp_session');
+    if (!fs.existsSync(this.sessionDir)) {
+      fs.mkdirSync(this.sessionDir, { recursive: true });
     }
   }
 
@@ -67,6 +59,10 @@ export class WhatsAppEngineService {
   }
 
   public getStatus(): WhatsAppStatus {
+    if (this.currentStatus === 'DISCONNECTED' && !this.qrCodeBase64 && !this.isInitializing && !this.socket) {
+      this.initialize().catch(() => {});
+    }
+
     return {
       status: this.currentStatus,
       connected: this.currentStatus === 'CONNECTED',
@@ -130,9 +126,14 @@ export class WhatsAppEngineService {
           console.log(`⚠️ [WhatsApp Engine] Conexão encerrada. Motivo: ${statusCode}. Reconectar: ${shouldReconnect}`);
 
           if (statusCode === DisconnectReason.loggedOut) {
-            console.log('🔒 [WhatsApp Engine] Sessão deslogada. Limpando credenciais locais...');
+            console.log('🔒 [WhatsApp Engine] Sessão deslogada. Limpando credenciais locais e gerando novo QR Code...');
             this.cleanSessionDir();
             this.qrCodeBase64 = null;
+            this.reconnectAttempts = 0;
+            // Reinicia imediatamente com sessão limpa para emitir novo QR Code para pareamento
+            setTimeout(() => {
+              this.initialize().catch(() => {});
+            }, 1000);
           } else if (shouldReconnect) {
             this.scheduleReconnect();
           }

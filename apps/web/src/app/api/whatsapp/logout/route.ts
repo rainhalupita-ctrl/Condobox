@@ -8,6 +8,8 @@ export async function POST() {
   try {
     const res = await fetch(`${localApiUrl}/api/whatsapp/logout`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(5000)
     });
     if (res.ok) {

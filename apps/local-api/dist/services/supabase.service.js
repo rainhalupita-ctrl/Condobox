@@ -97,7 +97,7 @@ export class SupabaseService {
         if (!this.isConfigured()) {
             // Mock para quando não estiver conectado ao Supabase
             const mockId = 'mock-' + Date.now();
-            const mockPickupCode = Math.floor(1000 + Math.random() * 9000).toString();
+            const mockPickupCode = Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
             return {
                 id: mockId,
                 pickup_code: mockPickupCode,
@@ -107,8 +107,8 @@ export class SupabaseService {
                 received_at: new Date().toISOString()
             };
         }
-        // Gera código numérico de 4 dígitos e token único
-        const pickupCode = Math.floor(1000 + Math.random() * 9000).toString();
+        // Gera código alfanumérico de 6 caracteres e token único
+        const pickupCode = Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
         const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         const { data, error } = await this.getClient()
             .from('packages')
@@ -184,6 +184,22 @@ export class SupabaseService {
         }
         catch (e) {
             console.error('[SupabaseService] Erro ao gravar notification log:', e);
+        }
+    }
+    /**
+     * Remove arquivo do Storage no Supabase
+     */
+    async deleteFile(bucket, path) {
+        if (!this.isConfigured())
+            return;
+        try {
+            const { error } = await this.getClient().storage.from(bucket).remove([path]);
+            if (error) {
+                console.error(`[SupabaseService] Erro ao deletar ${path} de ${bucket}:`, error.message);
+            }
+        }
+        catch (e) {
+            console.error(`[SupabaseService] Exceção ao deletar ${path} de ${bucket}:`, e.message);
         }
     }
 }

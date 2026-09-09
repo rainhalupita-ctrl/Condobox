@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { env, ABSOLUTE_STORAGE_DIR } from '../config/env.js';
 
@@ -20,8 +19,8 @@ export interface LocalResident {
   name: string;
   phone: string;
   email?: string | null;
-  is_primary: number;
-  active: number;
+  is_primary?: number;
+  active?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -29,7 +28,7 @@ export interface LocalResident {
 export interface LocalPackage {
   id: string;
   condo_id: string;
-  unit_id?: string | null;
+  unit_id: string;
   resident_id?: string | null;
   carrier: string;
   tracking_code?: string | null;
@@ -40,33 +39,14 @@ export interface LocalPackage {
   delivered_by_user_id?: string | null;
   pickup_code: string;
   qr_token: string;
-  status: 'RECEIVED' | 'DELIVERED';
-  received_at?: string;
+  status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED';
+  received_at: string;
   delivered_at?: string | null;
   notes?: string | null;
-  sync_status?: 'PENDING' | 'SYNCED' | 'FAILED';
+  sync_status: 'PENDING' | 'SYNCED' | 'FAILED';
   last_synced_at?: string | null;
   unit?: { id: string; block: string; unit_number: string } | null;
   resident?: { id: string; name: string; phone: string } | null;
-}
-
-export interface LocalNotificationLog {
-  id: string;
-  package_id: string;
-  resident_id?: string | null;
-  recipient_phone: string;
-  message_content: string;
-  status: 'PENDING' | 'SENT' | 'FAILED';
-  error_message?: string | null;
-  sent_at?: string | null;
-  created_at?: string;
-}
-
-export interface DeliverPackageParams {
-  deliveredToName: string;
-  signatureBuffer?: Buffer;
-  receivedByUserId?: string | null;
-  notes?: string | null;
 }
 
 export interface CreatePackageLocalInput {
@@ -82,35 +62,30 @@ export interface CreatePackageLocalInput {
 }
 
 export class DatabaseService {
-  private db!: Database.Database;
-  private dbPath: string = '';
+  private db: Database.Database;
+  private dbPath: string;
 
   constructor() {
     const isWindows = process.platform === 'win32';
-    const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    // Se o dirname não estiver definido (em alguns setups ES modules), podemos usar uma abordagem alternativa
+    // ou pegar da env ABSOLUTE_STORAGE_DIR que foi cuidadosamente resolvida
     
-    // Em ambiente serverless (Vercel), utiliza o diretório /tmp que possui permissão de escrita
-    const rootDir = isServerless
-      ? path.join(os.tmpdir(), 'condobox')
-      : path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../..');
+    // ABSOLUTE_STORAGE_DIR = apps/local-api/data/packages
+    // ../.. = apps/local-api
+    const rootDir = path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../..');
     const dataDir = path.resolve(rootDir, 'data');
 
-    try {
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-
-      this.dbPath = path.join(dataDir, 'condobox.db');
-      this.db = new Database(this.dbPath);
-      this.db.pragma('journal_mode = WAL');
-      this.initTables();
-    } catch (err: any) {
-      console.warn('[DatabaseService] SQLite init warning (operando em modo tolerante):', err?.message);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
+
+    this.dbPath = path.join(dataDir, 'condobox.db');
+    this.db = new Database(this.dbPath);
+    this.db.pragma('journal_mode = WAL');
+    this.initTables();
   }
 
   private initTables() {
-    if (!this.db) return;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS units (
         id TEXT PRIMARY KEY,

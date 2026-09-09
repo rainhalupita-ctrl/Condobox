@@ -120,6 +120,9 @@ export async function packageRoutes(fastify) {
                     });
                     whatsappSent = notifyRes.success;
                     whatsappError = notifyRes.error;
+                    if (whatsappSent) {
+                        databaseService.updatePackageStatus(newPackage.id, 'NOTIFIED');
+                    }
                 }
             }
             return reply.status(201).send({
