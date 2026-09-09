@@ -12,6 +12,7 @@ import path from 'path';
 import pino from 'pino';
 import os from 'os';
 import { env } from '../config/env.js';
+import { supabaseService } from './supabase.service.js';
 
 export interface WhatsAppStatus {
   status: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED';
@@ -111,6 +112,7 @@ export class WhatsAppEngineService {
             this.qrCodeBase64 = await QRCode.toDataURL(qr, { margin: 2, scale: 6 });
             this.currentStatus = 'DISCONNECTED';
             console.log('📲 [WhatsApp Engine] Novo QR Code gerado para pareamento da Portaria.');
+            this.broadcastStatus();
           } catch (err: any) {
             console.error('[WhatsApp Engine] Erro ao converter QR Code:', err.message);
           }
@@ -124,12 +126,14 @@ export class WhatsAppEngineService {
           this.connectedPhone = null;
 
           console.log(`⚠️ [WhatsApp Engine] Conexão encerrada. Motivo: ${statusCode}. Reconectar: ${shouldReconnect}`);
+          this.broadcastStatus();
 
           if (statusCode === DisconnectReason.loggedOut) {
             console.log('🔒 [WhatsApp Engine] Sessão deslogada. Limpando credenciais locais e gerando novo QR Code...');
             this.cleanSessionDir();
             this.qrCodeBase64 = null;
             this.reconnectAttempts = 0;
+            this.broadcastStatus();
             // Reinicia imediatamente com sessão limpa para emitir novo QR Code para pareamento
             setTimeout(() => {
               this.initialize().catch(() => {});
@@ -146,6 +150,7 @@ export class WhatsAppEngineService {
           this.connectedPhone = userJid.split(':')[0] || userJid.split('@')[0] || 'Conectado';
 
           console.log(`✅ [WhatsApp Engine] Conexão ativa com sucesso! Número: ${this.connectedPhone}`);
+          this.broadcastStatus();
         }
       });
 
@@ -235,7 +240,56 @@ export class WhatsAppEngineService {
     this.connectedPhone = null;
     this.qrCodeBase64 = null;
     this.reconnectAttempts = 0;
+    this.broadcastStatus();
     console.log('🔓 [WhatsApp Engine] Sessão encerrada manualmente.');
+  }
+
+  private bridgeChannel: any = null;
+
+  public setupRealtimeBridge(): void {
+    if (!supabaseService.isConfigured()) return;
+
+    try {
+      const client = supabaseService.getClient();
+      this.bridgeChannel = client.channel('whatsapp_bridge', {
+        config: { broadcast: { self: false } }
+      });
+
+      this.bridgeChannel
+        .on('broadcast', { event: 'request_status' }, () => {
+          console.log('📡 [WhatsApp Bridge] Frontend solicitou status via Realtime.');
+          this.broadcastStatus();
+        })
+        .on('broadcast', { event: 'request_connect' }, async () => {
+          console.log('📡 [WhatsApp Bridge] Frontend solicitou conexão via Realtime.');
+          await this.initialize().catch(() => {});
+          this.broadcastStatus();
+        })
+        .on('broadcast', { event: 'request_logout' }, async () => {
+          console.log('📡 [WhatsApp Bridge] Frontend solicitou logout via Realtime.');
+          await this.logout().catch(() => {});
+        })
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ [WhatsApp Bridge] Ponte Supabase Realtime conectada.');
+            this.broadcastStatus();
+          }
+        });
+    } catch (err: any) {
+      console.warn('[WhatsApp Bridge] Erro ao iniciar ponte Realtime:', err?.message);
+    }
+  }
+
+  public broadcastStatus(): void {
+    if (!this.bridgeChannel) return;
+    try {
+      const st = this.getStatus();
+      this.bridgeChannel.send({
+        type: 'broadcast',
+        event: 'status_sync',
+        payload: st
+      }).catch(() => {});
+    } catch {}
   }
 
   public async resolveJid(phone: string): Promise<string> {

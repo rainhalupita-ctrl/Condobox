@@ -117,6 +117,37 @@ export default function AdminPage() {
     loadData();
   }, []);
 
+  // Ponte Supabase Realtime para WhatsApp (comunicação instantânea nuvem <-> portaria)
+  useEffect(() => {
+    const supabase = createClient();
+    const ch = supabase.channel('whatsapp_bridge', { config: { broadcast: { self: false } } });
+
+    ch.on('broadcast', { event: 'status_sync' }, ({ payload }: any) => {
+      if (payload) {
+        setWhatsappState(payload);
+        if (payload.qrcode) {
+          setWhatsappQrCode(payload.qrcode);
+          setWhatsappError(null);
+        }
+        if (payload.connected) {
+          setWhatsappQrCode(null);
+          setWhatsappPairingCode(null);
+          setWhatsappError(null);
+        }
+      }
+    });
+
+    ch.subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        ch.send({ type: 'broadcast', event: 'request_status', payload: {} });
+      }
+    });
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, []);
+
   // Polling de status do WhatsApp enquanto na aba SYSTEM ou com QR Code aberto
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -182,6 +213,15 @@ export default function AdminPage() {
   const handleConnectWhatsApp = async () => {
     setWhatsappLoading(true);
     setWhatsappError(null);
+
+    // 1. Dispara solicitação imediata via Supabase Realtime Bridge
+    try {
+      const supabase = createClient();
+      const ch = supabase.channel('whatsapp_bridge');
+      ch.send({ type: 'broadcast', event: 'request_connect', payload: {} }).catch(() => {});
+    } catch {}
+
+    // 2. Tenta também via HTTP direto como contingência
     try {
       const res = await LocalApiClient.connectWhatsApp();
       if (res?.qrcode) {
@@ -201,9 +241,6 @@ export default function AdminPage() {
           setWhatsappError(null);
           return;
         }
-        if (res?.error) {
-          setWhatsappError(res.error);
-        }
       }
 
       const st = await LocalApiClient.getWhatsAppStatus();
@@ -213,17 +250,7 @@ export default function AdminPage() {
         setWhatsappError(null);
       }
     } catch (err: any) {
-      console.error('Erro ao conectar WhatsApp:', err);
-      try {
-        const st = await LocalApiClient.getWhatsAppStatus();
-        setWhatsappState(st);
-        if (st?.qrcode) {
-          setWhatsappQrCode(st.qrcode);
-          setWhatsappError(null);
-          return;
-        }
-      } catch {}
-      setWhatsappError('Motor do WhatsApp em inicialização. Aguarde 2 segundos e tente novamente.');
+      console.error('Erro ao conectar WhatsApp via HTTP:', err);
     } finally {
       setWhatsappLoading(false);
     }
@@ -234,17 +261,22 @@ export default function AdminPage() {
       return;
     }
     setWhatsappLoading(true);
-    setWhatsappQrCode(null);
-    setWhatsappPairingCode(null);
     setWhatsappError(null);
+
+    try {
+      const supabase = createClient();
+      const ch = supabase.channel('whatsapp_bridge');
+      ch.send({ type: 'broadcast', event: 'request_logout', payload: {} }).catch(() => {});
+    } catch {}
+
     try {
       const res = await LocalApiClient.logoutWhatsApp();
       const st = await LocalApiClient.getWhatsAppStatus();
       setWhatsappState(st);
+      setWhatsappQrCode(null);
       alert(res?.message || 'Sessão do WhatsApp desconectada com sucesso!');
     } catch (err: any) {
       console.error('Erro ao desconectar WhatsApp:', err);
-      setWhatsappError('Erro ao desconectar WhatsApp.');
     } finally {
       setWhatsappLoading(false);
     }

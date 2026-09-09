@@ -81,7 +81,8 @@ async function main() {
     // Novo: Consumidor de Fila (Supabase → SQLite → WhatsApp)
     // Escuta fila_encomendas e fila_mensagens via Realtime
     queueConsumerService.start();
-    // Inicia motor de WhatsApp nativo em background
+    // Inicia motor de WhatsApp nativo e ponte Supabase Realtime em background
+    whatsAppEngineService.setupRealtimeBridge();
     whatsAppEngineService.initialize().catch((e) => {
         console.warn('[Server] Inicialização do WhatsApp em background:', e.message);
     });
