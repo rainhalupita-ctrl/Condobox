@@ -127,6 +127,10 @@ export default function AdminPage() {
         if (st.connected) {
           setWhatsappQrCode(null);
           setWhatsappPairingCode(null);
+          setWhatsappError(null);
+        } else if (st.qrcode) {
+          setWhatsappQrCode(st.qrcode);
+          setWhatsappError(null);
         }
       }, 3000);
     }
@@ -148,6 +152,9 @@ export default function AdminPage() {
 
       const wa = await LocalApiClient.getWhatsAppStatus();
       setWhatsappState(wa);
+      if (!wa.connected && wa.qrcode) {
+        setWhatsappQrCode(wa.qrcode);
+      }
 
       const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
       const { data: rData } = await supabase.from('residents').select('*, unit:units(*)').order('name');
@@ -174,41 +181,45 @@ export default function AdminPage() {
 
   const handleConnectWhatsApp = async () => {
     setWhatsappLoading(true);
-    setWhatsappQrCode(null);
-    setWhatsappPairingCode(null);
     setWhatsappError(null);
     try {
       const res = await LocalApiClient.connectWhatsApp();
       if (res?.qrcode) {
         setWhatsappQrCode(res.qrcode);
+        setWhatsappError(null);
       } else if (res?.pairingCode) {
         setWhatsappPairingCode(res.pairingCode);
+        setWhatsappError(null);
       } else if (res?.connected) {
-        // Já está conectado
-      } else if (res?.error && !res?.qrcode) {
-        // Tenta checar status imediatamente antes de reportar erro
+        setWhatsappQrCode(null);
+        setWhatsappError(null);
+      } else {
         const fallbackSt = await LocalApiClient.getWhatsAppStatus();
         if (fallbackSt?.qrcode) {
           setWhatsappQrCode(fallbackSt.qrcode);
           setWhatsappState(fallbackSt);
+          setWhatsappError(null);
           return;
         }
-        setWhatsappError(res.error);
+        if (res?.error) {
+          setWhatsappError(res.error);
+        }
       }
 
       const st = await LocalApiClient.getWhatsAppStatus();
       setWhatsappState(st);
       if (st?.qrcode && !res?.qrcode) {
         setWhatsappQrCode(st.qrcode);
+        setWhatsappError(null);
       }
     } catch (err: any) {
       console.error('Erro ao conectar WhatsApp:', err);
-      // Tenta fallback rápido de status
       try {
         const st = await LocalApiClient.getWhatsAppStatus();
         setWhatsappState(st);
         if (st?.qrcode) {
           setWhatsappQrCode(st.qrcode);
+          setWhatsappError(null);
           return;
         }
       } catch {}

@@ -17,10 +17,10 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * POST /api/whatsapp/connect
+   * POST & GET /api/whatsapp/connect
    * Inicializa o motor de WhatsApp e gera/retorna o QR Code
    */
-  fastify.post('/api/whatsapp/connect', async (request, reply) => {
+  const connectHandler = async (_request: any, reply: any) => {
     try {
       await whatsAppEngineService.initialize();
 
@@ -45,13 +45,16 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
         details: err.message
       });
     }
-  });
+  };
+
+  fastify.post('/api/whatsapp/connect', connectHandler);
+  fastify.get('/api/whatsapp/connect', connectHandler);
 
   /**
-   * POST /api/whatsapp/logout
+   * POST & GET /api/whatsapp/logout
    * Desconecta o WhatsApp e limpa a sessão local para permitir novo pareamento
    */
-  fastify.post('/api/whatsapp/logout', async (request, reply) => {
+  const logoutHandler = async (_request: any, reply: any) => {
     try {
       await whatsAppEngineService.logout();
       return reply.send({
@@ -64,7 +67,10 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
         error: err.message
       });
     }
-  });
+  };
+
+  fastify.post('/api/whatsapp/logout', logoutHandler);
+  fastify.get('/api/whatsapp/logout', logoutHandler);
 
   /**
    * POST /api/whatsapp/test
