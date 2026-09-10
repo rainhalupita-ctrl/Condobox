@@ -83,6 +83,7 @@ export class WhatsAppEngineService {
 
     this.isInitializing = true;
     this.currentStatus = 'CONNECTING';
+    this.reconnectAttempts = 0;
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.sessionDir);
