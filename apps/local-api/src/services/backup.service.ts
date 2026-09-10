@@ -10,7 +10,13 @@ export interface BackupItem {
 }
 
 export class BackupService {
-  private static backupsDir = path.join(process.cwd(), 'data', 'backups');
+  private static getBaseDir(): string {
+    return process.env.CONDOBOX_DATA_DIR || path.join(process.cwd(), 'data');
+  }
+
+  private static get backupsDir(): string {
+    return path.join(this.getBaseDir(), 'backups');
+  }
 
   public static init() {
     if (!fs.existsSync(this.backupsDir)) {
@@ -61,7 +67,7 @@ export class BackupService {
           const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
           const filename = `condobox_backup_${timestamp}.db`;
           const destPath = path.join(this.backupsDir, filename);
-          const srcPath = path.join(process.cwd(), 'data', 'condobox.db');
+          const srcPath = path.join(this.getBaseDir(), 'condobox.db');
 
           if (fs.existsSync(srcPath)) {
             fs.copyFileSync(srcPath, destPath);
@@ -81,7 +87,7 @@ export class BackupService {
           const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
           const filename = `condobox_backup_${timestamp}.db`;
           const destPath = path.join(this.backupsDir, filename);
-          const srcPath = path.join(process.cwd(), 'data', 'condobox.db');
+          const srcPath = path.join(this.getBaseDir(), 'condobox.db');
 
           if (fs.existsSync(srcPath)) {
             fs.copyFileSync(srcPath, destPath);

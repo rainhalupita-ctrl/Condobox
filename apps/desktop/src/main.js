@@ -141,12 +141,49 @@ function createWindow() {
   });
 }
 
+function killProcessOnPort(port) {
+  try {
+    const { execSync } = require("child_process");
+    const output = execSync(`netstat -ano | findstr :${port}`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const lines = output.trim().split("\n");
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      const pid = parts[parts.length - 1];
+      if (pid && pid !== "0" && pid !== String(process.pid)) {
+        console.log(`[CondoBox] Liberando porta ${port} ocupada pelo PID ${pid}...`);
+        try {
+          execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
 function startLocalApi() {
   const isDev = !app.isPackaged;
+
+  // Libera a porta 3001 caso algum processo anterior tenha ficado preso
+  killProcessOnPort(3001);
 
   const scriptPath = isDev
     ? path.join(__dirname, "../../local-api/dist/server.js")
     : path.join(process.resourcesPath, "app.asar.unpacked/node_modules/condo-local-api/dist/server.js");
+
+  // Diretório de dados persistente e 100% gravável em qualquer computador Windows (sem erro de permissão)
+  const dataDir = isDev
+    ? path.join(__dirname, "../../local-api/data")
+    : path.join(app.getPath("userData"), "data");
+
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+  } catch (e) {
+    console.warn("[CondoBox] Falha ao criar dataDir:", e?.message);
+  }
 
   // Configuração segura embutida (protegida dentro do ASAR binário)
   let embeddedEnv = {};
@@ -158,7 +195,13 @@ function startLocalApi() {
     ? path.join(__dirname, "../../local-api/.env")
     : path.join(process.resourcesPath, ".env");
 
-  let envVars = { ...process.env, ...embeddedEnv, PORT: "3001" };
+  let envVars = {
+    ...process.env,
+    ...embeddedEnv,
+    PORT: "3001",
+    CONDOBOX_DATA_DIR: dataDir,
+  };
+
   if (fs.existsSync(envPath)) {
     try {
       const envContent = fs.readFileSync(envPath, "utf-8");
@@ -182,16 +225,42 @@ function startLocalApi() {
 
   const nodeModulesPath = isDev
     ? path.join(__dirname, "../../local-api/node_modules")
-    : path.join(process.resourcesPath, "app.asar.unpacked/node_modules");
+    : `${path.join(process.resourcesPath, "app.asar.unpacked/node_modules/condo-local-api/node_modules")};${path.join(process.resourcesPath, "app.asar.unpacked/node_modules")}`;
 
-  const runWithExecutable = (executable, isElectronNode) => {
-    const childEnv = isElectronNode
-      ? { ...envVars, NODE_PATH: nodeModulesPath, ELECTRON_RUN_AS_NODE: "1" }
-      : { ...envVars, NODE_PATH: nodeModulesPath };
+  // Procura o executável Node.js:
+  // 1. Node portátil embutido dentro de resources/bin/node.exe (GARANTE funcionamento em QUALQUER computador sem Node)
+  // 2. Node em apps/desktop/bin/node.exe (em desenvolvimento)
+  // 3. Node do sistema operacional
+  const packagedNode = path.join(process.resourcesPath, "bin", "node.exe");
+  const devBundledNode = path.join(__dirname, "..", "bin", "node.exe");
 
-    console.log("[CondoBox] Iniciando API Local em:", scriptPath, "via", executable);
+  let nodeExe = "node";
+  if (!isDev && fs.existsSync(packagedNode)) {
+    nodeExe = packagedNode;
+  } else if (isDev && fs.existsSync(devBundledNode)) {
+    nodeExe = devBundledNode;
+  } else {
+    try {
+      const { execSync } = require("child_process");
+      execSync("node -v", { stdio: "ignore" });
+      nodeExe = "node";
+    } catch {
+      nodeExe = isDev ? "node" : process.execPath;
+    }
+  }
 
-    const proc = spawn(executable, [scriptPath], {
+  const childEnv = {
+    ...envVars,
+    NODE_PATH: nodeModulesPath,
+    CONDOBOX_DATA_DIR: dataDir,
+  };
+
+  console.log(`[CondoBox] Iniciando API Local em: ${scriptPath}`);
+  console.log(`[CondoBox] Usando executável Node: ${nodeExe}`);
+  console.log(`[CondoBox] Diretório de dados persistentes: ${dataDir}`);
+
+  try {
+    apiProcess = spawn(nodeExe, [scriptPath], {
       cwd: cwd,
       env: childEnv,
       stdio: "inherit",
@@ -199,36 +268,16 @@ function startLocalApi() {
       detached: false,
     });
 
-    proc.on("error", (err) => {
-      console.error(`[CondoBox] Erro ao iniciar via ${executable}:`, err?.message);
-      if (executable !== "node") {
-        console.log("[CondoBox] Tentando fallback para 'node' do sistema...");
-        apiProcess = runWithExecutable("node", false);
-      }
+    apiProcess.on("error", (err) => {
+      console.error(`[CondoBox] Erro ao iniciar processo da API via ${nodeExe}:`, err?.message);
     });
 
-    proc.on("exit", (code) => {
-      console.log(`[CondoBox] Processo da API local (${executable}) finalizado com código ${code}`);
-      if (code !== null && code !== 0 && executable !== "node") {
-        console.log("[CondoBox] Falha no binário empacotado. Tentando fallback para 'node'...");
-        apiProcess = runWithExecutable("node", false);
-      }
+    apiProcess.on("exit", (code) => {
+      console.log(`[CondoBox] Processo da API local finalizado com código ${code}`);
     });
-
-    return proc;
-  };
-
-  // Se node do sistema estiver disponível, prefere node nativo para evitar conflito com Electron fuses
-  let preferredExe = "node";
-  try {
-    const { execSync } = require("child_process");
-    execSync("node -v", { stdio: "ignore" });
-    preferredExe = "node";
-  } catch {
-    preferredExe = isDev ? "node" : process.execPath;
+  } catch (err) {
+    console.error("[CondoBox] Falha crítica ao disparar API Local:", err?.message);
   }
-
-  apiProcess = runWithExecutable(preferredExe, preferredExe === process.execPath);
 }
 
 app.whenReady().then(() => {
@@ -251,13 +300,28 @@ app.whenReady().then(() => {
   });
 });
 
+function killApiProcess() {
+  if (apiProcess) {
+    try {
+      if (process.platform === "win32" && apiProcess.pid) {
+        const { execSync } = require("child_process");
+        execSync(`taskkill /F /T /PID ${apiProcess.pid}`, { stdio: "ignore" });
+      } else {
+        apiProcess.kill();
+      }
+    } catch {}
+    apiProcess = null;
+  }
+}
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    if (apiProcess) { try { apiProcess.kill(); } catch {} }
+    killApiProcess();
     app.quit();
   }
 });
 
 app.on("before-quit", () => {
-  if (apiProcess) { try { apiProcess.kill(); } catch {} }
+  killApiProcess();
 });
+

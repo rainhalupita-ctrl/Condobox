@@ -66,14 +66,7 @@ export class DatabaseService {
   private dbPath: string;
 
   constructor() {
-    const isWindows = process.platform === 'win32';
-    // Se o dirname não estiver definido (em alguns setups ES modules), podemos usar uma abordagem alternativa
-    // ou pegar da env ABSOLUTE_STORAGE_DIR que foi cuidadosamente resolvida
-    
-    // ABSOLUTE_STORAGE_DIR = apps/local-api/data/packages
-    // ../.. = apps/local-api
-    const rootDir = path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../..');
-    const dataDir = path.resolve(rootDir, 'data');
+    const dataDir = process.env.CONDOBOX_DATA_DIR || path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../../data');
 
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });

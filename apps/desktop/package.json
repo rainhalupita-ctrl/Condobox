@@ -5,9 +5,10 @@
   "main": "src/main.js",
   "author": "CondoBox Tecnologia Condominial",
   "scripts": {
+    "prebuild": "powershell -ExecutionPolicy Bypass -Command \"if (!(Test-Path 'bin')) { New-Item -ItemType Directory -Path 'bin' }; if (!(Test-Path 'bin/node.exe')) { Copy-Item (Get-Command node).Source 'bin/node.exe' -Force }\"",
     "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder && powershell -ExecutionPolicy Bypass -File ./scripts/sign_and_configure.ps1"
+    "pack": "npm run prebuild && electron-builder --dir",
+    "dist": "npm run prebuild && electron-builder && powershell -ExecutionPolicy Bypass -File ./scripts/sign_and_configure.ps1"
   },
   "dependencies": {
     "condo-local-api": "*"
@@ -55,6 +56,12 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
     },
+    "extraResources": [
+      {
+        "from": "bin/node.exe",
+        "to": "bin/node.exe"
+      }
+    ],
     "asarUnpack": [
       "node_modules/**/*"
     ]

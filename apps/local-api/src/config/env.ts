@@ -23,10 +23,21 @@ const envSchema = z.object({
 
 export const env = envSchema.parse(process.env);
 
+import fs from 'fs';
+
 // Garante que a raiz seja sempre resolvida corretamente, mesmo se rodado do root do monorepo
 const cwd = process.cwd();
 const localApiRoot = cwd.endsWith('local-api') ? cwd : path.join(cwd, 'apps', 'local-api');
 
-export const ABSOLUTE_STORAGE_DIR = path.isAbsolute(env.STORAGE_DIR)
-  ? env.STORAGE_DIR
-  : path.resolve(localApiRoot, env.STORAGE_DIR);
+export const ABSOLUTE_STORAGE_DIR = process.env.CONDOBOX_DATA_DIR
+  ? path.join(process.env.CONDOBOX_DATA_DIR, 'packages')
+  : (path.isAbsolute(env.STORAGE_DIR)
+      ? env.STORAGE_DIR
+      : path.resolve(localApiRoot, env.STORAGE_DIR));
+
+try {
+  if (!fs.existsSync(ABSOLUTE_STORAGE_DIR)) {
+    fs.mkdirSync(ABSOLUTE_STORAGE_DIR, { recursive: true });
+  }
+} catch {}
+

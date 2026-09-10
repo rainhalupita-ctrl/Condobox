@@ -34,11 +34,14 @@ export class WhatsAppEngineService {
   private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.sessionDir = path.resolve(process.cwd(), 'data', 'whatsapp_session');
+    const baseDataDir = process.env.CONDOBOX_DATA_DIR || path.resolve(process.cwd(), 'data');
+    this.sessionDir = path.resolve(baseDataDir, 'whatsapp_session');
     if (!fs.existsSync(this.sessionDir)) {
       fs.mkdirSync(this.sessionDir, { recursive: true });
     }
+    console.log(`📱 [WhatsApp Engine] Diretório de sessão configurado em: ${this.sessionDir}`);
   }
+
 
   public getPublicWebUrl(): string {
     if (env.WEB_APP_URL && !env.WEB_APP_URL.includes('localhost') && !env.WEB_APP_URL.includes('127.0.0.1')) {
