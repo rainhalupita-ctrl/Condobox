@@ -135,18 +135,32 @@ export default function RetiradaPage() {
         sendWhatsAppConfirmation: true
       });
 
-      // Dispara broadcast em tempo real para o site do morador
+      // Dispara broadcast em tempo real para o site do morador em todos os canais
       const supabase = createClient();
-      const broadcastChannel = supabase.channel(`public-package-${scannedPackage.id}`);
-      broadcastChannel.subscribe(async (status: string) => {
-        if (status === 'SUBSCRIBED') {
-          await broadcastChannel.send({
-            type: 'broadcast',
-            event: 'status-updated',
-            payload: { status: 'DELIVERED', packageId: scannedPackage.id }
-          }).catch(() => {});
-          setTimeout(() => supabase.removeChannel(broadcastChannel), 3000);
-        }
+      const channelsToNotify = [
+        `public-package-${scannedPackage.id}`,
+        scannedPackage.qr_token ? `public-package-${scannedPackage.qr_token}` : null,
+        scannedPackage.pickup_code ? `public-package-${scannedPackage.pickup_code}` : null,
+        'packages-morador-live'
+      ].filter(Boolean) as string[];
+
+      channelsToNotify.forEach((chName) => {
+        const ch = supabase.channel(chName);
+        ch.subscribe(async (status: string) => {
+          if (status === 'SUBSCRIBED') {
+            await ch.send({
+              type: 'broadcast',
+              event: 'status-updated',
+              payload: {
+                status: 'DELIVERED',
+                packageId: scannedPackage.id,
+                qrToken: scannedPackage.qr_token,
+                pickupCode: scannedPackage.pickup_code
+              }
+            }).catch(() => {});
+            setTimeout(() => supabase.removeChannel(ch), 3000);
+          }
+        });
       });
 
       setReceiptData(res);

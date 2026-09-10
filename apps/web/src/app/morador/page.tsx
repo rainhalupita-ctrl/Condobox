@@ -92,6 +92,10 @@ export default function MoradorPage() {
       const supabase = createClient();
       const channel = supabase
         .channel('packages-morador-live')
+        .on('broadcast', { event: 'status-updated' }, () => {
+          console.log('📡 [Portal Morador] Broadcast status-updated recebido');
+          loadResidentAndPackages();
+        })
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'packages' },

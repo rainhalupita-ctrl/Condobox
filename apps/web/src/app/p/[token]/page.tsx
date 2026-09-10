@@ -69,30 +69,65 @@ export default function PublicPackagePage() {
 
     const supabase = createClient();
     const pkgId = pkg?.id;
+    const cleanToken = token.trim();
 
-    // Conecta canais Realtime para o pacote (por ID e por Token)
-    const channelNames = [];
-    if (pkgId) channelNames.push(`public-package-${pkgId}`);
-    if (token) channelNames.push(`public-package-${token}`);
+    // Conecta canais Realtime para o pacote (por ID, por Token e canal global)
+    const channelNames = new Set<string>();
+    if (cleanToken) channelNames.add(`public-package-${cleanToken}`);
+    if (pkgId) channelNames.add(`public-package-${pkgId}`);
+    if (pkg?.qr_token) channelNames.add(`public-package-${pkg.qr_token}`);
+    if (pkg?.pickup_code) channelNames.add(`public-package-${pkg.pickup_code}`);
+    channelNames.add('packages-morador-live');
 
-    const channels = channelNames.map((chName) => {
+    const channels = Array.from(channelNames).map((chName) => {
       const ch = supabase.channel(chName);
       ch.on('broadcast', { event: 'status-updated' }, (payload: any) => {
-        console.log('📡 [Morador] Broadcast recebido:', payload);
-        loadPackage(true);
+        console.log('📡 [Morador] Broadcast recebido no canal ' + chName + ':', payload);
+        const data = payload?.payload;
+        if (
+          !data?.packageId ||
+          data.packageId === pkgId ||
+          data.packageId === cleanToken ||
+          data.qrToken === cleanToken ||
+          data.pickupCode === cleanToken ||
+          data.qrToken === pkg?.qr_token ||
+          data.pickupCode === pkg?.pickup_code
+        ) {
+          try {
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              navigator.vibrate([100, 50, 100]);
+            }
+          } catch {}
+          loadPackage(true);
+        }
       });
-      if (pkgId) {
-        ch.on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'packages', filter: `id=eq.${pkgId}` },
-          (payload: any) => {
-            console.log('📡 [Morador] postgres_changes recebido:', payload);
-            if (payload.new?.status === 'DELIVERED') {
+
+      ch.on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'packages' },
+        (payload: any) => {
+          console.log('📡 [Morador] postgres_changes recebido:', payload);
+          const updated = payload.new;
+          if (
+            updated &&
+            (updated.id === pkgId ||
+              updated.qr_token === cleanToken ||
+              updated.pickup_code === cleanToken ||
+              updated.qr_token === pkg?.qr_token ||
+              updated.pickup_code === pkg?.pickup_code)
+          ) {
+            if (updated.status === 'DELIVERED') {
+              try {
+                if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                  navigator.vibrate([100, 50, 100]);
+                }
+              } catch {}
               loadPackage(true);
             }
           }
-        );
-      }
+        }
+      );
+
       ch.subscribe();
       return ch;
     });
@@ -100,7 +135,8 @@ export default function PublicPackagePage() {
     // Fallback de polling rápido (a cada 1.5s com cache-busting)
     const interval = setInterval(() => {
       if (pkg?.status !== 'DELIVERED') {
-        fetch(`/api/package/${token}?_t=${Date.now()}`, { cache: 'no-store' })
+        const urlToken = encodeURIComponent(cleanToken);
+        fetch(`/api/package/${urlToken}?_t=${Date.now()}`, { cache: 'no-store' })
           .then((res) => res.json())
           .then((data) => {
             if (data.package && data.package.status === 'DELIVERED') {
@@ -124,7 +160,7 @@ export default function PublicPackagePage() {
       channels.forEach((ch) => supabase.removeChannel(ch));
       clearInterval(interval);
     };
-  }, [token, pkg?.id, pkg?.status]);
+  }, [token, pkg?.id, pkg?.qr_token, pkg?.pickup_code, pkg?.status]);
 
   const loadPackage = async (silent = false, retryCount = 0) => {
     if (!silent) setLoading(true);

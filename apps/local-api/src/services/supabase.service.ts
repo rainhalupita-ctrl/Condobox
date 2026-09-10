@@ -187,6 +187,8 @@ export class SupabaseService {
    */
   async deliverPackage(params: {
     packageId: string;
+    qrToken?: string;
+    pickupCode?: string;
     signatureImagePath: string;
     deliveredToName: string;
     deliveredByUserId?: string | null;
@@ -201,18 +203,39 @@ export class SupabaseService {
       };
     }
 
-    const { data, error } = await this.getClient()
+    const client = this.getClient();
+    const updateData = {
+      status: 'DELIVERED',
+      signature_image_path: params.signatureImagePath,
+      delivered_to_name: params.deliveredToName,
+      delivered_by_user_id: params.deliveredByUserId || null,
+      delivered_at: new Date().toISOString()
+    };
+
+    // Tenta atualizar pelo id
+    let { data, error } = await client
       .from('packages')
-      .update({
-        status: 'DELIVERED',
-        signature_image_path: params.signatureImagePath,
-        delivered_to_name: params.deliveredToName,
-        delivered_by_user_id: params.deliveredByUserId || null,
-        delivered_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('id', params.packageId)
       .select('*, unit:units(*), resident:residents(*)')
-      .single();
+      .maybeSingle();
+
+    // Se não encontrou pelo id, tenta atualizar por qr_token ou pickup_code
+    if (!data && (params.qrToken || params.pickupCode)) {
+      const matchCriteria: string[] = [];
+      if (params.qrToken) matchCriteria.push(`qr_token.eq.${params.qrToken}`);
+      if (params.pickupCode) matchCriteria.push(`pickup_code.eq.${params.pickupCode}`);
+
+      const fallbackRes = await client
+        .from('packages')
+        .update(updateData)
+        .or(matchCriteria.join(','))
+        .select('*, unit:units(*), resident:residents(*)')
+        .maybeSingle();
+
+      data = fallbackRes.data;
+      error = fallbackRes.error;
+    }
 
     if (error) {
       console.error('[SupabaseService] Erro ao atualizar retirada:', error);

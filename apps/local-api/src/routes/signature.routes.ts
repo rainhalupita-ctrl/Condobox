@@ -37,40 +37,74 @@ export async function signatureRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: 'Encomenda não encontrada no banco de dados' });
       }
 
-      // 3. Se o Supabase estiver online, atualiza na nuvem e dispara Realtime para o morador
+      // 3. Se o Supabase estiver online, envia assinatura para a nuvem, atualiza e dispara Realtime
       if (supabaseService.isConfigured()) {
+        let cloudSignaturePath = stored.relativePath;
+        try {
+          const client = supabaseService.getClient();
+          const cleanBase64 = body.signatureBase64.replace(/^data:image\/\w+;base64,/, '');
+          const buffer = Buffer.from(cleanBase64, 'base64');
+          const sigFilename = `sig_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.png`;
+          const { data: upData, error: upErr } = await client.storage
+            .from('signatures')
+            .upload(sigFilename, buffer, { contentType: 'image/png', upsert: true });
+          if (!upErr && upData) {
+            cloudSignaturePath = `signatures/${sigFilename}`;
+          }
+        } catch (storageErr: any) {
+          console.warn('[SignatureRoutes] Falha no upload para Supabase Storage:', storageErr.message);
+        }
+
         supabaseService
           .deliverPackage({
-            packageId: body.packageId,
-            signatureImagePath: stored.relativePath,
+            packageId: updatedPackage.id,
+            qrToken: updatedPackage.qr_token,
+            pickupCode: updatedPackage.pickup_code,
+            signatureImagePath: cloudSignaturePath,
             deliveredToName: body.deliveredToName,
             deliveredByUserId: body.deliveredByUserId
           })
           .then(() => {
-            databaseService.markPackageSynced(body.packageId);
-
-            // Dispara broadcast Realtime para atualizar a tela do celular do morador instantaneamente
-            try {
-              const client = supabaseService.getClient();
-              const ch = client.channel(`public-package-${body.packageId}`);
-              ch.subscribe((st: string) => {
-                if (st === 'SUBSCRIBED') {
-                  ch.send({
-                    type: 'broadcast',
-                    event: 'status-updated',
-                    payload: { status: 'DELIVERED', packageId: body.packageId }
-                  }).then(() => {
-                    setTimeout(() => client.removeChannel(ch), 3000);
-                  }).catch(() => {});
-                }
-              });
-            } catch (brErr: any) {
-              console.warn('[SignatureRoutes] Aviso ao emitir broadcast Realtime:', brErr.message);
-            }
+            databaseService.markPackageSynced(updatedPackage.id);
           })
-          .catch(() => {
-            // Sincronizará no próximo ciclo do syncService
+          .catch((cloudErr: any) => {
+            console.warn('[SignatureRoutes] Aviso ao atualizar entrega na nuvem:', cloudErr.message);
           });
+
+        // Dispara broadcast Realtime instantâneo em TODOS os canais associados à encomenda
+        try {
+          const client = supabaseService.getClient();
+          const channelsToNotify = [
+            `public-package-${updatedPackage.id}`,
+            `public-package-${updatedPackage.qr_token}`,
+            `public-package-${updatedPackage.pickup_code}`,
+            'packages-morador-live'
+          ].filter(Boolean);
+
+          for (const chName of channelsToNotify) {
+            const ch = client.channel(chName);
+            ch.subscribe((st: string) => {
+              if (st === 'SUBSCRIBED') {
+                ch.send({
+                  type: 'broadcast',
+                  event: 'status-updated',
+                  payload: {
+                    status: 'DELIVERED',
+                    packageId: updatedPackage.id,
+                    qrToken: updatedPackage.qr_token,
+                    pickupCode: updatedPackage.pickup_code,
+                    deliveredTo: body.deliveredToName,
+                    deliveredAt: new Date().toISOString()
+                  }
+                }).then(() => {
+                  setTimeout(() => client.removeChannel(ch), 3000);
+                }).catch(() => {});
+              }
+            });
+          }
+        } catch (brErr: any) {
+          console.warn('[SignatureRoutes] Aviso ao emitir broadcast Realtime:', brErr.message);
+        }
       }
 
       let whatsappSent = false;

@@ -90,18 +90,34 @@ export async function POST(request: NextRequest) {
 
     // Dispara broadcast em tempo real para o site do morador
     try {
-      const ch = supabase.channel(`public-package-${packageId}`);
-      ch.subscribe((st: string) => {
-        if (st === 'SUBSCRIBED') {
-          ch.send({
-            type: 'broadcast',
-            event: 'status-updated',
-            payload: { status: 'DELIVERED', packageId }
-          }).then(() => {
-            supabase.removeChannel(ch);
-          });
-        }
-      });
+      const channelsToNotify = [
+        `public-package-${packageId}`,
+        pkg.qr_token ? `public-package-${pkg.qr_token}` : null,
+        pkg.pickup_code ? `public-package-${pkg.pickup_code}` : null,
+        'packages-morador-live'
+      ].filter(Boolean) as string[];
+
+      for (const chName of channelsToNotify) {
+        const ch = supabase.channel(chName);
+        ch.subscribe((st: string) => {
+          if (st === 'SUBSCRIBED') {
+            ch.send({
+              type: 'broadcast',
+              event: 'status-updated',
+              payload: {
+                status: 'DELIVERED',
+                packageId,
+                qrToken: pkg.qr_token,
+                pickupCode: pkg.pickup_code,
+                deliveredTo,
+                deliveredAt
+              }
+            }).then(() => {
+              setTimeout(() => supabase.removeChannel(ch), 3000);
+            }).catch(() => {});
+          }
+        });
+      }
     } catch (realtimeErr) {
       console.warn('[api/signature] Falha ao disparar Realtime broadcast:', realtimeErr);
     }
