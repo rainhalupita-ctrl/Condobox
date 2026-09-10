@@ -27,8 +27,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://isurnvsehvjdslpnxirn.supabase.co';
+    const serviceKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlzdXJudnNlaHZqZHNscG54aXJuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODAzNjM4NCwiZXhwIjoyMTAzNjEyMzg0fQ.2PO_jbeh-rpMmLFbN17aHbJwxHaQr8aeWi6A2hkg708';
     const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
     // Gera código alfanumérico de 6 caracteres
@@ -39,6 +41,7 @@ export async function POST(request: NextRequest) {
     const { data: newPackage, error: dbError } = await supabase
       .from('packages')
       .insert({
+        condo_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
         unit_id: unitId,
         resident_id: residentId || null,
         carrier,

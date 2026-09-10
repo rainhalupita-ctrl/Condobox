@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { env } from '../config/env.js';
 
 export interface CreatePackageInput {
+  id?: string;
   condoId?: string;
   unitId: string;
   residentId?: string | null;
@@ -11,6 +12,9 @@ export interface CreatePackageInput {
   labelImagePath?: string | null;
   receivedByUserId?: string | null;
   notes?: string | null;
+  pickupCode?: string;
+  qrToken?: string;
+  receivedAt?: string;
 }
 
 export class SupabaseService {
@@ -128,43 +132,50 @@ export class SupabaseService {
   async createPackage(input: CreatePackageInput) {
     if (!this.isConfigured()) {
       // Mock para quando não estiver conectado ao Supabase
-      const mockId = 'mock-' + Date.now();
-      const mockPickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
+      const mockId = input.id || 'mock-' + Date.now();
+      const mockPickupCode = input.pickupCode || Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
       return {
         id: mockId,
         pickup_code: mockPickupCode,
-        qr_token: `pkg_${mockId}_${mockPickupCode}`,
+        qr_token: input.qrToken || `pkg_${mockId}_${mockPickupCode}`,
         ...input,
         status: 'RECEIVED',
-        received_at: new Date().toISOString()
+        received_at: input.receivedAt || new Date().toISOString()
       };
     }
 
-    // Gera código alfanumérico de 6 caracteres e token único
-    const pickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
-    const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    // Usa código e token existentes do SQLite local para não criar divergência
+    const pickupCode = input.pickupCode || Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
+    const qrToken = input.qrToken || `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    const payload: any = {
+      condo_id: input.condoId || env.CONDO_ID,
+      unit_id: input.unitId,
+      resident_id: input.residentId || null,
+      carrier: input.carrier || 'Outro',
+      tracking_code: input.trackingCode || null,
+      recipient_name_ocr: input.recipientNameOcr || null,
+      label_image_path: input.labelImagePath || null,
+      pickup_code: pickupCode,
+      qr_token: qrToken,
+      received_by_user_id: input.receivedByUserId || null,
+      notes: input.notes || null,
+      status: 'RECEIVED',
+      received_at: input.receivedAt || new Date().toISOString()
+    };
+
+    if (input.id) {
+      payload.id = input.id;
+    }
 
     const { data, error } = await this.getClient()
       .from('packages')
-      .insert({
-        condo_id: input.condoId || env.CONDO_ID,
-        unit_id: input.unitId,
-        resident_id: input.residentId || null,
-        carrier: input.carrier || 'Outro',
-        tracking_code: input.trackingCode || null,
-        recipient_name_ocr: input.recipientNameOcr || null,
-        label_image_path: input.labelImagePath || null,
-        pickup_code: pickupCode,
-        qr_token: qrToken,
-        received_by_user_id: input.receivedByUserId || null,
-        notes: input.notes || null,
-        status: 'RECEIVED'
-      })
+      .upsert(payload)
       .select()
       .single();
 
     if (error) {
-      console.error('[SupabaseService] Erro ao inserir encomenda:', error);
+      console.error('[SupabaseService] Erro ao sincronizar encomenda:', error);
       throw error;
     }
 

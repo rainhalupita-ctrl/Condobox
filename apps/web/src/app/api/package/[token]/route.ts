@@ -7,13 +7,16 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { token: string } }
 ) {
-  const token = params.token;
-  if (!token) {
+  const rawToken = params.token;
+  if (!rawToken) {
     return NextResponse.json({ error: 'Token não fornecido' }, { status: 400 });
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const token = decodeURIComponent(rawToken).trim();
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://isurnvsehvjdslpnxirn.supabase.co';
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlzdXJudnNlaHZqZHNscG54aXJuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODAzNjM4NCwiZXhwIjoyMTAzNjEyMzg0fQ.2PO_jbeh-rpMmLFbN17aHbJwxHaQr8aeWi6A2hkg708';
 
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false }
@@ -29,12 +32,38 @@ export async function GET(
     if (isUUID) {
       query = query.eq('id', token);
     } else {
-      query = query.or(`qr_token.eq.${token},pickup_code.eq.${token}`);
+      query = query.or(`qr_token.eq.${token},pickup_code.ilike.${token},qr_token.ilike.${token},pickup_code.eq.${token}`);
     }
 
-    const { data: pkg, error } = await query.limit(1).maybeSingle();
+    let { data: pkg, error } = await query.limit(1).maybeSingle();
 
-    if (error || !pkg) {
+    // Fallback: se não encontrou com joins, busca direto na tabela packages
+    if (!pkg) {
+      let fallbackQuery = supabase.from('packages').select('*');
+      if (isUUID) {
+        fallbackQuery = fallbackQuery.eq('id', token);
+      } else {
+        fallbackQuery = fallbackQuery.or(`qr_token.eq.${token},pickup_code.ilike.${token},qr_token.ilike.${token},pickup_code.eq.${token}`);
+      }
+      const fallbackRes = await fallbackQuery.limit(1).maybeSingle();
+      if (fallbackRes.data) {
+        pkg = fallbackRes.data;
+        if (pkg.unit_id) {
+          const { data: u } = await supabase.from('units').select('block, unit_number').eq('id', pkg.unit_id).maybeSingle();
+          if (u) pkg.unit = u;
+        }
+        if (pkg.resident_id) {
+          const { data: r } = await supabase.from('residents').select('name, phone').eq('id', pkg.resident_id).maybeSingle();
+          if (r) pkg.resident = r;
+        }
+        if (pkg.condo_id) {
+          const { data: c } = await supabase.from('condos').select('phone').eq('id', pkg.condo_id).maybeSingle();
+          if (c) pkg.condo = c;
+        }
+      }
+    }
+
+    if (!pkg) {
       return NextResponse.json(
         { error: 'Encomenda não encontrada ou código inválido.' },
         { status: 404 }

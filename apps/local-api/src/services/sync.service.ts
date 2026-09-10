@@ -102,9 +102,11 @@ export class SyncService {
 
         if (!error) {
           databaseService.markPackageSynced(pkg.id);
+        } else {
+          console.error('[SyncService] Falha ao sincronizar pacote:', pkg.id, error.message);
         }
-      } catch (e) {
-        // Tenta novamente na próxima rodada
+      } catch (e: any) {
+        console.error('[SyncService] Exceção ao sincronizar pacote:', pkg.id, e.message);
       }
     }
   }

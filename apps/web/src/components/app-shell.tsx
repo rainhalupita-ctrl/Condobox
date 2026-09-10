@@ -7,7 +7,7 @@ import { BarcodeListener } from './BarcodeListener';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { useAuth } from '@/contexts/auth-context';
 
-const NO_NAVBAR_PATHS = ['/login', '/cadastro'];
+const NO_NAVBAR_PATHS = ['/login', '/cadastro', '/p/'];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

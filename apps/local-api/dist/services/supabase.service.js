@@ -96,23 +96,21 @@ export class SupabaseService {
     async createPackage(input) {
         if (!this.isConfigured()) {
             // Mock para quando não estiver conectado ao Supabase
-            const mockId = 'mock-' + Date.now();
-            const mockPickupCode = Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
+            const mockId = input.id || 'mock-' + Date.now();
+            const mockPickupCode = input.pickupCode || Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
             return {
                 id: mockId,
                 pickup_code: mockPickupCode,
-                qr_token: `pkg_${mockId}_${mockPickupCode}`,
+                qr_token: input.qrToken || `pkg_${mockId}_${mockPickupCode}`,
                 ...input,
                 status: 'RECEIVED',
-                received_at: new Date().toISOString()
+                received_at: input.receivedAt || new Date().toISOString()
             };
         }
-        // Gera código alfanumérico de 6 caracteres e token único
-        const pickupCode = Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
-        const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const { data, error } = await this.getClient()
-            .from('packages')
-            .insert({
+        // Usa código e token existentes do SQLite local para não criar divergência
+        const pickupCode = input.pickupCode || Array.from({ length: 6 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
+        const qrToken = input.qrToken || `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const payload = {
             condo_id: input.condoId || env.CONDO_ID,
             unit_id: input.unitId,
             resident_id: input.residentId || null,
@@ -124,12 +122,19 @@ export class SupabaseService {
             qr_token: qrToken,
             received_by_user_id: input.receivedByUserId || null,
             notes: input.notes || null,
-            status: 'RECEIVED'
-        })
+            status: 'RECEIVED',
+            received_at: input.receivedAt || new Date().toISOString()
+        };
+        if (input.id) {
+            payload.id = input.id;
+        }
+        const { data, error } = await this.getClient()
+            .from('packages')
+            .upsert(payload)
             .select()
             .single();
         if (error) {
-            console.error('[SupabaseService] Erro ao inserir encomenda:', error);
+            console.error('[SupabaseService] Erro ao sincronizar encomenda:', error);
             throw error;
         }
         return data;

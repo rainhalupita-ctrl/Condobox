@@ -126,11 +126,12 @@ export default function PublicPackagePage() {
     };
   }, [token, pkg?.id, pkg?.status]);
 
-  const loadPackage = async (silent = false) => {
+  const loadPackage = async (silent = false, retryCount = 0) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/package/${token}?_t=${Date.now()}`, { cache: 'no-store' });
+      const cleanToken = encodeURIComponent(token.trim());
+      const res = await fetch(`/api/package/${cleanToken}?_t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok && data.package) {
         setPkg((prev) => {
@@ -151,12 +152,22 @@ export default function PublicPackagePage() {
           setIsUnlocked(true);
         }
       } else {
+        if (retryCount < 2) {
+          // Se acabou de ser criada na portaria, dá 1.5s para sincronizar na nuvem
+          setTimeout(() => loadPackage(silent, retryCount + 1), 1500);
+          return;
+        }
         if (!silent) setError(data.error || 'Encomenda não encontrada.');
       }
     } catch (err: any) {
+      if (retryCount < 2) {
+        setTimeout(() => loadPackage(silent, retryCount + 1), 1500);
+        return;
+      }
       if (!silent) setError('Não foi possível carregar as informações da encomenda.');
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && retryCount >= 2) setLoading(false);
+      else if (!silent && !error) setLoading(false);
     }
   };
 

@@ -57,23 +57,28 @@ export async function packageRoutes(fastify) {
                 labelImagePath: body.labelImagePath,
                 notes: body.notes
             });
-            // 2. Se o Supabase estiver configurado e online, grava em background
+            // 2. Se o Supabase estiver configurado e online, grava em background com o MESMO ID e tokens do SQLite
             if (supabaseService.isConfigured()) {
                 supabaseService
                     .createPackage({
-                    unitId: body.unitId,
-                    residentId: body.residentId,
-                    carrier: body.carrier,
-                    trackingCode: body.trackingCode,
-                    recipientNameOcr: body.recipientNameOcr,
-                    labelImagePath: body.labelImagePath,
-                    notes: body.notes
+                    id: newPackage.id,
+                    condoId: newPackage.condo_id,
+                    unitId: newPackage.unit_id,
+                    residentId: newPackage.resident_id,
+                    carrier: newPackage.carrier,
+                    trackingCode: newPackage.tracking_code,
+                    recipientNameOcr: newPackage.recipient_name_ocr,
+                    labelImagePath: newPackage.label_image_path,
+                    notes: newPackage.notes,
+                    pickupCode: newPackage.pickup_code,
+                    qrToken: newPackage.qr_token,
+                    receivedAt: newPackage.received_at
                 })
-                    .then((cloudPkg) => {
+                    .then(() => {
                     databaseService.markPackageSynced(newPackage.id);
                 })
-                    .catch(() => {
-                    // Ficará PENDING no SQLite e o syncService enviará quando houver internet
+                    .catch((cloudErr) => {
+                    console.warn('[PackageRoutes] Sincronização inicial em nuvem falhou, syncService enviará:', cloudErr?.message);
                 });
             }
             let whatsappSent = false;
