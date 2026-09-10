@@ -112,10 +112,16 @@ export default function PortariaDashboardPage() {
       });
 
       // Dispara broadcast em tempo real para o site do morador
-      await supabase.channel(`public-package-${selectedForDelivery.id}`).send({
-        type: 'broadcast',
-        event: 'status-updated',
-        payload: { status: 'DELIVERED' }
+      const broadcastChannel = supabase.channel(`public-package-${selectedForDelivery.id}`);
+      broadcastChannel.subscribe(async (status: string) => {
+        if (status === 'SUBSCRIBED') {
+          await broadcastChannel.send({
+            type: 'broadcast',
+            event: 'status-updated',
+            payload: { status: 'DELIVERED', packageId: selectedForDelivery.id }
+          }).catch(() => {});
+          setTimeout(() => supabase.removeChannel(broadcastChannel), 3000);
+        }
       });
 
       VoiceService.playSuccessBeep();

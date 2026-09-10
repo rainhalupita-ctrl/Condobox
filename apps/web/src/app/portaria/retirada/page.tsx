@@ -137,10 +137,16 @@ export default function RetiradaPage() {
 
       // Dispara broadcast em tempo real para o site do morador
       const supabase = createClient();
-      await supabase.channel(`public-package-${scannedPackage.id}`).send({
-        type: 'broadcast',
-        event: 'status-updated',
-        payload: { status: 'DELIVERED' }
+      const broadcastChannel = supabase.channel(`public-package-${scannedPackage.id}`);
+      broadcastChannel.subscribe(async (status: string) => {
+        if (status === 'SUBSCRIBED') {
+          await broadcastChannel.send({
+            type: 'broadcast',
+            event: 'status-updated',
+            payload: { status: 'DELIVERED', packageId: scannedPackage.id }
+          }).catch(() => {});
+          setTimeout(() => supabase.removeChannel(broadcastChannel), 3000);
+        }
       });
 
       setReceiptData(res);

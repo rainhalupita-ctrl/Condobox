@@ -37,7 +37,7 @@ export async function signatureRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: 'Encomenda não encontrada no banco de dados' });
       }
 
-      // 3. Se o Supabase estiver online, atualiza na nuvem em background
+      // 3. Se o Supabase estiver online, atualiza na nuvem e dispara Realtime para o morador
       if (supabaseService.isConfigured()) {
         supabaseService
           .deliverPackage({
@@ -48,6 +48,25 @@ export async function signatureRoutes(fastify: FastifyInstance) {
           })
           .then(() => {
             databaseService.markPackageSynced(body.packageId);
+
+            // Dispara broadcast Realtime para atualizar a tela do celular do morador instantaneamente
+            try {
+              const client = supabaseService.getClient();
+              const ch = client.channel(`public-package-${body.packageId}`);
+              ch.subscribe((st: string) => {
+                if (st === 'SUBSCRIBED') {
+                  ch.send({
+                    type: 'broadcast',
+                    event: 'status-updated',
+                    payload: { status: 'DELIVERED', packageId: body.packageId }
+                  }).then(() => {
+                    setTimeout(() => client.removeChannel(ch), 3000);
+                  }).catch(() => {});
+                }
+              });
+            } catch (brErr: any) {
+              console.warn('[SignatureRoutes] Aviso ao emitir broadcast Realtime:', brErr.message);
+            }
           })
           .catch(() => {
             // Sincronizará no próximo ciclo do syncService

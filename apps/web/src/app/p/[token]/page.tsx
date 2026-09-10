@@ -54,6 +54,7 @@ export default function PublicPackagePage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
 
   useEffect(() => {
@@ -62,46 +63,86 @@ export default function PublicPackagePage() {
     }
   }, [token]);
 
-  // Real-time Push Subscription + Fallback Polling
+  // Real-time Push Subscription + Fallback Polling Ultra-Rápido
   useEffect(() => {
-    if (!pkg?.id || pkg.status === 'DELIVERED') return;
+    if (!token) return;
 
-    // Supabase Realtime Broadcast para atualização instantânea
     const supabase = createClient();
-    const channel = supabase.channel(`public-package-${pkg.id}`)
-      .on('broadcast', { event: 'status-updated' }, (payload) => {
-        if (payload.payload?.status === 'DELIVERED') {
-          loadPackage();
-        }
-      })
-      .subscribe();
+    const pkgId = pkg?.id;
 
-    // Fallback de polling a cada 5 segundos (garantia caso o broadcast falhe ou websocket caia)
-    const interval = setInterval(() => {
-      fetch(`/api/package/${token}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.package && data.package.status === 'DELIVERED') {
-            loadPackage();
+    // Conecta canais Realtime para o pacote (por ID e por Token)
+    const channelNames = [];
+    if (pkgId) channelNames.push(`public-package-${pkgId}`);
+    if (token) channelNames.push(`public-package-${token}`);
+
+    const channels = channelNames.map((chName) => {
+      const ch = supabase.channel(chName);
+      ch.on('broadcast', { event: 'status-updated' }, (payload: any) => {
+        console.log('📡 [Morador] Broadcast recebido:', payload);
+        loadPackage(true);
+      });
+      if (pkgId) {
+        ch.on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'packages', filter: `id=eq.${pkgId}` },
+          (payload: any) => {
+            console.log('📡 [Morador] postgres_changes recebido:', payload);
+            if (payload.new?.status === 'DELIVERED') {
+              loadPackage(true);
+            }
           }
-        })
-        .catch(() => {});
-    }, 5000);
+        );
+      }
+      ch.subscribe();
+      return ch;
+    });
+
+    // Fallback de polling rápido (a cada 1.5s com cache-busting)
+    const interval = setInterval(() => {
+      if (pkg?.status !== 'DELIVERED') {
+        fetch(`/api/package/${token}?_t=${Date.now()}`, { cache: 'no-store' })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.package && data.package.status === 'DELIVERED') {
+              setPkg((prev) => {
+                if (prev?.status !== 'DELIVERED') {
+                  try {
+                    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                      navigator.vibrate([100, 50, 100]);
+                    }
+                  } catch {}
+                }
+                return data.package;
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
 
     return () => {
-      supabase.removeChannel(channel);
+      channels.forEach((ch) => supabase.removeChannel(ch));
       clearInterval(interval);
     };
-  }, [pkg?.id, pkg?.status]);
+  }, [token, pkg?.id, pkg?.status]);
 
-  const loadPackage = async () => {
-    setLoading(true);
+  const loadPackage = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/package/${token}`);
+      const res = await fetch(`/api/package/${token}?_t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok && data.package) {
-        setPkg(data.package);
+        setPkg((prev) => {
+          if (prev && prev.status !== 'DELIVERED' && data.package.status === 'DELIVERED') {
+            try {
+              if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                navigator.vibrate([100, 50, 100]);
+              }
+            } catch {}
+          }
+          return data.package;
+        });
         if (data.ad) {
           setAd(data.ad);
         }
@@ -110,12 +151,12 @@ export default function PublicPackagePage() {
           setIsUnlocked(true);
         }
       } else {
-        setError(data.error || 'Encomenda não encontrada.');
+        if (!silent) setError(data.error || 'Encomenda não encontrada.');
       }
     } catch (err: any) {
-      setError('Não foi possível carregar as informações da encomenda.');
+      if (!silent) setError('Não foi possível carregar as informações da encomenda.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -184,7 +225,7 @@ export default function PublicPackagePage() {
               {error || 'Não foi possível encontrar a encomenda correspondente a este link. Verifique o link recebido no WhatsApp.'}
             </p>
             <button
-              onClick={loadPackage}
+              onClick={() => loadPackage()}
               className="mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
             >
               Tentar Novamente
@@ -412,24 +453,26 @@ export default function PublicPackagePage() {
               )}
             </div>
 
-            {/* Botões - Exibidos fora do card DADOS DE ENTREGA para destaque quando entregue */}
+            {/* Botões de Ação quando Entregue - Conforme solicitado pelo usuário */}
             {isDelivered && (
-              <div className="flex flex-col gap-3 mt-4 w-full">
-                {signatureUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setModalImage(signatureUrl)}
-                    className="w-full flex items-center justify-center py-4 px-4 bg-white hover:bg-gray-100 text-black rounded-full font-bold text-[15px] transition shadow-md"
-                  >
-                    Ver assinatura
-                  </button>
-                )}
+              <div className="flex flex-col gap-3 mt-4 w-full animate-fade-in">
+                {/* Botão Ver assinatura - Fundo Branco, Texto Preto */}
+                <button
+                  type="button"
+                  onClick={() => setShowSignatureModal(true)}
+                  className="w-full flex items-center justify-center py-4 px-6 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-950 rounded-2xl font-black text-base transition-all shadow-xl tracking-wide cursor-pointer border border-slate-200"
+                >
+                  Ver assinatura
+                </button>
                 
+                {/* Botão Não fiz a retirada - Fundo Vermelho Vibrante, Texto Branco */}
                 <a
-                  href={`https://wa.me/${pkg?.condo_phone?.replace(/\D/g, '') || ''}?text=Ol%C3%A1%2C+consta+no+sistema+que+minha+encomenda+%28c%C3%B3digo+${pkg?.pickup_code}%29+foi+retirada%2C+mas+eu+n%C3%A3o+fiz+a+retirada.`}
+                  href={`https://wa.me/${(pkg?.condo_phone?.replace(/\D/g, '') || '557398419901')}?text=${encodeURIComponent(
+                    `⚠️ *CONTESTAÇÃO DE RETIRADA*\n\nOlá, consta no sistema que a minha encomenda de *${pkg?.carrier || 'encomenda'}* (Código: *${pkg?.pickup_code}*, Destinatário: *${pkg?.recipient_name}*, Unidade: *${pkg?.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'minha unidade'}*) foi registrada como retirada, mas eu *NÃO FIZ A RETIRADA*!\n\nSolicito verificar na portaria com urgência.`
+                  )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center py-4 px-4 bg-[#FF3B30] hover:bg-[#FF453A] text-white rounded-full font-bold text-[15px] transition shadow-md mt-2"
+                  className="w-full flex items-center justify-center py-4 px-6 bg-[#EF4444] hover:bg-[#DC2626] active:scale-[0.98] text-white rounded-2xl font-black text-base transition-all shadow-xl shadow-red-500/25 tracking-wide cursor-pointer"
                 >
                   Não fiz a retirada
                 </a>
@@ -461,6 +504,68 @@ export default function PublicPackagePage() {
               className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition"
             >
               Fechar Foto
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Visualização da Assinatura Digital */}
+      {showSignatureModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in"
+          onClick={() => setShowSignatureModal(false)}
+        >
+          <div
+            className="relative max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-bold text-white">Assinatura Digital de Retirada</h3>
+              <p className="text-xs text-slate-400">
+                Registrada eletronicamente no sistema da portaria
+              </p>
+            </div>
+
+            {signatureUrl ? (
+              <div className="w-full p-4 bg-white rounded-2xl border border-slate-200 shadow-inner flex items-center justify-center min-h-[140px]">
+                <img
+                  src={signatureUrl}
+                  alt="Assinatura de Retirada"
+                  className="max-h-36 max-w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="w-full p-6 bg-slate-950 rounded-2xl border border-slate-800 text-center space-y-2">
+                <p className="text-xs text-slate-300 font-semibold">Assinatura Coletada na Portaria</p>
+                <p className="text-[11px] text-slate-500">Comprovante arquivado com segurança no sistema.</p>
+              </div>
+            )}
+
+            <div className="w-full bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Retirado por:</span>
+                <span className="font-bold text-slate-100">{pkg?.delivered_to_name || 'Morador'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Data e Hora:</span>
+                <span className="font-bold text-slate-100">{deliveredDate || 'Registrado'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Código de Retirada:</span>
+                <span className="font-mono font-bold text-emerald-400">{pkg?.pickup_code}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSignatureModal(false)}
+              className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition"
+            >
+              Fechar Assinatura
             </button>
           </div>
         </div>

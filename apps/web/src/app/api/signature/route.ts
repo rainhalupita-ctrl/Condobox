@@ -40,9 +40,30 @@ export async function POST(request: NextRequest) {
     }
 
     const filename = `signature_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.png`;
-    const signaturePath = `signatures/${filename}`;
+    let signaturePath = `signatures/${filename}`;
     const deliveredAt = new Date().toISOString();
     const deliveredTo = deliveredToName || pkg.resident?.name || 'Morador';
+
+    // Faz upload da assinatura para o Supabase Storage (bucket 'signatures')
+    try {
+      const base64Data = signatureBase64.replace(/^data:image\/\w+;base64,/, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('signatures')
+        .upload(filename, buffer, {
+          contentType: 'image/png',
+          upsert: true
+        });
+
+      if (!uploadErr && uploadData) {
+        const { data: pubData } = supabase.storage.from('signatures').getPublicUrl(filename);
+        if (pubData?.publicUrl) {
+          signaturePath = pubData.publicUrl;
+        }
+      }
+    } catch (e: any) {
+      console.warn('[api/signature] Falha ao fazer upload da assinatura:', e.message);
+    }
 
     // 2. Atualiza a encomenda como entregue
     const { data: updatedPkg, error: updateErr } = await supabase
@@ -63,6 +84,24 @@ export async function POST(request: NextRequest) {
         { error: 'Erro ao dar baixa na encomenda', details: updateErr.message },
         { status: 500 }
       );
+    }
+
+    // Dispara broadcast em tempo real para o site do morador
+    try {
+      const ch = supabase.channel(`public-package-${packageId}`);
+      ch.subscribe((st: string) => {
+        if (st === 'SUBSCRIBED') {
+          ch.send({
+            type: 'broadcast',
+            event: 'status-updated',
+            payload: { status: 'DELIVERED', packageId }
+          }).then(() => {
+            supabase.removeChannel(ch);
+          });
+        }
+      });
+    } catch (realtimeErr) {
+      console.warn('[api/signature] Falha ao disparar Realtime broadcast:', realtimeErr);
     }
 
     // 3. Dispara WhatsApp de confirmação de entrega
