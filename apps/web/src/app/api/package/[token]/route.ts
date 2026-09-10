@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 export async function GET(
   request: NextRequest,
@@ -19,7 +21,15 @@ export async function GET(
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlzdXJudnNlaHZqZHNscG54aXJuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODAzNjM4NCwiZXhwIjoyMTAzNjEyMzg0fQ.2PO_jbeh-rpMmLFbN17aHbJwxHaQr8aeWi6A2hkg708';
 
   const supabase = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false }
+    auth: { persistSession: false },
+    global: {
+      fetch: (url, options = {}) =>
+        fetch(url, {
+          ...options,
+          cache: 'no-store',
+          next: { revalidate: 0 }
+        })
+    }
   });
 
   try {
@@ -110,30 +120,41 @@ export async function GET(
       }
     } catch {}
 
-    return NextResponse.json({
-      package: {
-        id: pkg.id,
-        condo_id: pkg.condo_id,
-        pickup_code: pkg.pickup_code,
-        qr_token: pkg.qr_token,
-        carrier: pkg.carrier,
-        tracking_code: pkg.tracking_code,
-        recipient_name: pkg.resident?.name || pkg.recipient_name_ocr || 'Morador',
-        status: pkg.status,
-        received_at: pkg.received_at,
-        delivered_at: pkg.delivered_at,
-        delivered_to_name: pkg.delivered_to_name,
-        label_image_path: pkg.label_image_path,
-        signature_image_path: pkg.signature_image_path,
-        notes: pkg.notes,
-        unit: pkg.unit ? {
-          block: pkg.unit.block,
-          unit_number: pkg.unit.unit_number
-        } : null,
-        condo_phone: pkg.condo?.phone || null
+    return NextResponse.json(
+      {
+        package: {
+          id: pkg.id,
+          condo_id: pkg.condo_id,
+          pickup_code: pkg.pickup_code,
+          qr_token: pkg.qr_token,
+          carrier: pkg.carrier,
+          tracking_code: pkg.tracking_code,
+          recipient_name: pkg.resident?.name || pkg.recipient_name_ocr || 'Morador',
+          status: pkg.status,
+          received_at: pkg.received_at,
+          delivered_at: pkg.delivered_at,
+          delivered_to_name: pkg.delivered_to_name,
+          label_image_path: pkg.label_image_path,
+          signature_image_path: pkg.signature_image_path,
+          notes: pkg.notes,
+          unit: pkg.unit ? {
+            block: pkg.unit.block,
+            unit_number: pkg.unit.unit_number
+          } : null,
+          condo_phone: pkg.condo?.phone || null
+        },
+        ad: activeAd
       },
-      ad: activeAd
-    });
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+          'CDN-Cache-Control': 'no-store',
+          'Vercel-CDN-Cache-Control': 'no-store',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      }
+    );
   } catch (err: any) {
     return NextResponse.json(
       { error: 'Erro interno ao consultar encomenda', details: err.message },

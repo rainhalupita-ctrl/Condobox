@@ -94,7 +94,8 @@ export async function signatureRoutes(fastify: FastifyInstance) {
                     qrToken: updatedPackage.qr_token,
                     pickupCode: updatedPackage.pickup_code,
                     deliveredTo: body.deliveredToName,
-                    deliveredAt: new Date().toISOString()
+                    deliveredAt: new Date().toISOString(),
+                    signatureUrl: cloudSignaturePath
                   }
                 }).then(() => {
                   setTimeout(() => client.removeChannel(ch), 3000);

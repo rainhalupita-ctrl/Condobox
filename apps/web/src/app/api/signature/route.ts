@@ -110,7 +110,8 @@ export async function POST(request: NextRequest) {
                 qrToken: pkg.qr_token,
                 pickupCode: pkg.pickup_code,
                 deliveredTo,
-                deliveredAt
+                deliveredAt,
+                signatureUrl: signaturePath
               }
             }).then(() => {
               setTimeout(() => supabase.removeChannel(ch), 3000);

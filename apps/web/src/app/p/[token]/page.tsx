@@ -98,6 +98,16 @@ export default function PublicPackagePage() {
               navigator.vibrate([100, 50, 100]);
             }
           } catch {}
+          setPkg((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              status: 'DELIVERED',
+              delivered_to_name: data?.deliveredTo || prev.delivered_to_name || 'Morador',
+              delivered_at: data?.deliveredAt || new Date().toISOString(),
+              signature_image_path: data?.signatureUrl || prev.signature_image_path
+            };
+          });
           loadPackage(true);
         }
       });
@@ -122,6 +132,16 @@ export default function PublicPackagePage() {
                   navigator.vibrate([100, 50, 100]);
                 }
               } catch {}
+              setPkg((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  status: 'DELIVERED',
+                  delivered_to_name: updated.delivered_to_name || prev.delivered_to_name,
+                  delivered_at: updated.delivered_at || new Date().toISOString(),
+                  signature_image_path: updated.signature_image_path || prev.signature_image_path
+                };
+              });
               loadPackage(true);
             }
           }
@@ -156,9 +176,24 @@ export default function PublicPackagePage() {
       }
     }, 1500);
 
+    // Refresh imediato ao focar na janela ou voltar para a aba do navegador
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && pkg?.status !== 'DELIVERED') {
+        loadPackage(true);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleVisibilityOrFocus);
+      document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    }
+
     return () => {
       channels.forEach((ch) => supabase.removeChannel(ch));
       clearInterval(interval);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleVisibilityOrFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      }
     };
   }, [token, pkg?.id, pkg?.qr_token, pkg?.pickup_code, pkg?.status]);
 
