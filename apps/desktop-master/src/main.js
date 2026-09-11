@@ -2,7 +2,6 @@ const { app, BrowserWindow, session, nativeImage, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
-// Configurações do App do Proprietário
 const APP_TITLE = "CondoBox SaaS Master - Painel do Proprietário";
 const MASTER_PARTITION = "persist:condobox_master_owner";
 const PRIMARY_URL = process.env.CONDOBOX_MASTER_URL || "http://localhost:3000/master/login";
@@ -14,7 +13,13 @@ if (process.platform === "win32") {
   app.setAppUserModelId("com.condobox.master");
 }
 
-let splashWindow = null;
+// Garante apenas 1 instância do aplicativo aberta
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
 let mainWindow = null;
 
 function getAppIcon() {
@@ -28,61 +33,37 @@ function getAppIcon() {
   return undefined;
 }
 
-function createSplash() {
-  const icon = getAppIcon();
-
-  splashWindow = new BrowserWindow({
-    width: 480,
-    height: 320,
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    resizable: false,
-    alwaysOnTop: true,
-    center: true,
-    skipTaskbar: false,
-    icon: icon,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  });
-
-  if (icon) splashWindow.setIcon(icon);
-  splashWindow.loadFile(path.join(__dirname, "splash.html"));
-}
-
 function createMainWindow() {
   const icon = getAppIcon();
   const masterSession = session.fromPartition(MASTER_PARTITION);
   masterSession.setUserAgent(masterSession.getUserAgent() + " CondoBox-Master-Desktop/1.0");
 
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    width: 1400,
+    height: 880,
     minWidth: 1024,
     minHeight: 650,
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
     titleBarOverlay: {
       color: "#020617",
-      symbolColor: "#c084fc", // Destaque em tom roxo/master
+      symbolColor: "#c084fc",
       height: 40,
     },
     title: APP_TITLE,
-    show: false,
+    show: true, // Abre IMEDIATAMENTE visível na tela
+    backgroundColor: "#020617",
     icon: icon,
     webPreferences: {
       session: masterSession,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true,
+      webSecurity: false,
     },
   });
 
   if (icon) mainWindow.setIcon(icon);
 
-  // Injetar CSS para refinamento da interface de desktop
   mainWindow.webContents.on("dom-ready", () => {
     mainWindow.webContents.insertCSS(`
       * {
@@ -96,20 +77,19 @@ function createMainWindow() {
     `);
   });
 
-  // Tenta carregar primeiro o servidor local mais atualizado, fallback para nuvem
-  mainWindow.loadURL(PRIMARY_URL).catch(() => {
-    console.log("[Master App] Servidor local indisponível, alternando para nuvem:", REMOTE_URL);
+  // Tenta carregar primeiro o servidor local mais recente
+  mainWindow.loadURL(PRIMARY_URL).catch((err) => {
+    console.warn("[Master App] Local indisponível, tentando nuvem:", err?.message);
     mainWindow.loadURL(REMOTE_URL).catch(() => {});
   });
 
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     if (validatedURL === PRIMARY_URL) {
-      console.warn(`[Master App] Falha ao conectar em ${PRIMARY_URL}. Alternando para nuvem...`);
+      console.warn(`[Master App] Falha ao carregar ${PRIMARY_URL}. Alternando para nuvem...`);
       mainWindow.loadURL(REMOTE_URL).catch(() => {});
     }
   });
 
-  // Abre links externos no navegador padrão do sistema
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http:") || url.startsWith("https:")) {
       shell.openExternal(url);
@@ -117,32 +97,19 @@ function createMainWindow() {
     return { action: "deny" };
   });
 
-  const showMainWindow = () => {
-    if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.close();
-      splashWindow = null;
-    }
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  };
-
-  mainWindow.once("ready-to-show", () => {
-    setTimeout(showMainWindow, 1800);
-  });
-
-  // Garantia: se ready-to-show demorar por lentidão de rede, mostra a janela após 3.5s
-  setTimeout(showMainWindow, 3500);
-
   mainWindow.on("closed", () => {
     mainWindow = null;
-    app.quit();
   });
 }
 
+app.on("second-instance", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(() => {
-  createSplash();
   createMainWindow();
 
   app.on("activate", () => {

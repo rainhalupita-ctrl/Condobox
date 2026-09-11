@@ -7,7 +7,7 @@ import { Building2, Package, LayoutDashboard, User, LogOut, Shield, ChevronDown,
 import { useState } from 'react';
 
 export function Navbar() {
-  const { profile, isPortaria, isAdmin, isSuperAdmin, signOut, loading } = useAuth();
+  const { profile, isPortaria, isAdmin, isSuperAdmin, isImpersonating, signOut, loading } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -18,11 +18,16 @@ export function Navbar() {
   }
 
   const navLinks = isSuperAdmin
-    ? [
-        { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
-        { href: '/admin', label: 'Gestão Local', icon: LayoutDashboard },
-        { href: '/portaria', label: 'Portaria', icon: Shield },
-      ]
+    ? (isImpersonating
+        ? [
+            { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
+            { href: '/admin', label: 'Administração', icon: LayoutDashboard },
+            { href: '/portaria', label: 'Portaria', icon: Shield },
+          ]
+        : [
+            { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
+          ]
+      )
     : isAdmin
     ? [
         { href: '/admin', label: 'Administração do Condomínio', icon: LayoutDashboard },
@@ -46,7 +51,7 @@ export function Navbar() {
         <div className="w-full px-3 sm:px-6 sm:pr-36 h-14 flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo Oficial CondoBox */}
           <Link 
-            href={isPortaria ? '/portaria' : '/morador'}
+            href={isSuperAdmin ? '/super-admin' : isPortaria ? '/portaria' : '/morador'}
             className="flex items-center gap-2 sm:gap-2.5 shrink-0 group"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >

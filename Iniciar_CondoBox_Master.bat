@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-title Iniciar CondoBox SaaS Master
+title CondoBox SaaS Master
 
 set ROOT_DIR=%~dp0
 
@@ -9,16 +9,21 @@ echo    👑 CONDOBOX SAAS MASTER - PROGRAMA DO PROPRIETÁRIO
 echo =======================================================
 echo.
 
+:: 1. Fecha instâncias zumbis anteriores que poderiam travar a sessão
+taskkill /F /IM electron.exe 2>nul
+
+:: 2. Verifica se o servidor local do sistema está ativo
 netstat -ano | findstr :3000 >nul 2>nul
 if %ERRORLEVEL% neq 0 (
-    echo [1/2] Inicializando servidor web em segundo plano...
-    start "CondoBox Server" /min cmd /c "cd /d "%ROOT_DIR%apps\web" && npm run dev"
+    echo [1/2] Iniciando servidor web do sistema...
+    start "CondoBox Server" /min cmd /c "cd /d %ROOT_DIR%apps\web && npm run dev"
     timeout /t 4 /nobreak >nul
 ) else (
-    echo [1/2] Servidor web ativo e respondendo.
+    echo [1/2] Servidor web já está ativo.
 )
 
-echo [2/2] Abrindo aplicativo executivo CondoBox Master...
+:: 3. Abre o programa do proprietário
+echo [2/2] Abrindo aplicativo CondoBox Master...
 cd /d "%ROOT_DIR%apps\desktop-master"
 
 if exist "..\desktop\node_modules\electron\dist\electron.exe" (
