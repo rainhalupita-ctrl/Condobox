@@ -113,6 +113,15 @@ export default function AdminPage() {
   const [newResBlock, setNewResBlock] = useState('Bloco A');
   const [newResUnitNumber, setNewResUnitNumber] = useState('');
 
+  // Modal de Detalhes da Unidade / Moradores do Apartamento
+  const [selectedUnitModal, setSelectedUnitModal] = useState<Unit | null>(null);
+  const [isUnitAddResidentOpen, setIsUnitAddResidentOpen] = useState(false);
+  const [unitResName, setUnitResName] = useState('');
+  const [unitResPhone, setUnitResPhone] = useState('');
+  const [unitResEmail, setUnitResEmail] = useState('');
+  const [unitResLoading, setUnitResLoading] = useState(false);
+  const [unitResError, setUnitResError] = useState<string | null>(null);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -578,6 +587,74 @@ export default function AdminPage() {
     }
   };
 
+  const handleDeleteResident = async (residentId: string, residentName: string) => {
+    if (!confirm(`Deseja realmente remover o morador ${residentName}?`)) return;
+    const supabase = createClient();
+    const { error } = await supabase.from('residents').delete().eq('id', residentId);
+    if (error) {
+      alert(`Erro ao excluir morador: ${error.message}`);
+    } else {
+      setResidents((prev) => prev.filter((r) => r.id !== residentId));
+      loadData();
+    }
+  };
+
+  const handleAddResidentToUnit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUnitModal) return;
+    if (!unitResName.trim() || !unitResPhone.trim()) {
+      setUnitResError('Preencha os campos obrigatórios (Nome e WhatsApp).');
+      return;
+    }
+
+    setUnitResLoading(true);
+    setUnitResError(null);
+
+    const supabase = createClient();
+    try {
+      const unitResidents = residents.filter(
+        (r) =>
+          r.unit_id === selectedUnitModal.id ||
+          (r.unit &&
+            (r.unit.block || 'Bloco A').toUpperCase() === (selectedUnitModal.block || 'Bloco A').toUpperCase() &&
+            r.unit.unit_number === selectedUnitModal.unit_number)
+      );
+
+      const { data, error } = await supabase
+        .from('residents')
+        .insert({
+          name: unitResName.trim(),
+          phone: unitResPhone.trim(),
+          email: unitResEmail.trim() || null,
+          unit_id: selectedUnitModal.id,
+          is_authorized_receiver: true,
+          is_primary: unitResidents.length === 0,
+          active: true
+        })
+        .select('*, unit:units(*)')
+        .single();
+
+      if (error) {
+        setUnitResError(`Erro ao cadastrar: ${error.message}`);
+        return;
+      }
+
+      if (data) {
+        setResidents((prev) => [...prev, data as Resident]);
+      }
+
+      setUnitResName('');
+      setUnitResPhone('');
+      setUnitResEmail('');
+      setIsUnitAddResidentOpen(false);
+      loadData();
+    } catch (err: any) {
+      setUnitResError(err.message || 'Erro inesperado ao salvar morador.');
+    } finally {
+      setUnitResLoading(false);
+    }
+  };
+
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newResName.trim() || !newResPhone.trim() || !newResUnitNumber.trim()) {
@@ -1004,21 +1081,65 @@ export default function AdminPage() {
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2">
-                        {blockUnits.map(u => (
-                          <div
-                            key={u.id}
-                            className="group relative bg-slate-900 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl p-2.5 text-center transition flex flex-col items-center justify-between gap-1"
-                          >
-                            <span className="font-mono font-bold text-xs text-slate-200">{u.unit_number}</span>
+                        {blockUnits.map(u => {
+                          const unitResCount = residents.filter(
+                            r =>
+                              r.unit_id === u.id ||
+                              (r.unit &&
+                                (r.unit.block || 'Bloco A').toUpperCase() === (u.block || 'Bloco A').toUpperCase() &&
+                                r.unit.unit_number === u.unit_number)
+                          ).length;
+
+                          return (
                             <button
-                              onClick={() => handleDeleteUnit(u.id, `${u.block} - Apto ${u.unit_number}`)}
-                              className="opacity-0 group-hover:opacity-100 text-[10px] text-red-400 hover:text-red-300 transition"
-                              title="Excluir unidade"
+                              key={u.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedUnitModal(u);
+                                setIsUnitAddResidentOpen(false);
+                                setUnitResName('');
+                                setUnitResPhone('');
+                                setUnitResEmail('');
+                                setUnitResError(null);
+                              }}
+                              className={`group relative bg-slate-900 hover:bg-slate-800/90 border ${
+                                unitResCount > 0 ? 'border-emerald-500/30 hover:border-emerald-500' : 'border-slate-800 hover:border-indigo-500'
+                              } rounded-xl p-2.5 text-center transition flex flex-col items-center justify-between gap-1 cursor-pointer hover:shadow-lg hover:shadow-indigo-950/40 active:scale-95`}
+                              title={`Clique para ver moradores do ${u.block} - Apto ${u.unit_number}`}
                             >
-                              <Trash2 size={12} />
+                              <div className="flex items-center justify-between w-full">
+                                <span className="font-mono font-bold text-xs text-slate-200">{u.unit_number}</span>
+                                {unitResCount > 0 ? (
+                                  <span
+                                    className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded-md border border-emerald-500/30"
+                                    title={`${unitResCount} morador(es) cadastrado(s)`}
+                                  >
+                                    <Users size={10} />
+                                    {unitResCount}
+                                  </span>
+                                ) : (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-700 group-hover:bg-indigo-400/50 transition" title="Sem moradores" />
+                                )}
+                              </div>
+
+                              <div className="w-full flex items-center justify-between pt-0.5">
+                                <span className="text-[9px] text-slate-500 group-hover:text-indigo-300 font-medium transition">
+                                  {unitResCount > 0 ? 'Moradores' : '+ Adicionar'}
+                                </span>
+                                <span
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteUnit(u.id, `${u.block} - Apto ${u.unit_number}`);
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 rounded transition"
+                                  title="Excluir unidade"
+                                >
+                                  <Trash2 size={11} />
+                                </span>
+                              </div>
                             </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -1120,12 +1241,7 @@ export default function AdminPage() {
                         <td className="p-4 text-right">
                           <button
                             type="button"
-                            onClick={async () => {
-                              if (!confirm(`Deseja remover o morador ${r.name}?`)) return;
-                              const supabase = createClient();
-                              await supabase.from('residents').delete().eq('id', r.id);
-                              loadData();
-                            }}
+                            onClick={() => handleDeleteResident(r.id, r.name)}
                             className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
                             title="Excluir Morador"
                           >
@@ -1706,6 +1822,199 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Detalhes da Unidade / Moradores do Apartamento */}
+      {selectedUnitModal && (() => {
+        const unitResidents = residents.filter(
+          (r) =>
+            r.unit_id === selectedUnitModal.id ||
+            (r.unit &&
+              (r.unit.block || 'Bloco A').toUpperCase() === (selectedUnitModal.block || 'Bloco A').toUpperCase() &&
+              r.unit.unit_number === selectedUnitModal.unit_number)
+        );
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 bg-indigo-500/15 border border-indigo-500/30 rounded-2xl text-indigo-400">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      {selectedUnitModal.block} - Apto {selectedUnitModal.unit_number}
+                      <span className="text-[11px] font-semibold px-2 py-0.5 bg-slate-800 text-indigo-300 border border-indigo-500/20 rounded-full">
+                        {unitResidents.length} {unitResidents.length === 1 ? 'morador' : 'moradores'}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Moradores cadastrados e notificações para esta unidade.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedUnitModal(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-200 rounded-xl hover:bg-slate-800 transition"
+                  title="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Lista de Moradores (com scroll caso haja vários) */}
+              <div className="space-y-3 overflow-y-auto pr-1 flex-1">
+                {unitResidents.length === 0 ? (
+                  <div className="text-center py-8 px-4 bg-slate-950/60 rounded-2xl border border-slate-800/80 space-y-2">
+                    <Users className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="text-xs text-slate-300 font-semibold">Nenhum morador cadastrado neste apartamento</p>
+                    <p className="text-[11px] text-slate-500">
+                      Cadastre o morador abaixo para habilitar o envio automático de avisos de encomendas via WhatsApp.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {unitResidents.map((r) => (
+                      <div
+                        key={r.id}
+                        className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-bold text-xs shrink-0">
+                            {r.name ? r.name.substring(0, 2).toUpperCase() : <Users size={16} />}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold text-slate-100 truncate">{r.name}</span>
+                              {r.is_primary && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-md">
+                                  Titular
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                              <span className="flex items-center gap-1 font-mono text-emerald-400 font-semibold">
+                                <Phone size={11} /> {r.phone}
+                              </span>
+                              {r.email && (
+                                <span className="flex items-center gap-1 text-slate-500 truncate">
+                                  <Mail size={11} /> {r.email}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteResident(r.id, r.name)}
+                          className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition shrink-0"
+                          title="Excluir Morador"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Formulário Inline para Adicionar Morador */}
+                {isUnitAddResidentOpen ? (
+                  <form onSubmit={handleAddResidentToUnit} className="bg-slate-950 p-4 rounded-2xl border border-indigo-500/30 space-y-3.5 text-xs animate-fade-in">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="font-bold text-slate-100 flex items-center gap-1.5">
+                        <UserPlus size={14} className="text-indigo-400" />
+                        Novo Morador ({selectedUnitModal.block} - Apto {selectedUnitModal.unit_number})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsUnitAddResidentOpen(false)}
+                        className="text-slate-500 hover:text-slate-300 text-[11px]"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+
+                    {unitResError && (
+                      <div className="p-2.5 bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-xl text-[11px] flex items-center gap-2">
+                        <AlertCircle size={14} className="shrink-0" />
+                        <span>{unitResError}</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Nome Completo *</label>
+                      <input
+                        type="text"
+                        required
+                        value={unitResName}
+                        onChange={(e) => setUnitResName(e.target.value)}
+                        placeholder="Ex: Carlos Eduardo"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">WhatsApp *</label>
+                        <input
+                          type="text"
+                          required
+                          value={unitResPhone}
+                          onChange={(e) => setUnitResPhone(e.target.value)}
+                          placeholder="Ex: 73981953741"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1">E-mail (opcional)</label>
+                        <input
+                          type="email"
+                          value={unitResEmail}
+                          onChange={(e) => setUnitResEmail(e.target.value)}
+                          placeholder="morador@email.com"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsUnitAddResidentOpen(false)}
+                        className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition"
+                      >
+                        Fechar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={unitResLoading}
+                        className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-md"
+                      >
+                        {unitResLoading ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                        {unitResLoading ? 'Salvando...' : 'Salvar Morador'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsUnitAddResidentOpen(true);
+                      setUnitResError(null);
+                    }}
+                    className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-950 active:scale-98"
+                  >
+                    <UserPlus size={15} /> Adicionar Morador neste Apartamento
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal de Cadastro Individual de Morador */}
       {isAddResidentModalOpen && (

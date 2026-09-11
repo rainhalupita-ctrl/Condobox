@@ -1,11 +1,13 @@
 # Especificação Técnica: Motor de WhatsApp Nativo (Baileys Embutido)
 
 ## 1. Visão Geral
+
 Eliminar a dependência de containers Docker (`Evolution API`, `PostgreSQL`, `Redis`) rodando um motor nativo de WhatsApp direto no processo Node.js / Fastify da API Local do CondoBox através da biblioteca `@whiskeysockets/baileys`.
 
 ---
 
 ## 2. Vantagens do Motor Nativo
+
 * **Zero Configuração & Zero Dependências**: O porteiro/síndico não precisa instalar Docker Desktop, WSL2 ou configurar portas adicionais.
 * **Economia de Recursos**: Consumo de RAM cai de ~4.5 GB (Docker + 3 containers) para apenas ~60 MB no processo Node.js existente.
 * **Pareamento Direto**: O QR Code é gerado e atualizado em tempo real na interface web/desktop do CondoBox.
@@ -52,4 +54,5 @@ sequenceDiagram
 ---
 
 ## 5. Estratégia de Fallback e Webhook Interno
+
 * As mensagens recebidas dos moradores (respostas como "Ciente", "OK", "Recebido") são tratadas diretamente pelo listener de eventos do Baileys (`messages.upsert`), disparando a baixa ou confirmação de ciência no banco de dados local instantaneamente, sem precisar de tunneling externo (ngrok/Cloudflare) para receber webhooks.
