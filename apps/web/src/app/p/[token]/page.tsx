@@ -56,6 +56,8 @@ export default function PublicPackagePage() {
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmedToast, setConfirmedToast] = useState(false);
   const [connectedWhatsappPhone, setConnectedWhatsappPhone] = useState<string | null>(null);
 
   // Sincronização em tempo real do número ativo do WhatsApp conectado via QR Code na portaria
@@ -283,6 +285,38 @@ export default function PublicPackagePage() {
     }
   };
 
+  const handleConfirmAndUnlock = async () => {
+    if (!pkg) return;
+    setConfirming(true);
+
+    // 1. Libera imediatamente o QR Code e código na tela e salva no navegador do morador
+    setIsUnlocked(true);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
+    }
+
+    // 2. Dispara a mensagem automática no WhatsApp via Evolution API / backend
+    try {
+      const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
+      const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: targetWhatsappPhone || undefined,
+        }),
+      });
+
+      if (res.ok) {
+        setConfirmedToast(true);
+        setTimeout(() => setConfirmedToast(false), 6000);
+      }
+    } catch (err) {
+      console.warn('[Confirm] Falha ao notificar WhatsApp:', err);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   const labelUrl = pkg?.label_image_path ? LocalApiClient.getImageUrl(pkg.label_image_path) : null;
   const signatureUrl = pkg?.signature_image_path ? LocalApiClient.getImageUrl(pkg.signature_image_path) : null;
 
@@ -380,6 +414,14 @@ export default function PublicPackagePage() {
               </div>
             </div>
 
+            {/* TOAST DE CONFIRMAÇÃO AUTOMÁTICA ENVIADA NO WHATSAPP */}
+            {confirmedToast && (
+              <div className="p-3.5 bg-emerald-500/15 border border-emerald-500/30 rounded-2xl text-emerald-300 text-xs flex items-center justify-center gap-2 animate-fade-in font-medium shadow-lg shadow-emerald-950/40">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Mensagem de confirmação enviada com sucesso no WhatsApp!</span>
+              </div>
+            )}
+
             {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
             {!isDelivered && (
               <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
@@ -437,32 +479,20 @@ export default function PublicPackagePage() {
                   <div className="w-full">
                     <button
                       type="button"
-                      onClick={() => {
-                        setIsUnlocked(true);
-                        localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
-                        // Usa o scheme nativo do WhatsApp em vez do wa.me para evitar a página intermediária no navegador
-                        const whatsappUrl = `whatsapp://send?phone=${targetWhatsappPhone}&text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
-                        // Cria um iframe invisível para forçar a abertura do app nativo sem navegar a página atual
-                        const iframe = document.createElement('iframe');
-                        iframe.style.display = 'none';
-                        iframe.src = whatsappUrl;
-                        document.body.appendChild(iframe);
-                        
-                        // Remove o iframe depois para limpeza
-                        setTimeout(() => {
-                          if (document.body.contains(iframe)) {
-                            document.body.removeChild(iframe);
-                          }
-                        }, 2000);
-                      }}
-                      className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50"
+                      disabled={confirming}
+                      onClick={handleConfirmAndUnlock}
+                      className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50 disabled:opacity-85"
                     >
                       <div className="flex items-center gap-2">
-                        <MessageSquare className="w-5 h-5 text-emerald-100" />
-                        <span>Confirmar e Liberar QR Code</span>
+                        {confirming ? (
+                          <RefreshCw className="w-5 h-5 text-emerald-100 animate-spin" />
+                        ) : (
+                          <MessageSquare className="w-5 h-5 text-emerald-100" />
+                        )}
+                        <span>{confirming ? 'Confirmando no WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
                       </div>
                       <span className="text-[10px] font-normal text-emerald-100/80">
-                        Abre o WhatsApp e libera a etiqueta na volta
+                        {confirming ? 'Disparando confirmação automática...' : 'Confirma no WhatsApp automaticamente e libera o QR Code'}
                       </span>
                     </button>
                   </div>
