@@ -788,31 +788,6 @@ export default function AdminPage() {
               </div>
             </div>
           </div>
-
-          {/* Relatório de Retenção e Armazenamento */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
-            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-400" />
-              Estatísticas do Armazenamento Local da Portaria
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <span className="text-slate-500 block">Política de Retenção:</span>
-                <span className="text-slate-200 font-bold text-sm">90 Dias (Automático)</span>
-                <p className="text-[11px] text-slate-500 mt-1">Fotos de etiquetas antigas são excluídas pelo cron local.</p>
-              </div>
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <span className="text-slate-500 block">Assinaturas Digitais:</span>
-                <span className="text-emerald-400 font-bold text-sm">Retenção Permanente</span>
-                <p className="text-[11px] text-slate-500 mt-1">Garantia jurídica e segurança para o condomínio.</p>
-              </div>
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <span className="text-slate-500 block">Custo de Servidor/Nuvem:</span>
-                <span className="text-emerald-400 font-bold text-sm">$0.00 / mês</span>
-                <p className="text-[11px] text-slate-500 mt-1">Tudo roda no PC local + Free Tier do Supabase.</p>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
