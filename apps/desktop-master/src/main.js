@@ -5,8 +5,8 @@ const fs = require("fs");
 // Configurações do App do Proprietário
 const APP_TITLE = "CondoBox SaaS Master - Painel do Proprietário";
 const MASTER_PARTITION = "persist:condobox_master_owner";
-const PRIMARY_URL = process.env.CONDOBOX_MASTER_URL || "https://web-eight-rust-97.vercel.app/super-admin";
-const LOCAL_URL = "http://localhost:3000/super-admin";
+const PRIMARY_URL = process.env.CONDOBOX_MASTER_URL || "http://localhost:3000/master/login";
+const REMOTE_URL = "https://web-eight-rust-97.vercel.app/master/login";
 
 app.disableHardwareAcceleration();
 
@@ -96,16 +96,16 @@ function createMainWindow() {
     `);
   });
 
-  // Carrega URL principal com fallback
+  // Tenta carregar primeiro o servidor local mais atualizado, fallback para nuvem
   mainWindow.loadURL(PRIMARY_URL).catch(() => {
-    console.log("[Master App] Tentando carregar endereço local:", LOCAL_URL);
-    mainWindow.loadURL(LOCAL_URL).catch(() => {});
+    console.log("[Master App] Servidor local indisponível, alternando para nuvem:", REMOTE_URL);
+    mainWindow.loadURL(REMOTE_URL).catch(() => {});
   });
 
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    if (validatedURL !== LOCAL_URL) {
-      console.warn(`[Master App] Falha de conexão (${errorCode}: ${errorDescription}). Alternando para porta local...`);
-      mainWindow.loadURL(LOCAL_URL).catch(() => {});
+    if (validatedURL === PRIMARY_URL) {
+      console.warn(`[Master App] Falha ao conectar em ${PRIMARY_URL}. Alternando para nuvem...`);
+      mainWindow.loadURL(REMOTE_URL).catch(() => {});
     }
   });
 
