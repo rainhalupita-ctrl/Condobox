@@ -17,7 +17,9 @@ export function Navbar() {
     );
   }
 
-  const navLinks = isSuperAdmin
+  const isMasterRoute = pathname.startsWith('/super-admin') || pathname.startsWith('/master');
+
+  const navLinks = (isSuperAdmin || isMasterRoute)
     ? (isImpersonating
         ? [
             { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
@@ -37,9 +39,11 @@ export function Navbar() {
     ? [
         { href: '/portaria', label: 'Portaria', icon: Shield },
       ]
-    : [
+    : (profile?.role === 'RESIDENT' && !isMasterRoute)
+    ? [
         { href: '/morador', label: 'Minhas Encomendas', icon: Package },
-      ];
+      ]
+    : [];
 
   return (
     <>
@@ -51,7 +55,7 @@ export function Navbar() {
         <div className="w-full px-3 sm:px-6 sm:pr-36 h-14 flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo Oficial CondoBox */}
           <Link 
-            href={isSuperAdmin ? '/super-admin' : isPortaria ? '/portaria' : '/morador'}
+            href={isSuperAdmin || isMasterRoute ? '/super-admin' : isPortaria ? '/portaria' : '/morador'}
             className="flex items-center gap-2 sm:gap-2.5 shrink-0 group"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >

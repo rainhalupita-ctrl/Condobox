@@ -1,32 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Building2, User, ShieldCheck, Eye, EyeOff, Lock, Mail, Loader2, QrCode, LogIn } from 'lucide-react';
-import { QRLoginScanner } from '@/components/qr-login-scanner';
+import { Package, User, Lock, Mail, Eye, EyeOff, Loader2, ArrowRight, Building2, Shield } from 'lucide-react';
 import Link from 'next/link';
 
-type Tab = 'portaria' | 'morador';
-
-export default function LoginPage() {
+export default function ResidentLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect') || '';
+  const redirectTo = searchParams.get('redirect') || '/morador';
 
-  const initialTab: Tab = redirectTo.includes('/portaria') || redirectTo.includes('/admin') || redirectTo.includes('/super-admin')
-    ? 'portaria'
-    : 'morador';
-
-  const [tab, setTab] = useState<Tab>(initialTab);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [portariaMode, setPortariaMode] = useState<'form' | 'qr'>('form');
 
   const supabase = createClient();
+
+  useEffect(() => {
+    document.title = 'CondoBox Morador — Minhas Encomendas';
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +29,10 @@ export default function LoginPage() {
     setError('');
 
     const cleanEmail = email.trim().toLowerCase();
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
 
     if (authError || !data.user) {
       const msg = authError?.message?.toLowerCase() || '';
@@ -61,173 +59,102 @@ export default function LoginPage() {
       .map(e => e.trim().toLowerCase());
     const isMaster = (role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
 
-    // Se for o Dono do Sistema (Master), direciona diretamente para o Painel Master
+    // Se for o Dono do Sistema (Master)
     if (isMaster) {
-      router.push(redirectTo || '/super-admin');
+      router.push('/super-admin');
       return;
     }
 
-    // Validar se o perfil bate com a aba selecionada
-    const isPortariaRole = ['ADMIN', 'SYNDIC', 'GUARD'].includes(role);
-    const isMoradorRole = role === 'RESIDENT';
-
-    if (tab === 'portaria' && !isPortariaRole) {
-      await supabase.auth.signOut();
-      setError('Sua conta não tem permissão de portaria. Use a aba "Morador".');
-      setLoading(false);
-      return;
-    }
-
-    if (tab === 'morador' && !isMoradorRole) {
-      if (redirectTo) {
-        router.push(redirectTo);
-        return;
-      }
-      router.push(role === 'SYNDIC' ? '/admin' : '/portaria');
-      return;
-    }
-
-    // Redirecionar conforme papel
-    if (redirectTo) {
-      router.push(redirectTo);
-    } else if (role === 'SYNDIC') {
+    // Se for Síndico entrando pelo portal do morador, encaminha para a gestão
+    if (role === 'SYNDIC' || (role === 'ADMIN' && profile?.condo_id)) {
       router.push('/admin');
-    } else if (isPortariaRole) {
-      router.push('/portaria');
-    } else {
-      router.push('/morador');
+      return;
     }
-  };
 
-  const handleQRScanSuccess = (url: string) => {
-    // Redireciona o usuário para o Magic Link escaneado
-    // Como é um URL, basta atribuir a window.location.href
-    // Exemplo do URL escaneado: https://isurnvsehvjdslpnxirn.supabase.co/auth/v1/verify?token=...&type=magiclink
-    setLoading(true);
-    window.location.href = url;
+    // Se for Porteiro
+    if (role === 'GUARD') {
+      router.push('/portaria');
+      return;
+    }
+
+    // Morador
+    router.push(redirectTo);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{
-      background: 'radial-gradient(ellipse at top left, #0f2027, #203a43, #2c5364)',
-    }}>
-      {/* Card de Login */}
-      <div className="w-full max-w-md">
-        {/* Logo Oficial / Brand */}
-        <div className="text-center mb-8">
-          <img
-            src="/logo.png"
-            alt="CondoBox - Gestão Inteligente de Encomendas"
-            className="h-24 w-auto mx-auto object-contain drop-shadow-2xl mb-2"
-          />
-        </div>
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950 relative overflow-hidden select-none">
+      {/* Glow de fundo */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-emerald-600/10 rounded-full blur-[140px] pointer-events-none" />
 
-        {/* Tabs */}
-        <div className="flex mb-6 rounded-xl overflow-hidden border border-slate-700 bg-slate-900/60 backdrop-blur">
-          <button
-            onClick={() => { setTab('morador'); setError(''); }}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-all ${
-              tab === 'morador'
-                ? 'bg-green-600 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <User size={16} />
-            Sou Morador
-          </button>
-          <button
-            onClick={() => { setTab('portaria'); setError(''); }}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-all ${
-              tab === 'portaria'
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <ShieldCheck size={16} />
-            Portaria / Síndico
-          </button>
-        </div>
+      <div className="w-full max-w-md relative z-10">
+        <div className="rounded-3xl border border-slate-800 bg-slate-900/80 backdrop-blur-xl p-8 sm:p-10 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-green-500" />
 
-        {/* Descrição da aba */}
-        <p className="text-center text-slate-400 text-xs mb-6">
-          {tab === 'morador'
-            ? '🏠 Acesse para ver e retirar suas encomendas'
-            : '🛡️ Acesso restrito a porteiros, síndicos e administradores'}
-        </p>
+          {/* Cabeçalho */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/25 mb-4 border border-emerald-400/20">
+              <Package size={32} />
+            </div>
 
-        {/* Modo Portaria / Síndico com opção QR Code */}
-        {tab === 'portaria' && (
-          <div className="flex gap-2 mb-6">
-            <button
-              onClick={() => setPortariaMode('form')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition ${
-                portariaMode === 'form' ? 'bg-slate-700 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              <LogIn size={16} /> E-mail
-            </button>
-            <button
-              onClick={() => setPortariaMode('qr')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition ${
-                portariaMode === 'qr' ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              <QrCode size={16} /> Ler QR Code
-            </button>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-2">
+              <User size={13} />
+              Portal do Morador
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              CondoBox <span className="text-emerald-400">Morador</span>
+            </h1>
+            <p className="text-slate-400 text-xs sm:text-sm mt-1.5 leading-relaxed">
+              Acompanhe a chegada e retirada de suas encomendas
+            </p>
           </div>
-        )}
 
-        {/* Formulário ou Leitor */}
-        {tab === 'portaria' && portariaMode === 'qr' ? (
-          <div className="animate-fade-in">
-            <QRLoginScanner
-              onScanSuccess={handleQRScanSuccess}
-              onClose={() => setPortariaMode('form')}
-            />
-          </div>
-        ) : (
-          <form onSubmit={handleLogin}
-            className="rounded-2xl border border-slate-700 bg-slate-900/70 backdrop-blur-md p-6 space-y-4 shadow-2xl animate-fade-in">
+          {error && (
+            <div className="mb-6 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium flex items-start gap-2.5 animate-shake">
+              <span className="shrink-0 mt-0.5">⚠️</span>
+              <span>{error}</span>
+            </div>
+          )}
 
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-xl">
-                {error}
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">E-mail</label>
+          {/* Formulário */}
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 tracking-wide uppercase">
+                Seu E-mail
+              </label>
               <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <Mail size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
-                  className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition"
+                  placeholder="morador@email.com"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-950/70 border border-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
                 />
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Senha</label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 tracking-wide uppercase">
+                Sua Senha
+              </label>
               <div className="relative">
-                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <Lock size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type={showPass ? 'text' : 'password'}
                   required
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-9 pr-10 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition"
+                  placeholder="••••••••••••"
+                  className="w-full pl-10 pr-11 py-3 rounded-xl bg-slate-950/70 border border-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all font-mono"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
                 >
-                  {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showPass ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
             </div>
@@ -235,32 +162,53 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className={`w-full py-3 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all ${
-                loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110 active:scale-[0.98]'
-              } ${tab === 'portaria' ? 'bg-blue-600' : 'bg-green-600'}`}
+              className="w-full mt-2 py-3.5 rounded-xl font-bold text-white text-sm bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : null}
-              {loading ? 'Entrando...' : 'Entrar'}
+              {loading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin text-white" />
+                  <span>Acessando...</span>
+                </>
+              ) : (
+                <>
+                  <span>Entrar nas Minhas Encomendas</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
             </button>
           </form>
-        )}
 
-        {/* Rodapé */}
-        {tab === 'morador' ? (
-          <p className="text-center text-slate-500 text-sm mt-6">
-            Ainda não tem conta?{' '}
-            <Link href="/cadastro" className="text-green-400 hover:text-green-300 font-medium">
+          {/* Cadastro de Morador */}
+          <p className="text-center text-slate-400 text-xs sm:text-sm mt-6">
+            Primeiro acesso?{' '}
+            <Link href="/cadastro" className="text-emerald-400 hover:text-emerald-300 font-bold underline">
               Cadastrar-se como Morador
             </Link>
           </p>
-        ) : (
-          <div className="mt-6 text-center bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-            <p className="text-slate-400 text-xs leading-relaxed">
-              🔒 Contas de portaria são criadas <strong className="text-slate-300">somente pelo síndico</strong>.<br />
-              Entre em contato com a administração do condomínio.
-            </p>
+
+          {/* Links para outros perfis */}
+          <div className="mt-8 pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-center gap-4 text-xs">
+            <Link
+              href="/admin/login"
+              className="inline-flex items-center gap-1.5 text-slate-400 hover:text-blue-400 font-medium transition-colors"
+            >
+              <Building2 size={14} className="text-blue-500" />
+              Portal do Síndico
+            </Link>
+            <span className="hidden sm:inline text-slate-700">•</span>
+            <Link
+              href="/portaria/login"
+              className="inline-flex items-center gap-1.5 text-slate-400 hover:text-teal-400 font-medium transition-colors"
+            >
+              <Shield size={14} className="text-teal-500" />
+              Terminal da Portaria
+            </Link>
           </div>
-        )}
+        </div>
+
+        <p className="text-center text-[11px] text-slate-600 mt-6">
+          CondoBox • Gestão de Encomendas para Condomínios
+        </p>
       </div>
     </div>
   );

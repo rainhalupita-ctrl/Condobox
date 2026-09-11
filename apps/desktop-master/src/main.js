@@ -34,16 +34,25 @@ function getAppIcon() {
   return undefined;
 }
 
+const net = require("net");
+
 function checkPortListening(port) {
   return new Promise((resolve) => {
-    const req = http.get({ host: "127.0.0.1", port, path: "/master/login", timeout: 1000 }, (res) => {
-      resolve(res.statusCode === 200 || res.statusCode === 307 || res.statusCode === 308);
+    const socket = new net.Socket();
+    socket.setTimeout(400);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
     });
-    req.on("error", () => resolve(false));
-    req.on("timeout", () => {
-      req.destroy();
+    socket.on("error", () => {
+      socket.destroy();
       resolve(false);
     });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, "127.0.0.1");
   });
 }
 
@@ -100,6 +109,12 @@ function createWindow() {
 
   // Garante inicializacao do servidor web se necessario
   ensureWebServer();
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
+      mainWindow.reload();
+    }
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http:") || url.startsWith("https:")) {

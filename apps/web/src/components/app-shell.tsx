@@ -8,12 +8,13 @@ import { BarcodeListener } from './BarcodeListener';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { useAuth } from '@/contexts/auth-context';
 
-const NO_NAVBAR_PATHS = ['/login', '/cadastro', '/p/'];
+const NO_NAVBAR_PATHS = ['/login', '/cadastro', '/p/', '/master', '/admin/login', '/portaria/login'];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const showNavbar = !NO_NAVBAR_PATHS.some(p => pathname.startsWith(p));
   const { license, isPortaria, isMorador, isSuperAdmin } = useAuth();
+  const isMaster = isSuperAdmin || pathname.startsWith('/super-admin') || pathname.startsWith('/master');
 
   const isBlocked = license && (license.status === 'EXPIRED' || license.status === 'BLOCKED');
   // Se for super admin ou acessando o super-admin, não bloqueia
@@ -38,7 +39,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
       {showNavbar && (
         <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-600">
-          CondoBox • Sistema de Portaria Inteligente
+          {isMaster 
+            ? 'CondoBox SaaS Master • Central de Gestão Global e Licenciamento'
+            : 'CondoBox • Sistema de Portaria Inteligente'}
         </footer>
       )}
       <CookieConsent />

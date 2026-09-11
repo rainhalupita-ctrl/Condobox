@@ -47,3 +47,30 @@
 [2026-09-11T14:53:51.107Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
 [2026-09-11T14:53:51.142Z] Porta 3000 nao esta escutando. Iniciando apps/web em background...
 [2026-09-11T14:53:51.157Z] Processo do servidor web disparado. PID: 6452
+[2026-09-11T14:57:23.472Z] Janela principal fechada pelo usuario.
+[2026-09-11T14:57:23.473Z] Todas as janelas foram fechadas.
+[2026-09-11T14:57:23.473Z] Encerrando processo do servidor web...
+[2026-09-11T14:57:28.304Z] Iniciando CondoBox SaaS Master... PID: 20264
+[2026-09-11T14:57:28.338Z] app.whenReady disparado com sucesso.
+[2026-09-11T14:57:28.339Z] Criando janela principal...
+[2026-09-11T14:57:28.391Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T14:57:28.432Z] Porta 3000 nao esta escutando. Iniciando apps/web em background...
+[2026-09-11T14:57:28.449Z] Processo do servidor web disparado. PID: 19320
+[2026-09-11T14:57:41.054Z] Janela principal fechada pelo usuario.
+[2026-09-11T14:57:41.055Z] Todas as janelas foram fechadas.
+[2026-09-11T14:57:41.055Z] Encerrando processo do servidor web...
+[2026-09-11T14:57:43.600Z] Iniciando CondoBox SaaS Master... PID: 1888
+[2026-09-11T14:57:43.635Z] app.whenReady disparado com sucesso.
+[2026-09-11T14:57:43.635Z] Criando janela principal...
+[2026-09-11T14:57:43.691Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T14:57:43.891Z] Servidor web ja esta rodando na porta 3000.
+[2026-09-11T15:05:20.497Z] Iniciando CondoBox SaaS Master... PID: 19116
+[2026-09-11T15:05:20.531Z] app.whenReady disparado com sucesso.
+[2026-09-11T15:05:20.531Z] Criando janela principal...
+[2026-09-11T15:05:20.584Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T15:05:20.702Z] Servidor web ja esta rodando na porta 3000.
+[2026-09-11T15:06:19.684Z] Iniciando CondoBox SaaS Master... PID: 12852
+[2026-09-11T15:06:19.725Z] app.whenReady disparado com sucesso.
+[2026-09-11T15:06:19.725Z] Criando janela principal...
+[2026-09-11T15:06:19.789Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T15:06:20.058Z] Servidor web ja esta rodando na porta 3000.

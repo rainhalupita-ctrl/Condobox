@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ShieldAlert, Lock, Mail, Eye, EyeOff, Loader2, KeyRound, ArrowRight } from 'lucide-react';
@@ -9,6 +9,10 @@ export default function MasterLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/super-admin';
+
+  useEffect(() => {
+    document.title = 'CondoBox Master - Acesso Exclusivo do Proprietário';
+  }, []);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

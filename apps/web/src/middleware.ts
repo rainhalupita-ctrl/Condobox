@@ -10,7 +10,7 @@ const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
 };
 
 // Rotas públicas (sem autenticação necessária)
-const PUBLIC_PATHS = ['/login', '/cadastro', '/p', '/encomenda', '/master/login'];
+const PUBLIC_PATHS = ['/login', '/cadastro', '/p/', '/encomenda', '/master/login', '/admin/login', '/portaria/login'];
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -69,8 +69,8 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    // Se já está logado e tenta acessar /login ou /cadastro, redireciona para o destino
-    if (user && (pathname === '/login' || pathname === '/cadastro')) {
+    // Se já está logado e tenta acessar telas de login ou cadastro
+    if (user && (pathname === '/login' || pathname === '/cadastro' || pathname === '/admin/login' || pathname === '/portaria/login')) {
       const profile = await supabase
         .from('profiles')
         .select('role, condo_id')
@@ -112,6 +112,10 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     if (pathname.startsWith('/super-admin')) {
       url.pathname = '/master/login';
+    } else if (pathname.startsWith('/admin')) {
+      url.pathname = '/admin/login';
+    } else if (pathname.startsWith('/portaria')) {
+      url.pathname = '/portaria/login';
     } else {
       url.pathname = '/login';
     }

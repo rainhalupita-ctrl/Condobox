@@ -42,7 +42,7 @@ export default function PortariaDashboardPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        window.location.href = '/login?redirect=/portaria';
+        window.location.href = '/portaria/login?redirect=/portaria';
         return;
       }
 

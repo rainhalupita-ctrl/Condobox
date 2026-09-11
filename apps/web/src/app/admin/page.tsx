@@ -183,7 +183,7 @@ export default function AdminPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        window.location.href = '/login?redirect=/admin';
+        window.location.href = '/admin/login?redirect=/admin';
         return;
       }
 

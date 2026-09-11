@@ -118,9 +118,10 @@ export default function SuperAdminPage() {
   const [adLoading, setAdLoading] = useState(false);
 
   useEffect(() => {
+    document.title = 'CondoBox SaaS Master - Painel do Proprietário';
     if (!loading) {
       if (!user) {
-        router.replace('/login');
+        router.replace('/master/login');
       } else {
         loadData();
       }
