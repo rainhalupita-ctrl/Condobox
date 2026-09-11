@@ -14,7 +14,7 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '';
 
-  const initialTab: Tab = redirectTo.includes('/portaria') || redirectTo.includes('/admin')
+  const initialTab: Tab = redirectTo.includes('/portaria') || redirectTo.includes('/admin') || redirectTo.includes('/super-admin')
     ? 'portaria'
     : 'morador';
 
@@ -50,11 +50,22 @@ export default function LoginPage() {
     // Buscar perfil para saber o papel
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, condo_id')
       .eq('id', data.user.id)
       .single();
 
     const role = profile?.role || 'RESIDENT';
+    const userEmail = (data.user.email || '').toLowerCase();
+    const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+      .split(',')
+      .map(e => e.trim().toLowerCase());
+    const isMaster = (role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+
+    // Se for o Dono do Sistema (Master), direciona diretamente para o Painel Master
+    if (isMaster) {
+      router.push(redirectTo || '/super-admin');
+      return;
+    }
 
     // Validar se o perfil bate com a aba selecionada
     const isPortariaRole = ['ADMIN', 'SYNDIC', 'GUARD'].includes(role);
@@ -68,14 +79,19 @@ export default function LoginPage() {
     }
 
     if (tab === 'morador' && !isMoradorRole) {
-      // Porteiros/admins tentando na aba morador — redirecionar para portaria
-      router.push('/portaria');
+      if (redirectTo) {
+        router.push(redirectTo);
+        return;
+      }
+      router.push(role === 'SYNDIC' ? '/admin' : '/portaria');
       return;
     }
 
     // Redirecionar conforme papel
     if (redirectTo) {
       router.push(redirectTo);
+    } else if (role === 'SYNDIC') {
+      router.push('/admin');
     } else if (isPortariaRole) {
       router.push('/portaria');
     } else {
