@@ -78,6 +78,7 @@ export default function NovaEncomendaPage() {
 
   // Modal de Aviso de Duplicidade
   const [duplicateWarning, setDuplicateWarning] = useState<any | null>(null);
+  const [isUnitDropdownOpen, setIsUnitDropdownOpen] = useState(false);
 
   useEffect(() => {
     if (!authLoading) {
@@ -863,31 +864,98 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
                 </select>
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Apartamento <span className="text-rose-400">*</span>
                 </label>
-                <select
-                  value={selectedUnitNumber}
-                  onChange={(e) => handleUnitNumberChange(e.target.value)}
-                  required
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-bold"
-                >
-                  <option value="">Selecione o apto...</option>
-                  {Array.from(
-                    new Set(
-                      units
-                        .filter((u) => (u.block || 'Bloco A').toUpperCase() === (selectedBlock || 'Bloco A').toUpperCase())
-                        .map((u) => u.unit_number)
-                    )
-                  )
-                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-                    .map((num) => (
-                      <option key={num} value={num}>
-                        Apto {num}
-                      </option>
-                    ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={selectedUnitNumber}
+                    onFocus={() => setIsUnitDropdownOpen(true)}
+                    onChange={(e) => {
+                      handleUnitNumberChange(e.target.value);
+                      setIsUnitDropdownOpen(true);
+                    }}
+                    placeholder="Digite ou selecione o apto..."
+                    className="w-full pl-3.5 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-bold"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setIsUnitDropdownOpen((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                    title="Ver todos os apartamentos"
+                  >
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isUnitDropdownOpen ? 'rotate-180 text-emerald-400' : ''}`} />
+                  </button>
+                </div>
+
+                {/* Dropdown com filtragem em tempo real ao digitar */}
+                {isUnitDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setIsUnitDropdownOpen(false)}
+                    />
+                    <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl py-1 text-slate-100 divide-y divide-slate-800/60">
+                      {Array.from(
+                        new Set(
+                          units
+                            .filter((u) => (u.block || 'Bloco A').toUpperCase() === (selectedBlock || 'Bloco A').toUpperCase())
+                            .map((u) => u.unit_number)
+                        )
+                      )
+                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                        .filter((num) => num.toLowerCase().includes((selectedUnitNumber || '').trim().toLowerCase()))
+                        .map((num) => (
+                          <button
+                            key={num}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              handleUnitNumberChange(num);
+                              setIsUnitDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3.5 py-2 text-xs font-bold transition flex items-center justify-between ${
+                              selectedUnitNumber === num
+                                ? 'bg-emerald-600/30 text-emerald-300'
+                                : 'hover:bg-slate-800 text-slate-200'
+                            }`}
+                          >
+                            <span>Apto {num}</span>
+                            {selectedUnitNumber === num && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                          </button>
+                        ))}
+
+                      {Array.from(
+                        new Set(
+                          units
+                            .filter((u) => (u.block || 'Bloco A').toUpperCase() === (selectedBlock || 'Bloco A').toUpperCase())
+                            .map((u) => u.unit_number)
+                        )
+                      ).filter((num) => num.toLowerCase().includes((selectedUnitNumber || '').trim().toLowerCase())).length === 0 && (
+                        <div className="px-3.5 py-2.5 text-xs text-slate-400 text-center">
+                          {selectedUnitNumber.trim() ? (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setIsUnitDropdownOpen(false);
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 font-bold"
+                            >
+                              Usar &quot;Apto {selectedUnitNumber}&quot;
+                            </button>
+                          ) : (
+                            'Nenhum apartamento cadastrado neste bloco'
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div>

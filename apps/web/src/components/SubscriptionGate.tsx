@@ -43,6 +43,15 @@ export function SubscriptionGate({ children }: Props) {
 
   useEffect(() => {
     checkLicense();
+
+    const handleUnitsChanged = () => {
+      checkLicense();
+    };
+
+    window.addEventListener('condo_units_changed', handleUnitsChanged);
+    return () => {
+      window.removeEventListener('condo_units_changed', handleUnitsChanged);
+    };
   }, [effectiveCondoId, license]);
 
   const checkLicense = async () => {

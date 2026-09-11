@@ -38,7 +38,9 @@ import {
   FileText,
   Cpu,
   LogOut,
-  X
+  X,
+  Check,
+  ChevronDown
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { VoiceService } from '../../lib/voice';
@@ -46,7 +48,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function AdminPage() {
-  const { isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, loading: authLoading } = useAuth();
+  const { isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
+  const [availableCondos, setAvailableCondos] = useState<{ id: string; name: string }[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
@@ -66,9 +69,9 @@ export default function AdminPage() {
 
   // Gerenciamento e Gerador de Unidades/Blocos
   const [batchBlock, setBatchBlock] = useState('Bloco A');
-  const [batchFloors, setBatchFloors] = useState(8);
-  const [batchStartUnit, setBatchStartUnit] = useState(0);
-  const [batchEndUnit, setBatchEndUnit] = useState(7);
+  const [batchFloors, setBatchFloors] = useState(4);
+  const [batchStartUnit, setBatchStartUnit] = useState(1);
+  const [batchEndUnit, setBatchEndUnit] = useState(4);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchSuccess, setBatchSuccess] = useState('');
   const [batchError, setBatchError] = useState('');
@@ -112,6 +115,7 @@ export default function AdminPage() {
   const [newResEmail, setNewResEmail] = useState('');
   const [newResBlock, setNewResBlock] = useState('Bloco A');
   const [newResUnitNumber, setNewResUnitNumber] = useState('');
+  const [isUnitDropdownOpen, setIsUnitDropdownOpen] = useState(false);
 
   // Modal de Detalhes da Unidade / Moradores do Apartamento
   const [selectedUnitModal, setSelectedUnitModal] = useState<Unit | null>(null);
@@ -179,6 +183,43 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [activeTab, whatsappQrCode]);
 
+  useEffect(() => {
+    if (isSuperAdmin) {
+      const fetchCondos = async () => {
+        const supabase = createClient();
+        const { data } = await supabase.from('condos').select('id, name').order('name');
+        if (data && data.length > 0) {
+          setAvailableCondos(data);
+          if (!effectiveCondoId) {
+            impersonateCondo({ id: data[0].id, name: data[0].name });
+          }
+        }
+      };
+      fetchCondos();
+    }
+  }, [isSuperAdmin, effectiveCondoId]);
+
+  useEffect(() => {
+    const handleUnitsChanged = () => {
+      loadData();
+    };
+    window.addEventListener('condo_units_changed', handleUnitsChanged);
+    return () => window.removeEventListener('condo_units_changed', handleUnitsChanged);
+  }, [effectiveCondoId]);
+
+  const loadLocalStatus = async () => {
+    try {
+      const health = await LocalApiClient.checkHealth();
+      setHealthStatus(health);
+
+      const wa = await LocalApiClient.getWhatsAppStatus();
+      setWhatsappState(wa);
+      if (!wa.connected && wa.qrcode) {
+        setWhatsappQrCode(wa.qrcode);
+      }
+    } catch {}
+  };
+
   const loadData = async () => {
     if (authLoading) return;
     if (!effectiveCondoId) {
@@ -197,14 +238,8 @@ export default function AdminPage() {
         return;
       }
 
-      const health = await LocalApiClient.checkHealth();
-      setHealthStatus(health);
-
-      const wa = await LocalApiClient.getWhatsAppStatus();
-      setWhatsappState(wa);
-      if (!wa.connected && wa.qrcode) {
-        setWhatsappQrCode(wa.qrcode);
-      }
+      // Executa status do WhatsApp e API local em segundo plano (não bloqueia unidades e moradores)
+      loadLocalStatus();
 
       const { data: uData } = await supabase
         .from('units')
@@ -552,11 +587,11 @@ export default function AdminPage() {
     setBatchSuccess('');
 
     if (!batchBlock.trim() || batchFloors < 1 || batchEndUnit < batchStartUnit) {
-      setBatchError('Configure os parâmetros corretamente.');
+      setBatchError('Configure os parâmetros corretamente. O último apto deve ser maior ou igual ao primeiro.');
       return;
     }
     if (!effectiveCondoId) {
-      setBatchError('Condomínio não identificado.');
+      setBatchError('Condomínio não identificado. Selecione um condomínio no topo.');
       return;
     }
 
@@ -566,7 +601,8 @@ export default function AdminPage() {
     const unitsToInsert: { condo_id: string; block: string; unit_number: string }[] = [];
     for (let floor = 1; floor <= batchFloors; floor++) {
       for (let apt = batchStartUnit; apt <= batchEndUnit; apt++) {
-        const unitNum = `${floor * 100 + apt}`;
+        const aptStr = String(apt).padStart(2, '0');
+        const unitNum = `${floor}${aptStr}`;
         unitsToInsert.push({
           condo_id: effectiveCondoId,
           block: batchBlock.trim(),
@@ -576,6 +612,15 @@ export default function AdminPage() {
     }
 
     try {
+      const existingKeys = new Set(
+        units
+          .filter((u) => (u.block || 'Bloco A').trim().toUpperCase() === batchBlock.trim().toUpperCase())
+          .map((u) => u.unit_number.trim())
+      );
+
+      const alreadyExisting = unitsToInsert.filter((u) => existingKeys.has(u.unit_number.trim())).length;
+      const newCount = unitsToInsert.length - alreadyExisting;
+
       const { data, error } = await supabase
         .from('units')
         .upsert(unitsToInsert, { onConflict: 'condo_id,block,unit_number', ignoreDuplicates: true })
@@ -584,8 +629,17 @@ export default function AdminPage() {
       if (error) {
         setBatchError(`Erro ao gerar unidades: ${error.message}`);
       } else {
-        setBatchSuccess(`${unitsToInsert.length} unidades criadas/atualizadas com sucesso para o ${batchBlock.trim()}!`);
-        loadData();
+        if (newCount === 0) {
+          setBatchSuccess(`Todas as ${unitsToInsert.length} unidades do ${batchBlock.trim()} já estavam cadastradas e continuam ativas.`);
+        } else {
+          setBatchSuccess(
+            `${newCount} nova(s) unidade(s) adicionada(s) com sucesso para o ${batchBlock.trim()}!${
+              alreadyExisting > 0 ? ` (${alreadyExisting} já existiam e foram mantidas)` : ''
+            }`
+          );
+        }
+        await loadData();
+        window.dispatchEvent(new CustomEvent('condo_units_changed'));
       }
     } catch (err: any) {
       setBatchError(`Erro: ${err.message}`);
@@ -614,7 +668,8 @@ export default function AdminPage() {
       alert(`Erro ao adicionar unidade: ${error.message}`);
     } else {
       setSingleUnitNumber('');
-      loadData();
+      await loadData();
+      window.dispatchEvent(new CustomEvent('condo_units_changed'));
     }
     setSingleLoading(false);
   };
@@ -626,7 +681,27 @@ export default function AdminPage() {
     if (error) {
       alert(`Erro ao excluir: ${error.message}`);
     } else {
-      loadData();
+      await loadData();
+      window.dispatchEvent(new CustomEvent('condo_units_changed'));
+    }
+  };
+
+  const handleDeleteBlock = async (blockName: string) => {
+    const blockUnits = units.filter((u) => (u.block || 'Bloco A').toUpperCase() === blockName.toUpperCase());
+    const hasResidents = residents.some((r) => blockUnits.some((u) => u.id === r.unit_id));
+    if (hasResidents) {
+      alert(`Não é possível excluir o ${blockName} inteiro pois há moradores vinculados a apartamentos deste bloco. Remova ou transfira os moradores primeiro.`);
+      return;
+    }
+    if (!confirm(`Deseja realmente excluir todos os ${blockUnits.length} apartamentos do ${blockName}?`)) return;
+
+    const supabase = createClient();
+    const { error } = await supabase.from('units').delete().eq('condo_id', effectiveCondoId).eq('block', blockName);
+    if (error) {
+      alert(`Erro ao excluir bloco: ${error.message}`);
+    } else {
+      await loadData();
+      window.dispatchEvent(new CustomEvent('condo_units_changed'));
     }
   };
 
@@ -791,10 +866,32 @@ export default function AdminPage() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-100 mt-1 flex items-center gap-2 flex-wrap">
             <span>Painel do Síndico</span>
-            {isImpersonating && impersonatedCondo && (
-              <span className="text-sm font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
-                {impersonatedCondo.name}
-              </span>
+            {isSuperAdmin && availableCondos.length > 0 ? (
+              <div className="flex items-center gap-2 bg-slate-900 border border-indigo-500/40 rounded-xl px-3 py-1.5 text-xs shadow-inner">
+                <span className="text-indigo-400 font-bold">Condomínio:</span>
+                <select
+                  value={effectiveCondoId || ''}
+                  onChange={(e) => {
+                    const found = availableCondos.find((c) => c.id === e.target.value);
+                    if (found) {
+                      impersonateCondo({ id: found.id, name: found.name });
+                    }
+                  }}
+                  className="bg-transparent text-slate-100 font-bold focus:outline-none cursor-pointer"
+                >
+                  {availableCondos.map((c) => (
+                    <option key={c.id} value={c.id} className="bg-slate-900 text-slate-100">
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              isImpersonating && impersonatedCondo && (
+                <span className="text-sm font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
+                  {impersonatedCondo.name}
+                </span>
+              )
             )}
           </h1>
         </div>
@@ -1129,9 +1226,20 @@ export default function AdminPage() {
                           <Building2 size={16} />
                           {blockName}
                         </span>
-                        <span className="text-xs text-slate-500 font-medium">
-                          {blockUnits.length} apartamentos
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-slate-500 font-medium">
+                            {blockUnits.length} apartamentos
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteBlock(blockName)}
+                            className="text-[11px] text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 transition opacity-70 hover:opacity-100 bg-rose-500/10 hover:bg-rose-500/20 px-2 py-0.5 rounded-lg border border-rose-500/20"
+                            title={`Excluir todos os apartamentos do ${blockName}`}
+                          >
+                            <Trash2 size={12} />
+                            Excluir Bloco
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2">
@@ -1198,6 +1306,18 @@ export default function AdminPage() {
                     </div>
                   );
                 })}
+
+              {units.length === 0 && (
+                <div className="text-center py-12 px-4 bg-slate-950/50 rounded-2xl border border-dashed border-slate-800 space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto">
+                    <Building2 size={24} />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-200">Nenhuma unidade cadastrada neste condomínio</h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Utilize o <strong>Gerador em Lote</strong> acima ou adicione unidades individuais para popular os apartamentos e blocos.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2126,29 +2246,96 @@ export default function AdminPage() {
                   </select>
                 </div>
 
-                <div>
+                <div className="relative">
                   <label className="block text-slate-300 font-semibold mb-1">Apartamento *</label>
-                  <select
-                    required
-                    value={newResUnitNumber}
-                    onChange={(e) => setNewResUnitNumber(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold"
-                  >
-                    <option value="">Selecione o apartamento...</option>
-                    {Array.from(
-                      new Set(
-                        units
-                          .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
-                          .map((u) => u.unit_number)
-                      )
-                    )
-                      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-                      .map((num) => (
-                        <option key={num} value={num}>
-                          Apto {num}
-                        </option>
-                      ))}
-                  </select>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={newResUnitNumber}
+                      onFocus={() => setIsUnitDropdownOpen(true)}
+                      onChange={(e) => {
+                        setNewResUnitNumber(e.target.value);
+                        setIsUnitDropdownOpen(true);
+                      }}
+                      placeholder="Digite ou selecione o apto..."
+                      className="w-full pl-3.5 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setIsUnitDropdownOpen((prev) => !prev)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                      title="Ver todos os apartamentos"
+                    >
+                      <ChevronDown className={`w-4 h-4 transition-transform ${isUnitDropdownOpen ? 'rotate-180 text-indigo-400' : ''}`} />
+                    </button>
+                  </div>
+
+                  {/* Dropdown com filtragem em tempo real ao digitar */}
+                  {isUnitDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setIsUnitDropdownOpen(false)}
+                      />
+                      <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl py-1 text-slate-100 divide-y divide-slate-800/60 animate-fade-in">
+                        {Array.from(
+                          new Set(
+                            units
+                              .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
+                              .map((u) => u.unit_number)
+                          )
+                        )
+                          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                          .filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase()))
+                          .map((num) => (
+                            <button
+                              key={num}
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setNewResUnitNumber(num);
+                                setIsUnitDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-3.5 py-2 text-xs font-bold transition flex items-center justify-between ${
+                                newResUnitNumber === num
+                                  ? 'bg-indigo-600/30 text-indigo-300'
+                                  : 'hover:bg-slate-800 text-slate-200'
+                              }`}
+                            >
+                              <span>Apto {num}</span>
+                              {newResUnitNumber === num && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                            </button>
+                          ))}
+
+                        {Array.from(
+                          new Set(
+                            units
+                              .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
+                              .map((u) => u.unit_number)
+                          )
+                        ).filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase())).length === 0 && (
+                          <div className="px-3.5 py-2.5 text-xs text-slate-400 text-center">
+                            {newResUnitNumber.trim() ? (
+                              <button
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setIsUnitDropdownOpen(false);
+                                }}
+                                className="text-indigo-400 hover:text-indigo-300 font-bold"
+                              >
+                                Usar &quot;Apto {newResUnitNumber}&quot; (Criará unidade)
+                              </button>
+                            ) : (
+                              'Nenhum apartamento cadastrado neste bloco'
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
