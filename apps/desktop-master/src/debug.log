@@ -1,0 +1,34 @@
+[2026-09-11T14:03:25.769Z] Electron starting... PID: 21372
+[2026-09-11T14:03:25.814Z] app.whenReady resolved
+[2026-09-11T14:03:25.814Z] createWindow called
+[2026-09-11T14:03:25.861Z] Loading URL: http://localhost:3000/master/login
+[2026-09-11T14:04:02.095Z] Electron starting... PID: 11216
+[2026-09-11T14:04:02.134Z] app.whenReady resolved
+[2026-09-11T14:04:02.134Z] createWindow called
+[2026-09-11T14:04:02.185Z] Loading URL: http://localhost:3000/master/login
+[2026-09-11T14:04:02.720Z] did-finish-load on: http://localhost:3000/master/login
+[2026-09-11T14:07:09.321Z] Electron starting... PID: 21944
+[2026-09-11T14:07:09.356Z] app.whenReady resolved
+[2026-09-11T14:07:09.357Z] createWindow called
+[2026-09-11T14:07:09.398Z] Loading URL: http://localhost:3000/master/login
+[2026-09-11T14:07:11.856Z] did-fail-load: -102 ERR_CONNECTION_REFUSED http://localhost:3000/master/login
+[2026-09-11T14:07:11.857Z] Fallback to REMOTE_URL
+[2026-09-11T14:07:11.863Z] Failed to load LOCAL_URL, trying REMOTE_URL: ERR_ABORTED (-3) loading 'https://web-eight-rust-97.vercel.app/super-admin'
+[2026-09-11T14:09:34.283Z] Iniciando CondoBox SaaS Master... PID: 2812
+[2026-09-11T14:09:34.319Z] app.whenReady disparado com sucesso.
+[2026-09-11T14:09:34.320Z] Criando janela principal...
+[2026-09-11T14:09:34.373Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T14:09:34.406Z] Porta 3000 nao esta escutando. Iniciando apps/web em background...
+[2026-09-11T14:09:34.409Z] Erro ao iniciar servidor web: spawn EINVAL
+[2026-09-11T14:09:57.914Z] Iniciando CondoBox SaaS Master... PID: 9164
+[2026-09-11T14:09:57.949Z] app.whenReady disparado com sucesso.
+[2026-09-11T14:09:57.950Z] Criando janela principal...
+[2026-09-11T14:09:58.002Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T14:09:58.035Z] Porta 3000 nao esta escutando. Iniciando apps/web em background...
+[2026-09-11T14:09:58.051Z] Processo do servidor web disparado. PID: 21672
+[2026-09-11T14:14:04.679Z] Iniciando CondoBox SaaS Master... PID: 10884
+[2026-09-11T14:14:04.717Z] app.whenReady disparado com sucesso.
+[2026-09-11T14:14:04.717Z] Criando janela principal...
+[2026-09-11T14:14:04.768Z] Carregando loading.html local: C:\Users\Kleber\Condo\apps\desktop-master\src\loading.html
+[2026-09-11T14:14:04.804Z] Porta 3000 nao esta escutando. Iniciando apps/web em background...
+[2026-09-11T14:14:04.819Z] Processo do servidor web disparado. PID: 13924

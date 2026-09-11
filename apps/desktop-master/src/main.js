@@ -1,11 +1,20 @@
-const { app, BrowserWindow, session, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, nativeImage, shell } = require("electron");
+const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const http = require("http");
 
 const APP_TITLE = "CondoBox SaaS Master - Painel do Proprietário";
-const MASTER_PARTITION = "persist:condobox_master_owner";
-const PRIMARY_URL = process.env.CONDOBOX_MASTER_URL || "http://localhost:3000/master/login";
-const REMOTE_URL = "https://web-eight-rust-97.vercel.app/master/login";
+const logFile = path.join(__dirname, "debug.log");
+
+function log(...args) {
+  try {
+    const line = `[${new Date().toISOString()}] ` + args.map(a => typeof a === "object" ? JSON.stringify(a) : a).join(" ") + "\n";
+    fs.appendFileSync(logFile, line);
+  } catch {}
+}
+
+log("Iniciando CondoBox SaaS Master... PID:", process.pid);
 
 app.disableHardwareAcceleration();
 
@@ -13,82 +22,84 @@ if (process.platform === "win32") {
   app.setAppUserModelId("com.condobox.master");
 }
 
-// Garante apenas 1 instância do aplicativo aberta
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-  process.exit(0);
-}
-
 let mainWindow = null;
+let webServerProcess = null;
 
 function getAppIcon() {
-  const customIco = path.join(__dirname, "..", "assets", "icon.ico");
-  const fallbackIco = path.join(__dirname, "..", "..", "desktop", "assets", "icon.ico");
+  const icoPath = path.join(__dirname, "..", "..", "desktop", "assets", "icon.ico");
   const pngPath = path.join(__dirname, "..", "..", "desktop", "assets", "icon.png");
 
-  if (fs.existsSync(customIco)) return nativeImage.createFromPath(customIco);
-  if (fs.existsSync(fallbackIco)) return nativeImage.createFromPath(fallbackIco);
+  if (fs.existsSync(icoPath)) return nativeImage.createFromPath(icoPath);
   if (fs.existsSync(pngPath)) return nativeImage.createFromPath(pngPath);
   return undefined;
 }
 
-function createMainWindow() {
+function checkPortListening(port) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port, path: "/master/login", timeout: 1000 }, (res) => {
+      resolve(res.statusCode === 200 || res.statusCode === 307 || res.statusCode === 308);
+    });
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function ensureWebServer() {
+  checkPortListening(3000).then((isListening) => {
+    if (!isListening) {
+      log("Porta 3000 nao esta escutando. Iniciando apps/web em background...");
+      const webDir = path.resolve(__dirname, "..", "..", "web");
+      const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+      
+      try {
+        webServerProcess = spawn(npmCmd, ["run", "dev"], {
+          cwd: webDir,
+          stdio: "ignore",
+          windowsHide: true,
+          shell: true,
+        });
+        log("Processo do servidor web disparado. PID:", webServerProcess.pid);
+      } catch (err) {
+        log("Erro ao iniciar servidor web:", err.message);
+      }
+    } else {
+      log("Servidor web ja esta rodando na porta 3000.");
+    }
+  });
+}
+
+function createWindow() {
+  log("Criando janela principal...");
   const icon = getAppIcon();
-  const masterSession = session.fromPartition(MASTER_PARTITION);
-  masterSession.setUserAgent(masterSession.getUserAgent() + " CondoBox-Master-Desktop/1.0");
 
   mainWindow = new BrowserWindow({
     width: 1400,
-    height: 880,
+    height: 900,
     minWidth: 1024,
     minHeight: 650,
     autoHideMenuBar: true,
-    titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#020617",
-      symbolColor: "#c084fc",
-      height: 40,
-    },
     title: APP_TITLE,
-    show: true, // Abre IMEDIATAMENTE visível na tela
     backgroundColor: "#020617",
     icon: icon,
+    show: true,
     webPreferences: {
-      session: masterSession,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
     },
   });
 
   if (icon) mainWindow.setIcon(icon);
 
-  mainWindow.webContents.on("dom-ready", () => {
-    mainWindow.webContents.insertCSS(`
-      * {
-        -webkit-user-drag: none !important;
-        user-drag: none !important;
-      }
-      input, textarea, [contenteditable="true"] {
-        -webkit-user-select: text !important;
-        user-select: text !important;
-      }
-    `);
-  });
+  // Carrega imediatamente a tela de abertura local
+  const loadingHtmlPath = path.join(__dirname, "loading.html");
+  log("Carregando loading.html local:", loadingHtmlPath);
+  mainWindow.loadFile(loadingHtmlPath);
 
-  // Tenta carregar primeiro o servidor local mais recente
-  mainWindow.loadURL(PRIMARY_URL).catch((err) => {
-    console.warn("[Master App] Local indisponível, tentando nuvem:", err?.message);
-    mainWindow.loadURL(REMOTE_URL).catch(() => {});
-  });
-
-  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    if (validatedURL === PRIMARY_URL) {
-      console.warn(`[Master App] Falha ao carregar ${PRIMARY_URL}. Alternando para nuvem...`);
-      mainWindow.loadURL(REMOTE_URL).catch(() => {});
-    }
-  });
+  // Garante inicializacao do servidor web se necessario
+  ensureWebServer();
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http:") || url.startsWith("https:")) {
@@ -98,28 +109,30 @@ function createMainWindow() {
   });
 
   mainWindow.on("closed", () => {
+    log("Janela principal fechada pelo usuario.");
     mainWindow = null;
   });
 }
 
-app.on("second-instance", () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
-});
-
 app.whenReady().then(() => {
-  createMainWindow();
+  log("app.whenReady disparado com sucesso.");
+  createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+      createWindow();
     }
   });
 });
 
 app.on("window-all-closed", () => {
+  log("Todas as janelas foram fechadas.");
+  if (webServerProcess) {
+    try {
+      log("Encerrando processo do servidor web...");
+      webServerProcess.kill();
+    } catch {}
+  }
   if (process.platform !== "darwin") {
     app.quit();
   }

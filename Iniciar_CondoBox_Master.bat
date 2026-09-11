@@ -1,37 +1,20 @@
 @echo off
-chcp 65001 > nul
 title CondoBox SaaS Master
 
-set ROOT_DIR=%~dp0
+REM 1. Fecha eventuais instancias anteriores do Electron
+taskkill /F /IM electron.exe >nul 2>&1
 
-echo =======================================================
-echo    👑 CONDOBOX SAAS MASTER - PROGRAMA DO PROPRIETÁRIO
-echo =======================================================
-echo.
+set "ELECTRON_EXE=%~dp0apps\desktop\node_modules\electron\dist\electron.exe"
+set "APP_DIR=%~dp0apps\desktop-master"
 
-:: 1. Fecha instâncias zumbis anteriores que poderiam travar a sessão
-taskkill /F /IM electron.exe 2>nul
-
-:: 2. Verifica se o servidor local do sistema está ativo
-netstat -ano | findstr :3000 >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-    echo [1/2] Iniciando servidor web do sistema...
-    start "CondoBox Server" /min cmd /c "cd /d %ROOT_DIR%apps\web && npm run dev"
-    timeout /t 4 /nobreak >nul
-) else (
-    echo [1/2] Servidor web já está ativo.
-)
-
-:: 3. Abre o programa do proprietário
-echo [2/2] Abrindo aplicativo CondoBox Master...
-cd /d "%ROOT_DIR%apps\desktop-master"
-
-if exist "..\desktop\node_modules\electron\dist\electron.exe" (
-    start "" "..\desktop\node_modules\electron\dist\electron.exe" .
+REM 2. Inicia o aplicativo Desktop Master diretamente
+if exist "%ELECTRON_EXE%" (
+    start "" /d "%APP_DIR%" "%ELECTRON_EXE%" "%APP_DIR%"
     exit
 )
 
-where electron >nul 2>nul
+cd /d "%APP_DIR%"
+where electron >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     start "" electron .
     exit

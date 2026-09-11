@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CondoBox SaaS Master - Conectando...</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: radial-gradient(circle at top center, #1e1b4b 0%, #020617 100%);
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      width: 100vw;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow: hidden;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(168, 85, 247, 0.12);
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      color: #c084fc;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.2);
+    }
+    .badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #a855f7;
+      box-shadow: 0 0 10px #a855f7;
+      animation: pulse 1.5s infinite;
+    }
+    .title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 36px;
+    }
+    .loader-container {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      margin-bottom: 24px;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 3px solid rgba(168, 85, 247, 0.15);
+      border-top-color: #a855f7;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    .status-text {
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 500;
+      animation: fade 2s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    @keyframes fade {
+      0%, 100% { opacity: 0.7; }
+      50% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="badge">
+    <span class="badge-dot"></span>
+    Painel do Proprietário
+  </div>
+
+  <h1 class="title">CondoBox SaaS Master</h1>
+  <p class="subtitle">Inicializando ambiente executivo seguro...</p>
+
+  <div class="loader-container">
+    <div class="spinner"></div>
+  </div>
+
+  <div class="status-text" id="status">Conectando ao núcleo do sistema...</div>
+
+  <script>
+    const TARGET_LOCAL = 'http://localhost:3000/master/login';
+    const TARGET_REMOTE = 'https://web-eight-rust-97.vercel.app/super-admin';
+    const statusEl = document.getElementById('status');
+    let attempts = 0;
+
+    async function tryConnect() {
+      attempts++;
+      try {
+        const res = await fetch(TARGET_LOCAL, { method: 'HEAD', cache: 'no-store' });
+        if (res.status === 200 || res.status === 307 || res.status === 308) {
+          statusEl.textContent = 'Carregando portal executivo...';
+          window.location.replace(TARGET_LOCAL);
+          return;
+        }
+      } catch (err) {}
+
+      if (attempts > 12) {
+        statusEl.textContent = 'Conectando ao servidor em nuvem...';
+        try {
+          const resRemote = await fetch(TARGET_REMOTE, { method: 'HEAD', mode: 'no-cors' });
+          window.location.replace(TARGET_REMOTE);
+          return;
+        } catch (e2) {}
+      }
+
+      setTimeout(tryConnect, 600);
+    }
+
+    tryConnect();
+  </script>
+</body>
+</html>
