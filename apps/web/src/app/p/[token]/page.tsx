@@ -56,6 +56,39 @@ export default function PublicPackagePage() {
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [connectedWhatsappPhone, setConnectedWhatsappPhone] = useState<string | null>(null);
+
+  // Sincronização em tempo real do número ativo do WhatsApp conectado via QR Code na portaria
+  useEffect(() => {
+    const supabase = createClient();
+    const bridgeCh = supabase.channel('whatsapp_bridge', { config: { broadcast: { self: false } } });
+
+    bridgeCh.on('broadcast', { event: 'status_sync' }, ({ payload }: any) => {
+      if (payload?.phone) {
+        const clean = payload.phone.replace(/\D/g, '');
+        if (clean) setConnectedWhatsappPhone(clean);
+      }
+    });
+
+    bridgeCh.subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        bridgeCh.send({ type: 'broadcast', event: 'request_status', payload: {} });
+      }
+    });
+
+    LocalApiClient.getWhatsAppStatus()
+      .then((st) => {
+        if (st?.phone) {
+          const clean = st.phone.replace(/\D/g, '');
+          if (clean) setConnectedWhatsappPhone(clean);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      supabase.removeChannel(bridgeCh);
+    };
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -274,6 +307,11 @@ export default function PublicPackagePage() {
     : '';
 
   const isDelivered = pkg?.status === 'DELIVERED';
+  const targetWhatsappPhone = (
+    connectedWhatsappPhone ||
+    (pkg?.condo_phone && pkg.condo_phone !== '5511988887777' ? pkg.condo_phone : null) ||
+    '557398419901'
+  ).replace(/\D/g, '');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-4 sm:p-6 selection:bg-emerald-500 selection:text-slate-950">
@@ -403,7 +441,7 @@ export default function PublicPackagePage() {
                         setIsUnlocked(true);
                         localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
                         // Usa o scheme nativo do WhatsApp em vez do wa.me para evitar a página intermediária no navegador
-                        const whatsappUrl = `whatsapp://send?phone=557398419901&text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
+                        const whatsappUrl = `whatsapp://send?phone=${targetWhatsappPhone}&text=${encodeURIComponent(`Estou ciente da encomenda ${pkg.pickup_code}`)}`;
                         // Cria um iframe invisível para forçar a abertura do app nativo sem navegar a página atual
                         const iframe = document.createElement('iframe');
                         iframe.style.display = 'none';
@@ -549,7 +587,7 @@ export default function PublicPackagePage() {
                 
                 {/* Botão Não fiz a retirada - Fundo Vermelho Vibrante, Texto Branco */}
                 <a
-                  href={`https://wa.me/${(pkg?.condo_phone?.replace(/\D/g, '') || '557398419901')}?text=${encodeURIComponent(
+                  href={`https://wa.me/${targetWhatsappPhone}?text=${encodeURIComponent(
                     `⚠️ *CONTESTAÇÃO DE RETIRADA*\n\nOlá, consta no sistema que a minha encomenda de *${pkg?.carrier || 'encomenda'}* (Código: *${pkg?.pickup_code}*, Destinatário: *${pkg?.recipient_name}*, Unidade: *${pkg?.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'minha unidade'}*) foi registrada como retirada, mas eu *NÃO FIZ A RETIRADA*!\n\nSolicito verificar na portaria com urgência.`
                   )}`}
                   target="_blank"

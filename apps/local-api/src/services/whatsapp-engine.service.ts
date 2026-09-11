@@ -90,6 +90,14 @@ export class WhatsAppEngineService {
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.sessionDir);
+      if (state.creds?.me?.id) {
+        const meId = state.creds.me.id;
+        this.connectedPhone = meId.split(':')[0] || meId.split('@')[0];
+        if (this.connectedPhone) {
+          this.syncConnectedPhoneToCondo(this.connectedPhone);
+        }
+      }
+
       const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] as [number, number, number] }));
 
       const logger = pino({ level: 'silent' });
@@ -118,7 +126,7 @@ export class WhatsAppEngineService {
             console.log('📲 [WhatsApp Engine] Novo QR Code gerado para pareamento da Portaria.');
             this.broadcastStatus();
           } catch (err: any) {
-            console.error('[WhatsApp Engine] Erro ao converter QR Code:', err.message);
+            console.error('[WhatsApp Engine] Erro ao gerar QR Code base64:', err.message);
           }
         }
 
@@ -154,6 +162,9 @@ export class WhatsAppEngineService {
           this.connectedPhone = userJid.split(':')[0] || userJid.split('@')[0] || 'Conectado';
 
           console.log(`✅ [WhatsApp Engine] Conexão ativa com sucesso! Número: ${this.connectedPhone}`);
+          if (this.connectedPhone && this.connectedPhone !== 'Conectado') {
+            this.syncConnectedPhoneToCondo(this.connectedPhone);
+          }
           this.broadcastStatus();
         }
       });
@@ -294,6 +305,26 @@ export class WhatsAppEngineService {
         payload: st
       }).catch(() => {});
     } catch {}
+  }
+
+  public syncConnectedPhoneToCondo(phone: string): void {
+    const clean = phone.replace(/\D/g, '');
+    if (!clean || clean.length < 8) return;
+    if (supabaseService.isConfigured()) {
+      const client = supabaseService.getClient();
+      client
+        .from('condos')
+        .update({ phone: clean })
+        .neq('id', '00000000-0000-0000-0000-000000000000')
+        .then(
+          () => {
+            console.log(`🏢 [WhatsApp Engine] Telefone da portaria sincronizado no condomínio: +${clean}`);
+          },
+          (err: any) => {
+            console.warn('[WhatsApp Engine] Erro ao sincronizar telefone no condomínio:', err?.message);
+          }
+        );
+    }
   }
 
   public async resolveJid(phone: string): Promise<string> {

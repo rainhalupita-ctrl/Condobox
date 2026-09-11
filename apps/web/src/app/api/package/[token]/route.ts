@@ -141,7 +141,7 @@ export async function GET(
             block: pkg.unit.block,
             unit_number: pkg.unit.unit_number
           } : null,
-          condo_phone: pkg.condo?.phone || null
+          condo_phone: (pkg.condo?.phone && pkg.condo.phone !== '5511988887777') ? pkg.condo.phone : '557398419901'
         },
         ad: activeAd
       },
