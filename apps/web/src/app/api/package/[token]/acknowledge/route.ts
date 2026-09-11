@@ -26,8 +26,8 @@ async function dispatchWhatsAppMessage({
 
   const formattedPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
 
-  // 1. Tenta Evolution API
-  const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
+  // 1. Tenta Evolution API (se configurada explicitamente e alcançável)
+  const evolutionUrl = process.env.EVOLUTION_API_URL;
   const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
   const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
 
@@ -43,7 +43,7 @@ async function dispatchWhatsAppMessage({
           number: formattedPhone,
           text: message,
         }),
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(4000),
       });
 
       if (res.ok) {
@@ -55,43 +55,105 @@ async function dispatchWhatsAppMessage({
     }
   }
 
-  // 2. Tenta API Local do CondoBox (Porta 3001)
-  const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001';
-  try {
-    const res = await fetch(`${localApiUrl.replace(/\/$/, '')}/api/whatsapp/test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phone: formattedPhone,
-        message,
-      }),
-      signal: AbortSignal.timeout(4000),
-    });
+  // 2. Tenta API Local do CondoBox (Porta 3001) se estiver na mesma rede/localhost
+  const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL;
+  if (localApiUrl) {
+    try {
+      const res = await fetch(`${localApiUrl.replace(/\/$/, '')}/api/whatsapp/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: formattedPhone,
+          message,
+        }),
+        signal: AbortSignal.timeout(3000),
+      });
 
-    if (res.ok) {
-      console.log(`[Acknowledge] WhatsApp enviado via API Local para ${formattedPhone}`);
-      return { success: true, method: 'local-api' };
+      if (res.ok) {
+        console.log(`[Acknowledge] WhatsApp enviado via API Local para ${formattedPhone}`);
+        return { success: true, method: 'local-api' };
+      }
+    } catch (err: any) {
+      console.warn(`[Acknowledge] API Local indisponível (${err.message})`);
     }
-  } catch (err: any) {
-    console.warn(`[Acknowledge] API Local indisponível (${err.message}), enfileirando no Supabase...`);
   }
 
-  // 3. Fallback: Fila Realtime do Supabase (fila_mensagens)
-  // O aplicativo desktop da portaria consome esta tabela em tempo real via WebSocket
+  // 3. Registra na tabela notifications_log (status: PENDING) como fila de persistência
+  let logId: string | undefined;
   try {
-    const { error: queueErr } = await supabase.from('fila_mensagens').insert({
-      package_id: packageId,
-      phone: formattedPhone,
-      message,
-      tipo: 'AVISO',
-    });
+    const { data: logRow, error: logErr } = await supabase
+      .from('notifications_log')
+      .insert({
+        package_id: packageId,
+        channel: 'WHATSAPP',
+        recipient_phone: formattedPhone,
+        message_content: message,
+        status: 'PENDING',
+      })
+      .select('id')
+      .single();
 
-    if (!queueErr) {
-      console.log(`[Acknowledge] Mensagem inserida na fila_mensagens para ${formattedPhone}`);
-      return { success: true, method: 'supabase-queue' };
+    if (!logErr && logRow?.id) {
+      logId = logRow.id;
     }
   } catch (err: any) {
-    console.warn(`[Acknowledge] Falha ao enfileirar no Supabase: ${err.message}`);
+    console.warn(`[Acknowledge] Falha ao registrar notifications_log: ${err.message}`);
+  }
+
+  // 4. Ponte Supabase Realtime (Canal whatsapp_bridge)
+  // O aplicativo CondoBox desktop (computador da portaria) escuta este canal via WebSocket
+  // e envia instantaneamente via Baileys/WhatsAppEngine
+  try {
+    const bridgeCh = supabase.channel('whatsapp_bridge');
+    const broadcastPromise = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        try { supabase.removeChannel(bridgeCh); } catch {}
+        resolve(false);
+      }, 2500);
+
+      bridgeCh.subscribe(async (status: string) => {
+        if (status === 'SUBSCRIBED') {
+          try {
+            await bridgeCh.send({
+              type: 'broadcast',
+              event: 'send_message',
+              payload: {
+                phone: formattedPhone,
+                message,
+                logId,
+                packageId,
+              },
+            });
+            setTimeout(() => {
+              clearTimeout(timer);
+              try { supabase.removeChannel(bridgeCh); } catch {}
+              resolve(true);
+            }, 300);
+          } catch {
+            clearTimeout(timer);
+            try { supabase.removeChannel(bridgeCh); } catch {}
+            resolve(false);
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          clearTimeout(timer);
+          try { supabase.removeChannel(bridgeCh); } catch {}
+          resolve(false);
+        }
+      });
+    });
+
+    const broadcastOk = await broadcastPromise;
+    if (broadcastOk) {
+      console.log(`[Acknowledge] Mensagem transmitida via Realtime Bridge para ${formattedPhone}`);
+      return { success: true, method: 'realtime-bridge' };
+    }
+  } catch (err: any) {
+    console.warn(`[Acknowledge] Falha no canal Realtime: ${err.message}`);
+  }
+
+  // Se o logId foi inserido como PENDING, o worker no desktop vai consumir
+  if (logId) {
+    return { success: true, method: 'supabase-queue' };
   }
 
   return { success: false, method: 'failed' };
@@ -214,17 +276,6 @@ export async function POST(
       })
       .eq('id', pkg.id);
 
-    // Registra log na tabela de notificações
-    if (recipientPhone) {
-      supabase.from('notifications_log').insert({
-        package_id: pkg.id,
-        resident_id: pkg.resident_id || null,
-        channel: 'WHATSAPP',
-        recipient_phone: recipientPhone.replace(/\D/g, ''),
-        message_content: message,
-        status: whatsappSent ? 'SENT' : 'PENDING_QUEUE',
-      }).then(() => {});
-    }
 
     return NextResponse.json({
       success: true,

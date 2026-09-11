@@ -73,6 +73,16 @@ export class WhatsAppQueueWorker {
             }
           }
         )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'notifications_log' },
+          async (payload) => {
+            if (payload.new?.status === 'PENDING') {
+              console.log('⚡ [WhatsApp Worker] Nova mensagem pendente em notifications_log:', payload.new?.id);
+              this.processQueue();
+            }
+          }
+        )
         .subscribe((status) => {
           console.log(`📡 [WhatsApp Worker] Realtime canal: ${status}`);
         });
@@ -155,6 +165,42 @@ export class WhatsAppQueueWorker {
           await this.dispatchDeliveryNotification(pkg.id, pkg);
         } else {
           this.processedDeliveryIds.add(pkg.id);
+        }
+      }
+
+      // 3. Fila de Notificações / Confirmações Pendentes (notifications_log)
+      const { data: pendingLogs } = await client
+        .from('notifications_log')
+        .select('*')
+        .eq('status', 'PENDING')
+        .order('created_at', { ascending: true })
+        .limit(10);
+
+      for (const logItem of pendingLogs || []) {
+        if (logItem.recipient_phone && logItem.message_content) {
+          try {
+            await client.from('notifications_log').update({ status: 'PROCESSING' }).eq('id', logItem.id);
+            const res = await whatsappService.sendMessage({
+              phone: logItem.recipient_phone,
+              message: logItem.message_content
+            });
+            if (res.success) {
+              console.log('✅ [WhatsApp Worker] Notificação de log enviada com sucesso para:', logItem.recipient_phone);
+              await client.from('notifications_log').update({
+                status: 'SENT',
+                sent_at: new Date().toISOString(),
+                external_message_id: res.messageId || 'queue-worker'
+              }).eq('id', logItem.id);
+            } else {
+              console.warn('⚠️ [WhatsApp Worker] Falha ao enviar notificação de log:', res.error);
+              await client.from('notifications_log').update({
+                status: 'FAILED',
+                error_message: res.error || 'Falha no envio'
+              }).eq('id', logItem.id);
+            }
+          } catch (e: any) {
+            console.error('[WhatsApp Worker] Erro ao processar log pendente:', e.message);
+          }
         }
       }
     } catch (err: any) {

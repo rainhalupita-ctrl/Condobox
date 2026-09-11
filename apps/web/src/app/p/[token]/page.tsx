@@ -41,6 +41,12 @@ interface PublicPackageData {
     block: string;
     unit_number: string;
   } | null;
+  resident?: {
+    name?: string;
+    phone?: string;
+  } | null;
+  phone?: string | null;
+  recipient_name_ocr?: string | null;
   condo_phone?: string | null;
 }
 
@@ -295,8 +301,38 @@ export default function PublicPackagePage() {
       localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
     }
 
-    // 2. Dispara a mensagem automática no WhatsApp via Evolution API / backend
+    // 2. Dispara a mensagem automática no WhatsApp via Evolution API / backend / Realtime Bridge
     try {
+      // Disparo em paralelo via Realtime Broadcast direto do navegador para latência instantânea
+      try {
+        const supabase = createClient();
+        const bridge = supabase.channel('whatsapp_bridge');
+        bridge.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            const resPhone = pkg.phone || (pkg.resident as any)?.phone;
+            const targetPhone = resPhone || targetWhatsappPhone;
+            const resName = (pkg.resident as any)?.name || pkg.recipient_name_ocr || 'Morador';
+            const unitInfo = pkg.unit ? `Bloco ${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : '';
+            if (targetPhone) {
+              bridge.send({
+                type: 'broadcast',
+                event: 'send_message',
+                payload: {
+                  phone: targetPhone,
+                  message: `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\nOlá, *${resName}*!\nRegistramos com sucesso sua confirmação para a encomenda da *${pkg.carrier || 'encomenda'}* (${unitInfo}).\n\n🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n🏢 *Portaria:* Notificação confirmada. Apresente o QR Code no balcão para retirar.`,
+                  packageId: pkg.id,
+                }
+              }).catch(() => {});
+            }
+            setTimeout(() => {
+              try { supabase.removeChannel(bridge); } catch {}
+            }, 1200);
+          }
+        });
+      } catch (e) {
+        console.warn('[Realtime Broadcast Error]', e);
+      }
+
       const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
       const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
         method: 'POST',

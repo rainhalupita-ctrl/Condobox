@@ -284,6 +284,29 @@ export class WhatsAppEngineService {
           console.log('📡 [WhatsApp Bridge] Frontend solicitou logout via Realtime.');
           await this.logout().catch(() => {});
         })
+        .on('broadcast', { event: 'send_message' }, async ({ payload }: any) => {
+          console.log('📡 [WhatsApp Bridge] Solicitação de envio recebida via Realtime:', payload);
+          const targetPhone = payload?.phone || payload?.number;
+          const targetText = payload?.message || payload?.text;
+          if (targetPhone && targetText) {
+            try {
+              const res = await this.sendTextMessage(targetPhone, targetText);
+              console.log('✅ [WhatsApp Bridge] Mensagem enviada com sucesso:', res);
+              if (payload?.logId && res.success && supabaseService.isConfigured()) {
+                await supabaseService.getClient()
+                  .from('notifications_log')
+                  .update({
+                    status: 'SENT',
+                    sent_at: new Date().toISOString(),
+                    external_message_id: res.messageId || 'realtime-bridge'
+                  })
+                  .eq('id', payload.logId);
+              }
+            } catch (err: any) {
+              console.error('❌ [WhatsApp Bridge] Erro ao enviar mensagem via Realtime:', err?.message);
+            }
+          }
+        })
         .subscribe((status: string) => {
           if (status === 'SUBSCRIBED') {
             console.log('✅ [WhatsApp Bridge] Ponte Supabase Realtime conectada.');
