@@ -10,7 +10,7 @@ const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
 };
 
 // Rotas públicas (sem autenticação necessária)
-const PUBLIC_PATHS = ['/login', '/cadastro', '/p', '/encomenda'];
+const PUBLIC_PATHS = ['/login', '/cadastro', '/p', '/encomenda', '/master/login'];
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -52,11 +52,28 @@ export async function middleware(request: NextRequest) {
   // Permitir rotas públicas sempre
   const isPublic = PUBLIC_PATHS.some(p => pathname.startsWith(p));
   if (isPublic) {
-    // Se já está logado e tenta acessar /login ou /cadastro, redireciona para a home
+    // Se já está logado e acessa /master/login, redireciona para /super-admin se for dono
+    if (user && pathname.startsWith('/master/login')) {
+      const profile = await supabase
+        .from('profiles')
+        .select('role, condo_id')
+        .eq('id', user.id)
+        .single();
+      const userEmail = (user.email || '').toLowerCase();
+      const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+        .split(',')
+        .map(e => e.trim().toLowerCase());
+      const isMasterOwner = (profile.data?.role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+      if (isMasterOwner) {
+        return NextResponse.redirect(new URL('/super-admin', request.url));
+      }
+    }
+
+    // Se já está logado e tenta acessar /login ou /cadastro, redireciona para o destino
     if (user && (pathname === '/login' || pathname === '/cadastro')) {
       const profile = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, condo_id')
         .eq('id', user.id)
         .single();
       const role = profile.data?.role || 'RESIDENT';
@@ -93,7 +110,11 @@ export async function middleware(request: NextRequest) {
   // Usuário não autenticado tentando acessar rota protegida
   if (!user) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    if (pathname.startsWith('/super-admin')) {
+      url.pathname = '/master/login';
+    } else {
+      url.pathname = '/login';
+    }
     url.searchParams.set('redirect', pathname);
     return NextResponse.redirect(url);
   }

@@ -55,6 +55,7 @@ function createSplash() {
 function createMainWindow() {
   const icon = getAppIcon();
   const masterSession = session.fromPartition(MASTER_PARTITION);
+  masterSession.setUserAgent(masterSession.getUserAgent() + " CondoBox-Master-Desktop/1.0");
 
   mainWindow = new BrowserWindow({
     width: 1440,
