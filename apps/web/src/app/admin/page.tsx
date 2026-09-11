@@ -1170,64 +1170,8 @@ export default function AdminPage() {
       {activeTab === 'SYSTEM' && (
         <div className="space-y-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
-            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Server className="w-5 h-5 text-indigo-400" />
-              Status dos Serviços da Arquitetura
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200">Local API (Porta 3001)</span>
-                  <span className="text-emerald-400 font-semibold">Online</span>
-                </div>
-                <p className="text-slate-400 text-[11px]">
-                  Executando no PC da portaria, cuidando do OCR Gemini, uploads em disco e servidor estático.
-                </p>
-              </div>
-
-              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200">Motor WhatsApp Nativo (Baileys All-in-One)</span>
-                  <span className={whatsappState.connected ? 'text-emerald-400 font-semibold flex items-center gap-1' : 'text-amber-400 font-semibold flex items-center gap-1'}>
-                    <span className={`w-2 h-2 rounded-full ${whatsappState.connected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
-                    {whatsappState.connected ? 'WhatsApp Conectado' : 'Pronto para Pareamento'}
-                  </span>
-                </div>
-                <p className="text-slate-400 text-[11px]">
-                  Motor Baileys 100% integrado ao aplicativo. Zero Docker, zero containers e custo R$0.
-                </p>
-              </div>
-
-              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200">Banco Supabase (PostgreSQL)</span>
-                  <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                    Sincronizado
-                  </span>
-                </div>
-                <p className="text-slate-400 text-[11px]">
-                  Tabelas com Row Level Security (RLS) e Realtime para atualização instantânea dos dashboards.
-                </p>
-              </div>
-
-              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200">Google Gemini Vision OCR</span>
-                  <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                    Ativo (Gemini 3.5)
-                  </span>
-                </div>
-                <p className="text-slate-400 text-[11px]">
-                  Visão computacional processando etiquetas em alta velocidade ($0 de custo).
-                </p>
-              </div>
-            </div>
-
             {/* PAINEL DE PAREAMENTO DO WHATSAPP */}
-            <div className="mt-6 pt-6 border-t border-slate-800 space-y-4">
+            <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
@@ -1235,8 +1179,6 @@ export default function AdminPage() {
                     Conexão do WhatsApp da Portaria
                   </h4>
                   <p className="text-slate-400 text-xs mt-0.5 flex items-center gap-2 flex-wrap">
-                    <span>Motor: <code className="text-emerald-300 font-mono">Baileys Nativo</code></span>
-                    <span>|</span>
                     <span>Status: <span className={whatsappState.connected ? 'text-emerald-400 font-bold' : (whatsappState.status === 'CONNECTING' ? 'text-amber-300 font-bold' : 'text-rose-400 font-bold')}>
                       {whatsappState.connected ? '● CONECTADO' : (whatsappState.status === 'CONNECTING' ? '⏳ CONECTANDO...' : '○ DESCONECTADO')}
                     </span></span>
@@ -1335,14 +1277,14 @@ export default function AdminPage() {
                 )}
               </form>
 
-              {/* Caixa Informativa do Motor Nativo */}
+              {/* Caixa Informativa do WhatsApp */}
               <div className="bg-slate-950/60 border border-emerald-500/20 rounded-2xl p-4 text-[11px] text-slate-400 space-y-2">
                 <p className="font-bold text-slate-200 flex items-center gap-1.5">
                   <Sparkles size={14} className="text-emerald-400" />
-                  Conexão Nativa Direta (Sem Docker):
+                  Instruções de Conexão:
                 </p>
                 <p className="text-slate-300 text-xs leading-relaxed">
-                  O CondoBox utiliza o motor <strong>Baileys Nativo</strong> 100% embutido. Não requer Docker Desktop nem configurações complexas. Basta clicar em <strong>"Gerar QR Code de Conexão"</strong> e apontar a câmera do WhatsApp para autenticar o computador da portaria.
+                  Basta clicar em <strong>&quot;Gerar QR Code de Conexão&quot;</strong> e apontar a câmera do WhatsApp para autenticar o computador da portaria e habilitar o envio de avisos aos moradores.
                 </p>
               </div>
             </div>
