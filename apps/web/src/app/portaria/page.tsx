@@ -9,6 +9,7 @@ import { SubscriptionGate } from '../../components/SubscriptionGate';
 import { VoiceService } from '../../lib/voice';
 import { LocalApiClient } from '../../lib/local-api';
 import { createClient } from '../../lib/supabase/client';
+import { useAuth } from '../../contexts/auth-context';
 import {
   Camera,
   QrCode,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react';
 
 export default function PortariaDashboardPage() {
+  const { effectiveCondoId, loading: authLoading } = useAuth();
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +39,12 @@ export default function PortariaDashboardPage() {
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   const loadPackages = async () => {
+    if (authLoading) return;
+    if (!effectiveCondoId) {
+      setPackages([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const supabase = createClient();
     try {
@@ -49,6 +57,7 @@ export default function PortariaDashboardPage() {
       const { data, error } = await supabase
         .from('packages')
         .select('*, unit:units(*), resident:residents(*)')
+        .eq('condo_id', effectiveCondoId)
         .order('received_at', { ascending: false });
 
       if (!error && data) {
@@ -65,7 +74,12 @@ export default function PortariaDashboardPage() {
   };
 
   useEffect(() => {
-    loadPackages();
+    if (!authLoading) {
+      loadPackages();
+    }
+  }, [authLoading, effectiveCondoId]);
+
+  useEffect(() => {
 
     const onSetFilter = (e: any) => {
       if (e.detail) setStatusFilter(e.detail);

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '../../../contexts/auth-context';
 import { QRScanner } from '../../../components/qr-scanner';
 import { SignaturePad } from '../../../components/signature-pad';
 import { PackageCard } from '../../../components/package-card';
@@ -22,6 +23,7 @@ import {
 
 export default function RetiradaPage() {
   const router = useRouter();
+  const { effectiveCondoId } = useAuth();
   const [step, setStep] = useState<'SCAN' | 'SIGN' | 'SUCCESS'>('SCAN');
   const [scannedPackage, setScannedPackage] = useState<PackageType | null>(null);
   const [deliveredToName, setDeliveredToName] = useState('');
@@ -59,6 +61,10 @@ export default function RetiradaPage() {
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanCode);
         let query = supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
         
+        if (effectiveCondoId) {
+          query = query.eq('condo_id', effectiveCondoId);
+        }
+
         if (isUUID) {
           query = query.eq('id', cleanCode);
         } else {

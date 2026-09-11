@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Shield, Lock, Mail, Eye, EyeOff, Loader2, ArrowRight, QrCode, LogIn } from 'lucide-react';
 import { QRLoginScanner } from '@/components/qr-login-scanner';
 import Link from 'next/link';
 
-export default function PortariaLoginPage() {
+function PortariaLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/portaria';
@@ -207,5 +207,13 @@ export default function PortariaLoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function PortariaLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Carregando...</div>}>
+      <PortariaLoginForm />
+    </Suspense>
   );
 }

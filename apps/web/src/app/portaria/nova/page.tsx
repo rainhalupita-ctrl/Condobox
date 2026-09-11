@@ -26,6 +26,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import Link from 'next/link';
+import { useAuth } from '../../../contexts/auth-context';
 
 interface RecentSavedPackage {
   id: string;
@@ -39,6 +40,7 @@ interface RecentSavedPackage {
 
 export default function NovaEncomendaPage() {
   const router = useRouter();
+  const { effectiveCondoId, loading: authLoading } = useAuth();
   const [step, setStep] = useState<'CAPTURE' | 'CONFIRM'>('CAPTURE');
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
@@ -78,8 +80,10 @@ export default function NovaEncomendaPage() {
   const [duplicateWarning, setDuplicateWarning] = useState<any | null>(null);
 
   useEffect(() => {
-    loadUnitsAndResidents();
-  }, []);
+    if (!authLoading) {
+      loadUnitsAndResidents();
+    }
+  }, [authLoading, effectiveCondoId]);
 
   // Escuta enriquecimento em segundo plano (Estágio 2 do OCR live)
   // Atualiza campos que o Estágio 1 (rápido) não preencheu: nome, transportadora, rastreio, morador
@@ -204,6 +208,12 @@ export default function NovaEncomendaPage() {
   }, [recentSaved, lastNotificationToast]);
 
   const loadUnitsAndResidents = async () => {
+    if (authLoading) return;
+    if (!effectiveCondoId) {
+      setUnits([]);
+      setResidents([]);
+      return;
+    }
     const supabase = createClient();
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -212,8 +222,19 @@ export default function NovaEncomendaPage() {
         return;
       }
 
-      const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
-      const { data: rData } = await supabase.from('residents').select('*').eq('active', true);
+      const { data: uData } = await supabase
+        .from('units')
+        .select('*')
+        .eq('condo_id', effectiveCondoId)
+        .order('block')
+        .order('unit_number');
+
+      const { data: rData } = await supabase
+        .from('residents')
+        .select('*, unit:units!inner(*)')
+        .eq('unit.condo_id', effectiveCondoId)
+        .eq('active', true);
+
       if (uData) {
         const uniqueMap = new Map<string, Unit>();
         uData.forEach((u) => {
@@ -227,8 +248,11 @@ export default function NovaEncomendaPage() {
         if (dedupedUnits.length > 0 && !selectedBlock) {
           setSelectedBlock(dedupedUnits[0].block || 'Bloco A');
         }
+      } else {
+        setUnits([]);
       }
       if (rData) setResidents(rData);
+      else setResidents([]);
     } catch (err) {
       console.error('Erro ao carregar unidades e moradores:', err);
     }
@@ -441,6 +465,10 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         .select('id, tracking_code, notes, created_at, status, unit:units(block, unit_number), carrier')
         .eq('status', 'RECEIVED');
 
+      if (effectiveCondoId) {
+        query = query.eq('condo_id', effectiveCondoId);
+      }
+
       if (code && code.trim().length >= 4) {
         query = query.eq('tracking_code', code.trim());
       } else if (nf && nf.trim().length >= 3) {
@@ -503,6 +531,7 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
       }
 
       const res = await LocalApiClient.createPackage({
+        condoId: effectiveCondoId,
         unitId: selectedUnitId,
         residentId: selectedResidentId || null,
         carrier: carrier,

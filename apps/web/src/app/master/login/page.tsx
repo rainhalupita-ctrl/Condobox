@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ShieldAlert, Lock, Mail, Eye, EyeOff, Loader2, KeyRound, ArrowRight } from 'lucide-react';
 
-export default function MasterLoginPage() {
+function MasterLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/super-admin';
@@ -190,5 +190,13 @@ export default function MasterLoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MasterLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Carregando...</div>}>
+      <MasterLoginForm />
+    </Suspense>
   );
 }

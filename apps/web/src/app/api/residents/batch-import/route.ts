@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const { residents } = await req.json();
+    const { residents, condoId } = await req.json();
 
     if (!residents || !Array.isArray(residents) || residents.length === 0) {
       return NextResponse.json({ error: 'Nenhum registro para importar.' }, { status: 400 });
@@ -20,8 +20,12 @@ export async function POST(req: NextRequest) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Carrega todas as unidades existentes
-    const { data: existingUnits, error: uErr } = await supabase.from('units').select('id, block, unit_number');
+    // 1. Carrega todas as unidades existentes do condomínio ativo
+    let unitQuery = supabase.from('units').select('id, block, unit_number');
+    if (condoId) {
+      unitQuery = unitQuery.eq('condo_id', condoId);
+    }
+    const { data: existingUnits, error: uErr } = await unitQuery;
     if (uErr) {
       console.error('Erro ao buscar unidades:', uErr);
       return NextResponse.json({ error: 'Falha ao consultar unidades existentes.' }, { status: 500 });
@@ -33,8 +37,8 @@ export async function POST(req: NextRequest) {
       unitMap.set(key, u.id);
     });
 
-    // 2. Identifica e cria novas unidades que ainda não existem
-    const unitsToCreate = new Map<string, { block: string; unit_number: string }>();
+    // 2. Identifica e cria novas unidades que ainda não existem para este condomínio
+    const unitsToCreate = new Map<string, { block: string; unit_number: string; condo_id?: string }>();
     residents.forEach((r) => {
       const block = (r.block || 'Bloco A').trim();
       const unitNumber = String(r.unitNumber || '').trim();
@@ -42,7 +46,11 @@ export async function POST(req: NextRequest) {
 
       const key = `${block.toUpperCase()}__${unitNumber}`;
       if (!unitMap.has(key) && !unitsToCreate.has(key)) {
-        unitsToCreate.set(key, { block, unit_number: unitNumber });
+        unitsToCreate.set(key, {
+          block,
+          unit_number: unitNumber,
+          ...(condoId ? { condo_id: condoId } : {})
+        });
       }
     });
 
@@ -65,8 +73,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Carrega moradores existentes para evitar duplicações
-    const { data: existingResidents } = await supabase.from('residents').select('id, name, phone, unit_id');
+    // 3. Carrega moradores existentes apenas das unidades deste condomínio para evitar duplicações cruzadas
+    const allCondoUnitIds = Array.from(unitMap.values());
+    let resQuery = supabase.from('residents').select('id, name, phone, unit_id');
+    if (allCondoUnitIds.length > 0) {
+      resQuery = resQuery.in('unit_id', allCondoUnitIds);
+    }
+    const { data: existingResidents } = await resQuery;
 
     let createdCount = 0;
     let updatedCount = 0;

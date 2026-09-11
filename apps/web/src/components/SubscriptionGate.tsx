@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '../lib/supabase/client';
+import { useAuth } from '../contexts/auth-context';
 import {
   Lock,
   KeyRound,
@@ -32,6 +33,7 @@ interface Props {
 }
 
 export function SubscriptionGate({ children }: Props) {
+  const { effectiveCondoId, license } = useAuth();
   const [sub, setSub] = useState<SubscriptionData | null>(null);
   const [unitsUsage, setUnitsUsage] = useState<{ current: number; max: number; canAddMore: boolean; percentage: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,22 +43,27 @@ export function SubscriptionGate({ children }: Props) {
 
   useEffect(() => {
     checkLicense();
-  }, []);
+  }, [effectiveCondoId, license]);
 
   const checkLicense = async () => {
     setLoading(true);
     try {
       let realUnitsCount = 0;
       try {
-        const supabase = createClient();
-        const { data: unitsData } = await supabase.from('units').select('block, unit_number');
-        if (unitsData) {
-          const uniqueMap = new Map<string, boolean>();
-          unitsData.forEach((u: any) => {
-            const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
-            uniqueMap.set(key, true);
-          });
-          realUnitsCount = uniqueMap.size;
+        if (effectiveCondoId) {
+          const supabase = createClient();
+          const { data: unitsData } = await supabase
+            .from('units')
+            .select('block, unit_number')
+            .eq('condo_id', effectiveCondoId);
+          if (unitsData) {
+            const uniqueMap = new Map<string, boolean>();
+            unitsData.forEach((u: any) => {
+              const key = `${(u.block || 'Bloco A').trim().toUpperCase()}__${(u.unit_number || '').trim()}`;
+              uniqueMap.set(key, true);
+            });
+            realUnitsCount = uniqueMap.size;
+          }
         }
       } catch {}
 
@@ -77,16 +84,17 @@ export function SubscriptionGate({ children }: Props) {
         }
       }
 
-      // Fallback padrão se API local não responder: Trial Ativo
-      const fallbackDate = new Date(Date.now() + 25 * 86400000).toISOString();
-      const maxUnits = 250;
+      // Fallback padrão se API local não responder: usa a licença real do condomínio do Supabase
+      const fallbackDate = license?.expires_at || new Date(Date.now() + 25 * 86400000).toISOString();
+      const maxUnits = license?.max_apartments || 250;
       const currentCount = realUnitsCount;
+      const planName = license?.plan === 'PRO_MAX' ? 'Plano Pro Max' : (license?.plan === 'PRO' ? 'Plano Pro' : (license?.plan === 'BASIC' ? 'Plano Básico' : 'Teste Grátis 30 Dias'));
       setSub({
-        plan_id: 'TRIAL',
-        status: 'TRIAL',
+        plan_id: (license?.plan as any) || 'TRIAL',
+        status: (license?.status as any) || 'TRIAL',
         current_period_ends_at: fallbackDate,
         plan: {
-          name: 'Teste Grátis 30 Dias',
+          name: planName,
           max_units: maxUnits,
           has_ads: false
         }

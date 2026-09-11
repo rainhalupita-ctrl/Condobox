@@ -178,8 +178,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isPortaria = isSuperAdmin || role === 'SYNDIC' || role === 'GUARD';
   const isAdmin = isSuperAdmin || role === 'SYNDIC';
   const isMorador = isSuperAdmin || role === 'RESIDENT' || role === 'SYNDIC';
-  const effectiveCondoId = impersonatedCondo?.id || profile?.condo_id || null;
-  const isImpersonating = !!impersonatedCondo;
+
+  // Se não for super admin, NUNCA permite impersonação de outro condomínio.
+  // Cada síndico ou porteiro fica 100% isolado no seu próprio condomínio.
+  const effectiveCondoId = isSuperAdmin
+    ? (impersonatedCondo?.id || profile?.condo_id || null)
+    : (profile?.condo_id || null);
+
+  const isImpersonating = isSuperAdmin && !!impersonatedCondo;
+
+  // Se o usuário logado não for super admin mas houver impersonação salva, limpa imediatamente
+  useEffect(() => {
+    if (!loading && profile && !isSuperAdmin && impersonatedCondo) {
+      setImpersonatedCondo(null);
+      try {
+        localStorage.removeItem('condobox_impersonated_condo');
+      } catch {}
+    }
+  }, [loading, profile, isSuperAdmin, impersonatedCondo]);
 
   return (
     <AuthContext.Provider

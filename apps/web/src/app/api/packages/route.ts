@@ -7,6 +7,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const {
+      condoId,
       unitId,
       residentId,
       carrier,
@@ -33,6 +34,13 @@ export async function POST(request: NextRequest) {
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlzdXJudnNlaHZqZHNscG54aXJuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODAzNjM4NCwiZXhwIjoyMTAzNjEyMzg0fQ.2PO_jbeh-rpMmLFbN17aHbJwxHaQr8aeWi6A2hkg708';
     const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
+    // Descobre o condo_id a partir do parâmetro ou consultando a unidade vinculada
+    let targetCondoId = condoId || null;
+    if (!targetCondoId && unitId) {
+      const { data: u } = await supabase.from('units').select('condo_id').eq('id', unitId).single();
+      targetCondoId = u?.condo_id || null;
+    }
+
     // Gera código alfanumérico de 6 caracteres
     const pickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
     const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -41,7 +49,7 @@ export async function POST(request: NextRequest) {
     const { data: newPackage, error: dbError } = await supabase
       .from('packages')
       .insert({
-        condo_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        condo_id: targetCondoId,
         unit_id: unitId,
         resident_id: residentId || null,
         carrier,

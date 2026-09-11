@@ -46,7 +46,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function AdminPage() {
-  const { isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo } = useAuth();
+  const { isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, loading: authLoading } = useAuth();
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
@@ -123,8 +123,10 @@ export default function AdminPage() {
   const [unitResError, setUnitResError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadData();
-  }, [effectiveCondoId]);
+    if (!authLoading) {
+      loadData();
+    }
+  }, [authLoading, effectiveCondoId]);
 
   // Ponte Supabase Realtime para WhatsApp (comunicação instantânea nuvem <-> portaria)
   useEffect(() => {
@@ -178,6 +180,14 @@ export default function AdminPage() {
   }, [activeTab, whatsappQrCode]);
 
   const loadData = async () => {
+    if (authLoading) return;
+    if (!effectiveCondoId) {
+      setUnits([]);
+      setResidents([]);
+      setPackages([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const supabase = createClient();
     try {
@@ -196,19 +206,24 @@ export default function AdminPage() {
         setWhatsappQrCode(wa.qrcode);
       }
 
-      let unitQuery = supabase.from('units').select('*').order('block').order('unit_number');
-      if (effectiveCondoId) {
-        unitQuery = unitQuery.eq('condo_id', effectiveCondoId);
-      }
-      const { data: uData } = await unitQuery;
+      const { data: uData } = await supabase
+        .from('units')
+        .select('*')
+        .eq('condo_id', effectiveCondoId)
+        .order('block')
+        .order('unit_number');
 
-      const { data: rData } = await supabase.from('residents').select('*, unit:units(*)').order('name');
+      const { data: rData } = await supabase
+        .from('residents')
+        .select('*, unit:units!inner(*)')
+        .eq('unit.condo_id', effectiveCondoId)
+        .order('name');
 
-      let pkgQuery = supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
-      if (effectiveCondoId) {
-        pkgQuery = pkgQuery.eq('condo_id', effectiveCondoId);
-      }
-      const { data: pData } = await pkgQuery;
+      const { data: pData } = await supabase
+        .from('packages')
+        .select('*, unit:units(*), resident:residents(*)')
+        .eq('condo_id', effectiveCondoId);
+
       if (uData) {
         // Deduplica unidades caso existam registros repetidos
         const uniqueMap = new Map<string, Unit>();
@@ -219,9 +234,11 @@ export default function AdminPage() {
           }
         });
         setUnits(Array.from(uniqueMap.values()));
+      } else {
+        setUnits([]);
       }
-      if (rData) setResidents(rData);
-      if (pData) setPackages(pData);
+      setResidents(rData || []);
+      setPackages(pData || []);
     } catch (err) {
       console.error('Erro ao carregar dados do admin:', err);
     } finally {
@@ -320,13 +337,19 @@ export default function AdminPage() {
   };
 
   const loadStaff = async () => {
+    if (!effectiveCondoId) {
+      setStaffList([]);
+      return;
+    }
     const supabase = createClient();
     const { data } = await supabase
       .from('profiles')
       .select('id, name, phone, role')
+      .eq('condo_id', effectiveCondoId)
       .in('role', ['GUARD', 'SYNDIC', 'ADMIN'])
       .order('role');
     if (data) setStaffList(data);
+    else setStaffList([]);
   };
 
   const handleCreateStaff = async (e: React.FormEvent) => {
@@ -532,15 +555,20 @@ export default function AdminPage() {
       setBatchError('Configure os parâmetros corretamente.');
       return;
     }
+    if (!effectiveCondoId) {
+      setBatchError('Condomínio não identificado.');
+      return;
+    }
 
     setBatchLoading(true);
     const supabase = createClient();
 
-    const unitsToInsert: { block: string; unit_number: string }[] = [];
+    const unitsToInsert: { condo_id: string; block: string; unit_number: string }[] = [];
     for (let floor = 1; floor <= batchFloors; floor++) {
       for (let apt = batchStartUnit; apt <= batchEndUnit; apt++) {
         const unitNum = `${floor * 100 + apt}`;
         unitsToInsert.push({
+          condo_id: effectiveCondoId,
           block: batchBlock.trim(),
           unit_number: unitNum,
         });
@@ -569,10 +597,15 @@ export default function AdminPage() {
   const handleAddSingleUnit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!singleBlock.trim() || !singleUnitNumber.trim()) return;
+    if (!effectiveCondoId) {
+      alert('Condomínio não identificado.');
+      return;
+    }
 
     setSingleLoading(true);
     const supabase = createClient();
     const { error } = await supabase.from('units').insert({
+      condo_id: effectiveCondoId,
       block: singleBlock.trim(),
       unit_number: singleUnitNumber.trim(),
     });
@@ -686,7 +719,11 @@ export default function AdminPage() {
       if (!unit && supabase) {
         const { data: newUnit, error: uErr } = await supabase
           .from('units')
-          .insert({ block, unit_number: unitNum })
+          .insert({
+            condo_id: effectiveCondoId,
+            block,
+            unit_number: unitNum
+          })
           .select()
           .single();
 

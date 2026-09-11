@@ -101,6 +101,7 @@ export class LocalApiClient {
    * Registra a encomenda e envia notificação no WhatsApp
    */
   static async createPackage(payload: {
+    condoId?: string | null;
     unitId: string;
     residentId?: string | null;
     carrier: string;

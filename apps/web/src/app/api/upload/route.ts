@@ -292,6 +292,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     if (!file) return NextResponse.json({ error: 'Nenhum arquivo enviado' }, { status: 400 });
+    const condoId = (formData.get('condoId') as string | null) || request.headers.get('x-condo-id') || null;
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
@@ -342,6 +343,7 @@ export async function POST(request: NextRequest) {
 
     if (finalOcr.unitNumber) {
       let query = supabase.from('units').select('id, block, unit_number');
+      if (condoId) query = query.eq('condo_id', condoId);
       if (finalOcr.block) query = query.ilike('block', `%${finalOcr.block.replace(/bloco\s*/i, '').trim()}%`);
       query = query.ilike('unit_number', `%${finalOcr.unitNumber.trim()}%`);
       const { data: units } = await query.limit(1);

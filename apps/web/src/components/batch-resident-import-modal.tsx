@@ -30,6 +30,8 @@ interface ParsedResident {
   isValid?: boolean;
 }
 
+import { useAuth } from '../contexts/auth-context';
+
 interface BatchResidentImportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -37,6 +39,7 @@ interface BatchResidentImportModalProps {
 }
 
 export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchResidentImportModalProps) {
+  const { effectiveCondoId } = useAuth();
   const [activeMode, setActiveMode] = useState<'FILE' | 'PASTE'>('FILE');
   const [file, setFile] = useState<File | null>(null);
   const [rawPastedText, setRawPastedText] = useState('');
@@ -274,7 +277,7 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
       const res = await fetch('/api/residents/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ residents: parsedList })
+        body: JSON.stringify({ residents: parsedList, condoId: effectiveCondoId })
       });
 
       const data = await res.json();

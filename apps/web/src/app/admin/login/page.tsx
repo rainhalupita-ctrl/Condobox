@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Building2, ShieldCheck, Lock, Mail, Eye, EyeOff, Loader2, ArrowRight, Home } from 'lucide-react';
 import Link from 'next/link';
 
-export default function SyndicLoginPage() {
+function SyndicLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/admin';
@@ -225,5 +225,13 @@ export default function SyndicLoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SyndicLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Carregando...</div>}>
+      <SyndicLoginForm />
+    </Suspense>
   );
 }
