@@ -31,7 +31,11 @@ import {
   Lock,
   Unlock,
   Layers,
-  ArrowRight
+  ArrowRight,
+  DollarSign,
+  Clock,
+  AlertTriangle,
+  TrendingUp
 } from 'lucide-react';
 
 interface AccountItem {
@@ -69,7 +73,8 @@ interface GlobalMetrics {
   total_condos: number;
   active_condos: number;
   trial_condos: number;
-  blocked_condos: number;
+  paused_condos: number;
+  estimated_mrr: number;
   total_units: number;
   total_residents: number;
   total_packages: number;
@@ -380,52 +385,140 @@ export default function SuperAdminPage() {
         </div>
       </div>
 
-      {/* KPIs Globais da Plataforma */}
+      {/* Bloquinhos Executivos do Dono do SaaS (Métricas de Negócio) */}
       {metrics && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-slate-900 border border-slate-800/90 rounded-3xl p-5 shadow-xl flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block">Total de Condomínios</span>
-              <span className="text-3xl font-black text-white mt-1 block">{metrics.total_condos}</span>
-              <span className="text-[11px] text-emerald-400 font-medium">{metrics.active_condos} ativos no sistema</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* 1. Faturamento Mensal (MRR) */}
+          <div className="bg-slate-900/90 border border-slate-800/90 hover:border-emerald-500/40 rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Faturamento Mensal
+              </span>
+              <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20 group-hover:scale-110 transition-transform">
+                <DollarSign size={20} />
+              </div>
             </div>
-            <div className="p-3 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20">
-              <Building2 size={24} />
-            </div>
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800/90 rounded-3xl p-5 shadow-xl flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block">Apartamentos na Rede</span>
-              <span className="text-3xl font-black text-indigo-400 mt-1 block">{metrics.total_units}</span>
-              <span className="text-[11px] text-slate-500">Unidades cadastradas</span>
-            </div>
-            <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20">
-              <Layers size={24} />
+            <div className="mt-3">
+              <span className="text-2xl sm:text-3xl font-black text-emerald-400 tracking-tight block">
+                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.estimated_mrr || 0)}
+              </span>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Receita recorrente (MRR)
+              </span>
             </div>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800/90 rounded-3xl p-5 shadow-xl flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block">Moradores Cadastrados</span>
-              <span className="text-3xl font-black text-emerald-400 mt-1 block">{metrics.total_residents}</span>
-              <span className="text-[11px] text-slate-500">Com alertas WhatsApp</span>
+          {/* 2. Assinaturas Ativas */}
+          <button
+            type="button"
+            onClick={() => setStatusFilter(statusFilter === 'ACTIVE' ? 'ALL' : 'ACTIVE')}
+            className={`text-left bg-slate-900/90 border rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group ${
+              statusFilter === 'ACTIVE'
+                ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-950/20'
+                : 'border-slate-800/90 hover:border-blue-500/40'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Assinaturas Ativas
+              </span>
+              <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-2xl border border-blue-500/20 group-hover:scale-110 transition-transform">
+                <CheckCircle2 size={20} />
+              </div>
             </div>
-            <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
-              <Users size={24} />
+            <div className="mt-3">
+              <span className="text-2xl sm:text-3xl font-black text-white tracking-tight block">
+                {metrics.active_condos}
+              </span>
+              <span className="text-[11px] text-blue-400 font-semibold mt-1 block">
+                Em dia • Acesso liberado
+              </span>
             </div>
-          </div>
+          </button>
 
-          <div className="bg-slate-900 border border-slate-800/90 rounded-3xl p-5 shadow-xl flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold text-slate-400 block">Total de Encomendas</span>
-              <span className="text-3xl font-black text-amber-400 mt-1 block">{metrics.total_packages}</span>
-              <span className="text-[11px] text-slate-500">Processadas pela IA</span>
+          {/* 3. Em Teste (Trial) */}
+          <button
+            type="button"
+            onClick={() => setStatusFilter(statusFilter === 'TRIAL' ? 'ALL' : 'TRIAL')}
+            className={`text-left bg-slate-900/90 border rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group ${
+              statusFilter === 'TRIAL'
+                ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-950/20'
+                : 'border-slate-800/90 hover:border-amber-500/40'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Em Teste (Trial)
+              </span>
+              <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20 group-hover:scale-110 transition-transform">
+                <Clock size={20} />
+              </div>
             </div>
-            <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
-              <Package size={24} />
+            <div className="mt-3">
+              <span className="text-2xl sm:text-3xl font-black text-amber-400 tracking-tight block">
+                {metrics.trial_condos}
+              </span>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Avaliação gratuita ativa
+              </span>
             </div>
-          </div>
+          </button>
+
+          {/* 4. Pausados por Falta de Pagamento */}
+          <button
+            type="button"
+            onClick={() => setStatusFilter(statusFilter === 'EXPIRED' ? 'ALL' : 'EXPIRED')}
+            className={`text-left bg-slate-900/90 border rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group ${
+              statusFilter === 'EXPIRED' || statusFilter === 'BLOCKED'
+                ? 'border-rose-500 ring-2 ring-rose-500/20 bg-rose-950/20'
+                : 'border-slate-800/90 hover:border-rose-500/40'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Pausados / Atrasados
+              </span>
+              <div className="p-2.5 bg-rose-500/10 text-rose-400 rounded-2xl border border-rose-500/20 group-hover:scale-110 transition-transform">
+                <AlertTriangle size={20} />
+              </div>
+            </div>
+            <div className="mt-3">
+              <span className="text-2xl sm:text-3xl font-black text-rose-400 tracking-tight block">
+                {metrics.paused_condos}
+              </span>
+              <span className="text-[11px] text-rose-400/90 font-medium mt-1 block">
+                Falta de pagamento / Expirado
+              </span>
+            </div>
+          </button>
+
+          {/* 5. Total de Condomínios */}
+          <button
+            type="button"
+            onClick={() => { setStatusFilter('ALL'); setPlanFilter('ALL'); setSearchQuery(''); }}
+            className={`text-left bg-slate-900/90 border rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group ${
+              statusFilter === 'ALL' && planFilter === 'ALL' && !searchQuery
+                ? 'border-purple-500/60 bg-purple-950/20'
+                : 'border-slate-800/90 hover:border-purple-500/40'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Total Condomínios
+              </span>
+              <div className="p-2.5 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20 group-hover:scale-110 transition-transform">
+                <Building2 size={20} />
+              </div>
+            </div>
+            <div className="mt-3">
+              <span className="text-2xl sm:text-3xl font-black text-white tracking-tight block">
+                {metrics.total_condos}
+              </span>
+              <span className="text-[11px] text-purple-300 font-semibold mt-1 block">
+                Base total cadastrada
+              </span>
+            </div>
+          </button>
         </div>
       )}
 

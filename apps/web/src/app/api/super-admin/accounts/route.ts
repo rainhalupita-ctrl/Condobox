@@ -142,12 +142,38 @@ export async function GET() {
       };
     });
 
-    // Métricas Globais da Plataforma
+    // Tabela de Preços dos Planos (em Reais / mês)
+    const PLAN_PRICES: Record<string, number> = {
+      TRIAL: 0,
+      BASIC: 149,
+      PRO: 249,
+      PRO_MAX: 449,
+    };
+
+    const activeAccounts = accounts.filter(a => a.license?.status === 'ACTIVE');
+    const trialAccounts = accounts.filter(a => {
+      const plan = (a.license?.plan || '').toUpperCase();
+      const status = (a.license?.status || '').toUpperCase();
+      return plan === 'TRIAL' || status === 'TRIAL';
+    });
+    const pausedAccounts = accounts.filter(a => {
+      const status = (a.license?.status || '').toUpperCase();
+      return status === 'BLOCKED' || status === 'EXPIRED' || status === 'PAUSED';
+    });
+
+    // Faturamento Mensal Recorrente (MRR): soma dos planos ativos que não são Trial
+    const estimatedMRR = activeAccounts.reduce((sum, curr) => {
+      const plan = (curr.license?.plan || 'BASIC').toUpperCase();
+      return sum + (PLAN_PRICES[plan] ?? 149);
+    }, 0);
+
+    // Métricas Globais da Plataforma (Focadas no Dono do SaaS)
     const globalMetrics = {
       total_condos: accounts.length,
-      active_condos: accounts.filter(a => a.license?.status === 'ACTIVE').length,
-      trial_condos: accounts.filter(a => a.license?.plan === 'TRIAL' || a.license?.status === 'TRIAL').length,
-      blocked_condos: accounts.filter(a => a.license?.status === 'BLOCKED' || a.license?.status === 'EXPIRED').length,
+      active_condos: activeAccounts.length,
+      trial_condos: trialAccounts.length,
+      paused_condos: pausedAccounts.length,
+      estimated_mrr: estimatedMRR,
       total_units: (units || []).length,
       total_residents: (residents || []).length,
       total_packages: (packages || []).length,
