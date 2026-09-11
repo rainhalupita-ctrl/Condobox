@@ -17,10 +17,15 @@ export interface UserProfile {
 
 export interface LicenseInfo {
   id: string;
-  plan: 'TRIAL' | 'BASIC' | 'PRO' | 'PRO_MAX';
-  status: 'ACTIVE' | 'EXPIRED' | 'BLOCKED';
+  plan: 'TRIAL' | 'BASIC' | 'PRO' | 'PRO_MAX' | string;
+  status: 'ACTIVE' | 'EXPIRED' | 'BLOCKED' | 'TRIAL' | string;
   expires_at: string | null;
   max_apartments: number;
+}
+
+export interface ImpersonatedCondo {
+  id: string;
+  name: string;
 }
 
 interface AuthContextType {
@@ -31,7 +36,13 @@ interface AuthContextType {
   loading: boolean;
   isPortaria: boolean;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isMorador: boolean;
+  impersonatedCondo: ImpersonatedCondo | null;
+  effectiveCondoId: string | null;
+  isImpersonating: boolean;
+  impersonateCondo: (condo: ImpersonatedCondo) => void;
+  stopImpersonating: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -42,9 +53,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [license, setLicense] = useState<LicenseInfo | null>(null);
+  const [impersonatedCondo, setImpersonatedCondo] = useState<ImpersonatedCondo | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const supabase = createClient();
+
+  // Carrega impersonação salva no localStorage ao iniciar
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('condobox_impersonated_condo');
+      if (saved) {
+        setImpersonatedCondo(JSON.parse(saved));
+      }
+    } catch {
+      // ignora erro de json/storage
+    }
+  }, []);
+
+  const fetchLicenseForCondo = async (condoId: string) => {
+    try {
+      const { data: licData } = await supabase
+        .from('licenses')
+        .select('*')
+        .eq('condo_id', condoId)
+        .maybeSingle();
+      if (licData) {
+        setLicense(licData as LicenseInfo);
+      } else {
+        setLicense(null);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar licença:', err);
+    }
+  };
 
   const fetchProfile = async (userId: string) => {
     const { data } = await supabase
@@ -52,20 +93,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select('id, name, phone, role, condo_id')
       .eq('id', userId)
       .single();
+
     if (data) {
       setProfile(data as UserProfile);
-      
-      // Fetch license se tiver condo_id
-      if (data.condo_id) {
-        const { data: licData } = await supabase
-          .from('licenses')
-          .select('*')
-          .eq('condo_id', data.condo_id)
-          .maybeSingle();
-        if (licData) setLicense(licData as LicenseInfo);
+
+      // Se não houver condomínio impersonado, busca licença do condomínio do perfil
+      const targetCondoId = impersonatedCondo?.id || data.condo_id;
+      if (targetCondoId) {
+        fetchLicenseForCondo(targetCondoId);
       }
     }
   };
+
+  // Se mudar o condomínio impersonado, atualiza a licença ativa
+  useEffect(() => {
+    const targetCondoId = impersonatedCondo?.id || profile?.condo_id;
+    if (targetCondoId) {
+      fetchLicenseForCondo(targetCondoId);
+    }
+  }, [impersonatedCondo, profile?.condo_id]);
 
   useEffect(() => {
     // Sessão inicial
@@ -93,7 +139,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const impersonateCondo = (condo: ImpersonatedCondo) => {
+    setImpersonatedCondo(condo);
+    try {
+      localStorage.setItem('condobox_impersonated_condo', JSON.stringify(condo));
+    } catch {}
+  };
+
+  const stopImpersonating = () => {
+    setImpersonatedCondo(null);
+    try {
+      localStorage.removeItem('condobox_impersonated_condo');
+    } catch {}
+  };
+
   const signOut = async () => {
+    stopImpersonating();
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
@@ -103,12 +164,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const role = profile?.role;
+  const isSuperAdmin = role === 'ADMIN';
   const isPortaria = role === 'ADMIN' || role === 'SYNDIC' || role === 'GUARD';
   const isAdmin = role === 'ADMIN' || role === 'SYNDIC';
   const isMorador = role === 'RESIDENT';
+  const effectiveCondoId = impersonatedCondo?.id || profile?.condo_id || null;
+  const isImpersonating = !!impersonatedCondo;
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, license, loading, isPortaria, isAdmin, isMorador, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        license,
+        loading,
+        isPortaria,
+        isAdmin,
+        isSuperAdmin,
+        isMorador,
+        impersonatedCondo,
+        effectiveCondoId,
+        isImpersonating,
+        impersonateCondo,
+        stopImpersonating,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

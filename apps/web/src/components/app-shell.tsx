@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { Navbar } from './navbar';
+import { ImpersonationBanner } from './impersonation-banner';
 import { CookieConsent } from './cookie-consent';
 import { BarcodeListener } from './BarcodeListener';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
@@ -12,15 +13,15 @@ const NO_NAVBAR_PATHS = ['/login', '/cadastro', '/p/'];
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const showNavbar = !NO_NAVBAR_PATHS.some(p => pathname.startsWith(p));
-  const { license, isPortaria, isMorador } = useAuth();
+  const { license, isPortaria, isMorador, isSuperAdmin } = useAuth();
 
   const isBlocked = license && (license.status === 'EXPIRED' || license.status === 'BLOCKED');
-  // Se for admin global (vamos assumir que acessa painel /super-admin), não bloqueia.
-  // Vamos bloquear apenas as telas /portaria, /morador, /admin local.
-  const shouldBlock = isBlocked && (pathname.startsWith('/portaria') || pathname.startsWith('/morador') || pathname.startsWith('/admin'));
+  // Se for super admin ou acessando o super-admin, não bloqueia
+  const shouldBlock = !isSuperAdmin && isBlocked && (pathname.startsWith('/portaria') || pathname.startsWith('/morador') || pathname.startsWith('/admin'));
 
   return (
     <div className="flex flex-col min-h-screen">
+      <ImpersonationBanner />
       {showNavbar && <Navbar />}
       <main className={`flex-1 w-full pb-20 sm:pb-6 ${showNavbar ? 'max-w-7xl mx-auto p-3 sm:p-6 md:p-8' : ''}`}>
         {shouldBlock ? (

@@ -3,11 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { Building2, Package, LayoutDashboard, User, LogOut, Shield, ChevronDown } from 'lucide-react';
+import { Building2, Package, LayoutDashboard, User, LogOut, Shield, ChevronDown, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 
 export function Navbar() {
-  const { profile, isPortaria, isAdmin, signOut, loading } = useAuth();
+  const { profile, isPortaria, isAdmin, isSuperAdmin, signOut, loading } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -21,6 +21,7 @@ export function Navbar() {
     ? [
         { href: '/portaria', label: 'Portaria', icon: Shield },
         { href: '/admin', label: 'Painel de Gestão', icon: LayoutDashboard },
+        ...(isSuperAdmin ? [{ href: '/super-admin', label: 'Painel Master', icon: ShieldAlert }] : []),
       ]
     : [
         { href: '/morador', label: 'Minhas Encomendas', icon: Package },
@@ -56,7 +57,9 @@ export function Navbar() {
                 href={href}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                   pathname.startsWith(href)
-                    ? 'bg-emerald-600/20 text-emerald-400 font-bold border border-emerald-500/30'
+                    ? href === '/super-admin'
+                      ? 'bg-purple-600/25 text-purple-300 font-bold border border-purple-500/40 shadow-sm'
+                      : 'bg-emerald-600/20 text-emerald-400 font-bold border border-emerald-500/30'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }`}
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -92,11 +95,24 @@ export function Navbar() {
               {menuOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 mt-2 w-52 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-20 overflow-hidden animate-fade-in">
+                  <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-20 overflow-hidden animate-fade-in">
                     <div className="px-4 py-3 border-b border-slate-800">
                       <p className="text-white text-sm font-bold truncate">{profile.name}</p>
                       <p className="text-slate-400 text-xs truncate mt-0.5">{profile.phone || 'Sem telefone'}</p>
                     </div>
+
+                    {isSuperAdmin && (
+                      <Link
+                        href="/super-admin"
+                        onClick={() => setMenuOpen(false)}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-purple-300 hover:bg-purple-500/15 font-bold border-b border-slate-800/80 transition-colors"
+                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                      >
+                        <ShieldAlert size={14} className="text-purple-400" />
+                        Painel Master (SaaS)
+                      </Link>
+                    )}
+
                     <button
                       onClick={() => { setMenuOpen(false); signOut(); }}
                       className="w-full flex items-center gap-2 px-4 py-3 text-sm text-rose-400 hover:bg-rose-500/10 font-semibold transition-colors"

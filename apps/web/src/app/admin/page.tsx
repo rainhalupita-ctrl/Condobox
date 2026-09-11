@@ -46,7 +46,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function AdminPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo } = useAuth();
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
@@ -124,7 +124,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [effectiveCondoId]);
 
   // Ponte Supabase Realtime para WhatsApp (comunicação instantânea nuvem <-> portaria)
   useEffect(() => {
@@ -196,9 +196,19 @@ export default function AdminPage() {
         setWhatsappQrCode(wa.qrcode);
       }
 
-      const { data: uData } = await supabase.from('units').select('*').order('block').order('unit_number');
+      let unitQuery = supabase.from('units').select('*').order('block').order('unit_number');
+      if (effectiveCondoId) {
+        unitQuery = unitQuery.eq('condo_id', effectiveCondoId);
+      }
+      const { data: uData } = await unitQuery;
+
       const { data: rData } = await supabase.from('residents').select('*, unit:units(*)').order('name');
-      const { data: pData } = await supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
+
+      let pkgQuery = supabase.from('packages').select('*, unit:units(*), resident:residents(*)');
+      if (effectiveCondoId) {
+        pkgQuery = pkgQuery.eq('condo_id', effectiveCondoId);
+      }
+      const { data: pData } = await pkgQuery;
       if (uData) {
         // Deduplica unidades caso existam registros repetidos
         const uniqueMap = new Map<string, Unit>();
@@ -742,7 +752,14 @@ export default function AdminPage() {
             <Shield className="w-5 h-5 text-indigo-400" />
             <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Administração Geral</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-100 mt-1">Painel do Síndico</h1>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-100 mt-1 flex items-center gap-2 flex-wrap">
+            <span>Painel do Síndico</span>
+            {isImpersonating && impersonatedCondo && (
+              <span className="text-sm font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
+                {impersonatedCondo.name}
+              </span>
+            )}
+          </h1>
         </div>
 
         <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
