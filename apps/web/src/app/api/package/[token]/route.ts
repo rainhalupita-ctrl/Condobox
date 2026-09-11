@@ -120,6 +120,16 @@ export async function GET(
       }
     } catch {}
 
+    let condoPhone = (pkg.condo?.phone && pkg.condo.phone !== '5511988887777') ? pkg.condo.phone : null;
+    if (!condoPhone) {
+      try {
+        const { data: c } = await supabase.from('condos').select('phone').limit(1).maybeSingle();
+        if (c?.phone && c.phone !== '5511988887777') {
+          condoPhone = c.phone;
+        }
+      } catch {}
+    }
+
     return NextResponse.json(
       {
         package: {
@@ -141,7 +151,7 @@ export async function GET(
             block: pkg.unit.block,
             unit_number: pkg.unit.unit_number
           } : null,
-          condo_phone: (pkg.condo?.phone && pkg.condo.phone !== '5511988887777') ? pkg.condo.phone : '557398419901'
+          condo_phone: condoPhone
         },
         ad: activeAd
       },

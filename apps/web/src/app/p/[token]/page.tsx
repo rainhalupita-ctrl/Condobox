@@ -310,7 +310,7 @@ export default function PublicPackagePage() {
   const targetWhatsappPhone = (
     connectedWhatsappPhone ||
     (pkg?.condo_phone && pkg.condo_phone !== '5511988887777' ? pkg.condo_phone : null) ||
-    '557398419901'
+    ''
   ).replace(/\D/g, '');
 
   return (
@@ -587,10 +587,16 @@ export default function PublicPackagePage() {
                 
                 {/* Botão Não fiz a retirada - Fundo Vermelho Vibrante, Texto Branco */}
                 <a
-                  href={`https://wa.me/${targetWhatsappPhone}?text=${encodeURIComponent(
+                  href={targetWhatsappPhone ? `https://wa.me/${targetWhatsappPhone}?text=${encodeURIComponent(
                     `⚠️ *CONTESTAÇÃO DE RETIRADA*\n\nOlá, consta no sistema que a minha encomenda de *${pkg?.carrier || 'encomenda'}* (Código: *${pkg?.pickup_code}*, Destinatário: *${pkg?.recipient_name}*, Unidade: *${pkg?.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'minha unidade'}*) foi registrada como retirada, mas eu *NÃO FIZ A RETIRADA*!\n\nSolicito verificar na portaria com urgência.`
-                  )}`}
-                  target="_blank"
+                  )}` : '#'}
+                  onClick={(e) => {
+                    if (!targetWhatsappPhone) {
+                      e.preventDefault();
+                      alert('A portaria ainda não conectou o WhatsApp via QR Code no sistema.');
+                    }
+                  }}
+                  target={targetWhatsappPhone ? '_blank' : undefined}
                   rel="noopener noreferrer"
                   className="w-full flex items-center justify-center py-4 px-6 bg-[#EF4444] hover:bg-[#DC2626] active:scale-[0.98] text-white rounded-2xl font-black text-base transition-all shadow-xl shadow-red-500/25 tracking-wide cursor-pointer"
                 >
