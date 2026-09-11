@@ -116,16 +116,23 @@ function createMainWindow() {
     return { action: "deny" };
   });
 
-  mainWindow.once("ready-to-show", () => {
-    setTimeout(() => {
-      if (splashWindow && !splashWindow.isDestroyed()) {
-        splashWindow.close();
-        splashWindow = null;
-      }
+  const showMainWindow = () => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.close();
+      splashWindow = null;
+    }
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
       mainWindow.focus();
-    }, 2000);
+    }
+  };
+
+  mainWindow.once("ready-to-show", () => {
+    setTimeout(showMainWindow, 1800);
   });
+
+  // Garantia: se ready-to-show demorar por lentidão de rede, mostra a janela após 3.5s
+  setTimeout(showMainWindow, 3500);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
