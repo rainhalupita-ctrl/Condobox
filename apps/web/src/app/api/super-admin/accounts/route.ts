@@ -18,21 +18,46 @@ function getSupabaseAdmin() {
 }
 
 // Verifica se o usuário autenticado na requisição é o Dono do Sistema (Master Admin)
-async function verifyAdminAuth() {
-  const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+async function verifyAdminAuth(request?: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
+  let user: any = null;
 
-  if (!session?.user) {
+  // 1. Tenta obter o usuário via cabeçalho Authorization: Bearer <token>
+  const authHeader = request?.headers.get('authorization');
+  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+    const token = authHeader.replace(/^bearer\s+/i, '').trim();
+    if (token) {
+      const { data: uData } = await supabaseAdmin.auth.getUser(token);
+      if (uData?.user) {
+        user = uData.user;
+      }
+    }
+  }
+
+  // 2. Fallback: tenta obter via cookies da sessão
+  if (!user) {
+    try {
+      const supabase = await createClient();
+      const { data: uData } = await supabase.auth.getUser();
+      user = uData?.user || null;
+      if (!user) {
+        const { data: sData } = await supabase.auth.getSession();
+        user = sData?.session?.user || null;
+      }
+    } catch {}
+  }
+
+  if (!user) {
     return { error: 'Não autorizado. Faça login primeiro.', status: 401 };
   }
 
-  const { data: profile } = await supabase
+  const { data: profile } = await supabaseAdmin
     .from('profiles')
     .select('id, role, name, condo_id')
-    .eq('id', session.user.id)
-    .single();
+    .eq('id', user.id)
+    .maybeSingle();
 
-  const userEmail = (session.user.email || '').toLowerCase();
+  const userEmail = (user.email || '').toLowerCase();
   const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
     .split(',')
     .map(e => e.trim().toLowerCase());
@@ -43,13 +68,13 @@ async function verifyAdminAuth() {
     return { error: 'Acesso negado. Apenas o Dono do Sistema tem acesso ao Painel Master.', status: 403 };
   }
 
-  return { user: session.user, profile };
+  return { user, profile };
 }
 
 // GET: Retorna lista de todos os condomínios com licenças, métricas e síndicos
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const authCheck = await verifyAdminAuth();
+    const authCheck = await verifyAdminAuth(request);
     if ('error' in authCheck) {
       return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
     }
@@ -190,7 +215,7 @@ export async function GET() {
 // PUT: Atualiza plano, limites, status ou dados cadastrais do condomínio
 export async function PUT(request: Request) {
   try {
-    const authCheck = await verifyAdminAuth();
+    const authCheck = await verifyAdminAuth(request);
     if ('error' in authCheck) {
       return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
     }
@@ -273,7 +298,7 @@ export async function PUT(request: Request) {
 // POST: Cadastra novo condomínio com licença e síndico inicial
 export async function POST(request: Request) {
   try {
-    const authCheck = await verifyAdminAuth();
+    const authCheck = await verifyAdminAuth(request);
     if ('error' in authCheck) {
       return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
     }
@@ -353,7 +378,7 @@ export async function POST(request: Request) {
 // DELETE: Exclui uma conta de condomínio
 export async function DELETE(request: Request) {
   try {
-    const authCheck = await verifyAdminAuth();
+    const authCheck = await verifyAdminAuth(request);
     if ('error' in authCheck) {
       return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
     }

@@ -40,7 +40,8 @@ import {
   LogOut,
   X,
   Check,
-  ChevronDown
+  ChevronDown,
+  Pencil
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { VoiceService } from '../../lib/voice';
@@ -106,8 +107,9 @@ export default function AdminPage() {
   const [testMsgResult, setTestMsgResult] = useState<string | null>(null);
   const [testMsgLoading, setTestMsgLoading] = useState(false);
 
-  // Formulário de novo morador e importação em lote
+  // Formulário de novo morador / edição e importação em lote
   const [isAddResidentModalOpen, setIsAddResidentModalOpen] = useState(false);
+  const [editingResident, setEditingResident] = useState<Resident | null>(null);
   const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
   const [newResName, setNewResName] = useState('');
@@ -773,6 +775,28 @@ export default function AdminPage() {
     }
   };
 
+  const handleOpenNewResidentModal = () => {
+    setEditingResident(null);
+    setNewResName('');
+    setNewResPhone('');
+    setNewResEmail('');
+    setNewResBlock(units[0]?.block || 'Bloco A');
+    setNewResUnitNumber('');
+    setIsUnitDropdownOpen(false);
+    setIsAddResidentModalOpen(true);
+  };
+
+  const handleOpenEditResidentModal = (resident: Resident) => {
+    setEditingResident(resident);
+    setNewResName(resident.name || '');
+    setNewResPhone(resident.phone || '');
+    setNewResEmail(resident.email || '');
+    setNewResBlock(resident.unit?.block || 'Bloco A');
+    setNewResUnitNumber(resident.unit?.unit_number || '');
+    setIsUnitDropdownOpen(false);
+    setIsAddResidentModalOpen(true);
+  };
+
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newResName.trim() || !newResPhone.trim() || !newResUnitNumber.trim()) {
@@ -807,6 +831,7 @@ export default function AdminPage() {
           return;
         }
         unit = newUnit;
+        setUnits((prev) => [...prev, newUnit as Unit]);
       }
 
       if (!unit) {
@@ -814,7 +839,43 @@ export default function AdminPage() {
         return;
       }
 
-      // 3. Cadastra o morador
+      // 3. Se estiver editando morador existente:
+      if (editingResident && supabase) {
+        const { data: updatedData, error: uError } = await supabase
+          .from('residents')
+          .update({
+            name: newResName.trim(),
+            phone: newResPhone.trim(),
+            email: newResEmail.trim() || null,
+            unit_id: unit.id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingResident.id)
+          .select('*, unit:units(*)')
+          .single();
+
+        if (uError) {
+          alert(`Erro ao atualizar morador: ${uError.message}`);
+          return;
+        }
+
+        if (updatedData) {
+          setResidents((prev) =>
+            prev.map((r) => (r.id === editingResident.id ? (updatedData as Resident) : r))
+          );
+        }
+
+        setIsAddResidentModalOpen(false);
+        setEditingResident(null);
+        setNewResName('');
+        setNewResPhone('');
+        setNewResEmail('');
+        setNewResUnitNumber('');
+        loadData();
+        return;
+      }
+
+      // 4. Cadastra novo morador
       if (supabase) {
         const { data, error } = await supabase
           .from('residents')
@@ -841,6 +902,7 @@ export default function AdminPage() {
       }
 
       setIsAddResidentModalOpen(false);
+      setEditingResident(null);
       setNewResName('');
       setNewResPhone('');
       setNewResEmail('');
@@ -1349,7 +1411,7 @@ export default function AdminPage() {
 
               <button
                 type="button"
-                onClick={() => setIsAddResidentModalOpen(true)}
+                onClick={handleOpenNewResidentModal}
                 className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition whitespace-nowrap"
               >
                 <Plus className="w-4 h-4" /> Novo Morador
@@ -1394,9 +1456,24 @@ export default function AdminPage() {
                       return nameMatch || unitMatch || phoneMatch || emailMatch;
                     })
                     .map((r) => (
-                      <tr key={r.id} className="hover:bg-slate-800/40 transition">
+                      <tr
+                        key={r.id}
+                        onClick={() => handleOpenEditResidentModal(r)}
+                        className="hover:bg-slate-800/60 transition group cursor-pointer"
+                        title={`Clique para editar os dados de ${r.name}`}
+                      >
                         <td className="p-4 font-semibold text-slate-100">
-                          {r.name} {r.is_primary && <span className="text-[10px] text-indigo-400 ml-1">(Titular)</span>}
+                          <div className="flex items-center gap-2">
+                            <span className="group-hover:text-indigo-400 transition font-bold">
+                              {r.name}
+                            </span>
+                            {r.is_primary && (
+                              <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded">
+                                Titular
+                              </span>
+                            )}
+                            <Pencil className="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
+                          </div>
                         </td>
                         <td className="p-4 font-medium text-slate-200">
                           {r.unit ? `${r.unit.block} - Apto ${r.unit.unit_number}` : 'Sem Unidade'}
@@ -1412,15 +1489,25 @@ export default function AdminPage() {
                             Ativo
                           </span>
                         </td>
-                        <td className="p-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteResident(r.id, r.name)}
-                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
-                            title="Excluir Morador"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditResidentModal(r)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Editar Morador"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteResident(r.id, r.name)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Excluir Morador"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -2053,20 +2140,23 @@ export default function AdminPage() {
                     {unitResidents.map((r) => (
                       <div
                         key={r.id}
-                        className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 hover:border-slate-700 transition flex items-center justify-between gap-3"
+                        onClick={() => handleOpenEditResidentModal(r)}
+                        className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 hover:border-indigo-500/50 hover:bg-slate-900/80 transition flex items-center justify-between gap-3 cursor-pointer group"
+                        title={`Clique para editar os dados de ${r.name}`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-bold text-xs shrink-0">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-bold text-xs shrink-0 group-hover:border-indigo-500/50 transition">
                             {r.name ? r.name.substring(0, 2).toUpperCase() : <Users size={16} />}
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-xs font-bold text-slate-100 truncate">{r.name}</span>
+                              <span className="text-xs font-bold text-slate-100 group-hover:text-indigo-300 transition truncate">{r.name}</span>
                               {r.is_primary && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-md">
                                   Titular
                                 </span>
                               )}
+                              <Pencil className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition" />
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                               <span className="flex items-center gap-1 font-mono text-emerald-400 font-semibold">
@@ -2081,14 +2171,24 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteResident(r.id, r.name)}
-                          className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition shrink-0"
-                          title="Excluir Morador"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditResidentModal(r)}
+                            className="p-2 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition"
+                            title="Editar Morador"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteResident(r.id, r.name)}
+                            className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition shrink-0"
+                            title="Excluir Morador"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2197,12 +2297,25 @@ export default function AdminPage() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-indigo-500/15 border border-indigo-500/30 rounded-xl text-indigo-400">
-                  <UserPlus className="w-5 h-5" />
+                  {editingResident ? <Pencil className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
                 </div>
-                <h3 className="text-base font-bold text-white">Cadastrar Novo Morador</h3>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    {editingResident ? 'Editar Morador' : 'Cadastrar Novo Morador'}
+                  </h3>
+                  {editingResident && (
+                    <p className="text-[11px] text-slate-400">
+                      Alterando cadastro de <span className="text-indigo-300 font-semibold">{editingResident.name}</span>
+                    </p>
+                  )}
+                </div>
               </div>
               <button
-                onClick={() => setIsAddResidentModalOpen(false)}
+                type="button"
+                onClick={() => {
+                  setIsAddResidentModalOpen(false);
+                  setEditingResident(null);
+                }}
                 className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition"
               >
                 <X className="w-5 h-5" />
@@ -2365,16 +2478,25 @@ export default function AdminPage() {
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddResidentModalOpen(false)}
+                  onClick={() => {
+                    setIsAddResidentModalOpen(false);
+                    setEditingResident(null);
+                  }}
                   className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow-lg shadow-indigo-950"
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow-lg shadow-indigo-950 flex items-center justify-center gap-2"
                 >
-                  Salvar Morador
+                  {editingResident ? (
+                    <>
+                      <Check className="w-4 h-4" /> Salvar Alterações
+                    </>
+                  ) : (
+                    'Salvar Morador'
+                  )}
                 </button>
               </div>
             </form>

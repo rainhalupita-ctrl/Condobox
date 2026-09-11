@@ -56,29 +56,60 @@ function checkPortListening(port) {
   });
 }
 
+let isStartingWebServer = false;
+
 function ensureWebServer() {
-  checkPortListening(3000).then((isListening) => {
+  if (isStartingWebServer) return Promise.resolve();
+  return checkPortListening(3000).then((isListening) => {
     if (!isListening) {
+      isStartingWebServer = true;
       log("Porta 3000 nao esta escutando. Iniciando apps/web em background...");
       const webDir = path.resolve(__dirname, "..", "..", "web");
-      const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
       
       try {
-        webServerProcess = spawn(npmCmd, ["run", "dev"], {
-          cwd: webDir,
-          stdio: "ignore",
-          windowsHide: true,
-          shell: true,
-        });
-        log("Processo do servidor web disparado. PID:", webServerProcess.pid);
+        if (process.platform === "win32") {
+          webServerProcess = spawn("powershell.exe", [
+            "-WindowStyle", "Hidden",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-Command",
+            `Start-Process cmd.exe -ArgumentList '/c npm run dev' -WorkingDirectory '${webDir}' -WindowStyle Hidden`
+          ], {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          });
+        } else {
+          webServerProcess = spawn("npm", ["run", "dev"], {
+            cwd: webDir,
+            detached: true,
+            stdio: "ignore",
+          });
+        }
+        if (webServerProcess) {
+          webServerProcess.unref();
+          log("Processo do servidor web disparado. PID:", webServerProcess.pid);
+        }
       } catch (err) {
         log("Erro ao iniciar servidor web:", err.message);
+      } finally {
+        setTimeout(() => { isStartingWebServer = false; }, 4000);
       }
     } else {
       log("Servidor web ja esta rodando na porta 3000.");
     }
   });
 }
+
+// Watchdog continuo para manter o servidor web sempre ativo na porta 3000
+setInterval(() => {
+  checkPortListening(3000).then((isListening) => {
+    if (!isListening && !isStartingWebServer) {
+      log("Watchdog: Servidor web (porta 3000) indisponivel. Relancando...");
+      ensureWebServer();
+    }
+  });
+}, 4000);
 
 function createWindow() {
   log("Criando janela principal...");
