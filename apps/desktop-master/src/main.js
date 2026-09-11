@@ -3,6 +3,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
+const { checkForUpdates } = require("./updater");
 
 const APP_TITLE = "CondoBox SaaS Master - Painel do Proprietário";
 const logFile = path.join(__dirname, "debug.log");
@@ -163,6 +164,11 @@ function createWindow() {
 app.whenReady().then(() => {
   log("app.whenReady disparado com sucesso.");
   createWindow();
+
+  // Checa se ha atualizacoes na nuvem
+  setTimeout(() => {
+    checkForUpdates(mainWindow, 'condobox-master');
+  }, 3000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -2,6 +2,7 @@ const { app, BrowserWindow, session, nativeImage } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { checkForUpdates } = require("./updater");
 
 // Desabilitar aceleração de hardware ANTES do app estar pronto para evitar bugs com webcams antigas/DWM
 app.disableHardwareAcceleration();
@@ -133,6 +134,9 @@ function createWindow() {
       }
       mainWindow.show();
       mainWindow.focus();
+
+      // Checa atualizações da versão ao iniciar o aplicativo
+      checkForUpdates(mainWindow, 'condobox-desktop');
     }, 4500);
   });
 

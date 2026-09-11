@@ -35,7 +35,9 @@ import {
   DollarSign,
   Clock,
   AlertTriangle,
-  TrendingUp
+  TrendingUp,
+  Download,
+  Laptop
 } from 'lucide-react';
 
 interface AccountItem {
@@ -86,13 +88,49 @@ export default function SuperAdminPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [activeTab, setActiveTab] = useState<'ACCOUNTS' | 'ADS'>('ACCOUNTS');
+  const [activeTab, setActiveTab] = useState<'ACCOUNTS' | 'ADS' | 'VERSIONS'>('ACCOUNTS');
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [planFilter, setPlanFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Gestão de Versões e Atualizações OTA
+  const [versionConfig, setVersionConfig] = useState<{
+    'condobox-desktop'?: {
+      latest_version: string;
+      download_url: string;
+      release_notes: string;
+      is_mandatory: boolean;
+      updated_at: string;
+    };
+    'condobox-master'?: {
+      latest_version: string;
+      download_url: string;
+      release_notes: string;
+      is_mandatory: boolean;
+      updated_at: string;
+    };
+  }>({});
+
+  const [versionForm, setVersionForm] = useState({
+    'condobox-desktop': {
+      version: '',
+      url: '',
+      notes: '',
+      mandatory: false,
+    },
+    'condobox-master': {
+      version: '',
+      url: '',
+      notes: '',
+      mandatory: false,
+    },
+  });
+
+  const [savingVersionApp, setSavingVersionApp] = useState<string | null>(null);
+  const [versionStatusMessage, setVersionStatusMessage] = useState<{ app: string; text: string; success: boolean } | null>(null);
 
   // Modal de Edição de Plano & Limites
   const [editingAccount, setEditingAccount] = useState<AccountItem | null>(null);
@@ -221,10 +259,86 @@ export default function SuperAdminPage() {
       // 2. Carrega anúncios
       const { data: adsData } = await supabase.from('ads').select('*').order('created_at', { ascending: false });
       if (adsData) setAds(adsData);
+
+      // 3. Carrega versões OTA dos aplicativos
+      await loadVersions();
     } catch (e) {
       console.error('Erro ao carregar dados:', e);
     } finally {
       setLoadingData(false);
+    }
+  };
+
+  const loadVersions = async () => {
+    try {
+      const res = await fetch(`/api/app-version?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setVersionConfig(data);
+        setVersionForm({
+          'condobox-desktop': {
+            version: data['condobox-desktop']?.latest_version || '1.0.0',
+            url: data['condobox-desktop']?.download_url || '',
+            notes: data['condobox-desktop']?.release_notes || '',
+            mandatory: Boolean(data['condobox-desktop']?.is_mandatory),
+          },
+          'condobox-master': {
+            version: data['condobox-master']?.latest_version || '1.0.0',
+            url: data['condobox-master']?.download_url || '',
+            notes: data['condobox-master']?.release_notes || '',
+            mandatory: Boolean(data['condobox-master']?.is_mandatory),
+          },
+        });
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar versões:', err);
+    }
+  };
+
+  const handleSaveVersion = async (appName: 'condobox-desktop' | 'condobox-master') => {
+    setSavingVersionApp(appName);
+    setVersionStatusMessage(null);
+    try {
+      const form = versionForm[appName];
+      if (!form.version.trim()) {
+        throw new Error('Informe o número da versão (ex: 1.0.1)');
+      }
+
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/app-version', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          app: appName,
+          latest_version: form.version.trim(),
+          download_url: form.url.trim(),
+          release_notes: form.notes.trim(),
+          is_mandatory: form.mandatory,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erro ao publicar versão');
+      }
+
+      setVersionStatusMessage({
+        app: appName,
+        text: `Versão v${form.version.trim()} publicada com sucesso! Notificação com opções "Atualizar Agora" e "Depois" ativada nos computadores ao iniciarem.`,
+        success: true,
+      });
+      await loadVersions();
+    } catch (err: any) {
+      setVersionStatusMessage({
+        app: appName,
+        text: err.message || 'Falha ao salvar versão',
+        success: false,
+      });
+    } finally {
+      setSavingVersionApp(null);
     }
   };
 
@@ -678,6 +792,19 @@ export default function SuperAdminPage() {
           <ImageIcon size={15} />
           Rede de Anúncios / Ads ({ads.length})
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('VERSIONS')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+            activeTab === 'VERSIONS'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-950/40'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <Download size={15} />
+          Versões & Atualizações OTA
+        </button>
       </div>
 
       {/* ABA 1: GESTÃO DE CONTAS */}
@@ -1014,6 +1141,336 @@ export default function SuperAdminPage() {
               {ads.length === 0 && (
                 <p className="text-xs text-slate-500 text-center py-6">Nenhum anúncio veiculado no momento.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ABA 3: VERSÕES & ATUALIZAÇÕES OTA */}
+      {activeTab === 'VERSIONS' && (
+        <div className="space-y-6">
+          {/* Header Explicativo */}
+          <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-slate-900 p-6 rounded-3xl border border-purple-800/30 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-1 max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/15 border border-purple-500/30 rounded-full text-purple-300 text-[11px] font-bold uppercase tracking-wider mb-1">
+                <Sparkles size={12} />
+                Sistema OTA (Over-The-Air) Ativo
+              </div>
+              <h2 className="text-xl font-bold text-white tracking-tight">Distribuição & Controle de Versões</h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Ao lançar uma nova versão aqui, todos os computadores com o aplicativo instalado verificarão automaticamente na nuvem ao iniciar. 
+                Se houver uma versão mais recente, uma notificação nativa do Windows será exibida perguntando: 
+                <strong className="text-purple-300 font-semibold"> &quot;Atualizar Agora&quot;</strong> ou <strong className="text-slate-300 font-semibold">&quot;Depois&quot;</strong>.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href="https://isurnvsehvjdslpnxirn.supabase.co/storage/v1/object/public/labels/system/version.json"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
+              >
+                <ExternalLink size={13} />
+                Ver JSON na Nuvem
+              </a>
+              <button
+                type="button"
+                onClick={loadVersions}
+                className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 text-xs font-semibold transition"
+                title="Recarregar dados de versão"
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
+          </div>
+
+          {/* Grid com os 2 Aplicativos */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* CARD 1: CONDOBOX PORTARIA */}
+            <div className="bg-slate-900/90 border border-slate-800/90 hover:border-purple-500/30 rounded-3xl p-6 shadow-xl flex flex-col justify-between space-y-6 transition-all">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20">
+                      <Laptop size={22} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-white">CondoBox Portaria</h3>
+                      <p className="text-xs text-slate-400 font-mono">condobox-desktop</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-purple-500/15 border border-purple-500/30 rounded-full text-purple-300 text-xs font-bold font-mono">
+                    v{versionConfig['condobox-desktop']?.latest_version || '1.0.0'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800/80 space-y-1.5 text-xs">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Versão em produção na nuvem:</span>
+                    <strong className="text-purple-400 font-mono">v{versionConfig['condobox-desktop']?.latest_version || '1.0.0'}</strong>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Última atualização:</span>
+                    <span className="text-slate-300">
+                      {versionConfig['condobox-desktop']?.updated_at
+                        ? new Date(versionConfig['condobox-desktop'].updated_at).toLocaleString('pt-BR')
+                        : 'Hoje'}
+                    </span>
+                  </div>
+                </div>
+
+                {versionStatusMessage?.app === 'condobox-desktop' && (
+                  <div
+                    className={`p-3 rounded-xl text-xs font-medium ${
+                      versionStatusMessage.success
+                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                    }`}
+                  >
+                    {versionStatusMessage.text}
+                  </div>
+                )}
+
+                <div className="space-y-3.5 text-xs">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">
+                      Número da Nova Versão (Semântico)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 1.0.1"
+                      value={versionForm['condobox-desktop'].version}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-desktop': { ...prev['condobox-desktop'], version: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-purple-500 font-mono font-bold"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Qualquer valor superior à versão instalada acionará o pop-up nos computadores da portaria.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">
+                      Link Direto de Download (.exe ou Releases)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://..."
+                      value={versionForm['condobox-desktop'].url}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-desktop': { ...prev['condobox-desktop'], url: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-purple-500 font-mono text-xs"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Ao clicar em &quot;Atualizar Agora&quot;, o usuário será redirecionado para este link.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">
+                      Notas da Versão / Novidades
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="- Correções na leitura de QR Code&#10;- Melhoria de performance e sincronização"
+                      value={versionForm['condobox-desktop'].notes}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-desktop': { ...prev['condobox-desktop'], notes: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-purple-500 resize-none text-xs"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={versionForm['condobox-desktop'].mandatory}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-desktop': { ...prev['condobox-desktop'], mandatory: e.target.checked }
+                        }))
+                      }
+                      className="rounded border-slate-700 bg-slate-950 text-purple-600 focus:ring-purple-500"
+                    />
+                    <span className="text-slate-300 text-xs font-medium">
+                      Atualização crítica recomendada
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleSaveVersion('condobox-desktop')}
+                disabled={savingVersionApp === 'condobox-desktop'}
+                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-2xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-purple-950/40 disabled:opacity-50"
+              >
+                {savingVersionApp === 'condobox-desktop' ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Publicando Versão na Nuvem...
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} /> Publicar Atualização da Portaria
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* CARD 2: CONDOBOX SAAS MASTER */}
+            <div className="bg-slate-900/90 border border-slate-800/90 hover:border-amber-500/30 rounded-3xl p-6 shadow-xl flex flex-col justify-between space-y-6 transition-all">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
+                      <Building2 size={22} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-white">CondoBox SaaS Master</h3>
+                      <p className="text-xs text-slate-400 font-mono">condobox-master</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-amber-500/15 border border-amber-500/30 rounded-full text-amber-300 text-xs font-bold font-mono">
+                    v{versionConfig['condobox-master']?.latest_version || '1.0.0'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800/80 space-y-1.5 text-xs">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Versão em produção na nuvem:</span>
+                    <strong className="text-amber-400 font-mono">v{versionConfig['condobox-master']?.latest_version || '1.0.0'}</strong>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Última atualização:</span>
+                    <span className="text-slate-300">
+                      {versionConfig['condobox-master']?.updated_at
+                        ? new Date(versionConfig['condobox-master'].updated_at).toLocaleString('pt-BR')
+                        : 'Hoje'}
+                    </span>
+                  </div>
+                </div>
+
+                {versionStatusMessage?.app === 'condobox-master' && (
+                  <div
+                    className={`p-3 rounded-xl text-xs font-medium ${
+                      versionStatusMessage.success
+                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                    }`}
+                  >
+                    {versionStatusMessage.text}
+                  </div>
+                )}
+
+                <div className="space-y-3.5 text-xs">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">
+                      Número da Nova Versão (Semântico)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 1.0.1"
+                      value={versionForm['condobox-master'].version}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-master': { ...prev['condobox-master'], version: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-amber-500 font-mono font-bold"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Dispara a notificação de nova versão no aplicativo executivo do proprietário.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">
+                      Link Direto de Download (.exe ou Releases)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://..."
+                      value={versionForm['condobox-master'].url}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-master': { ...prev['condobox-master'], url: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-amber-500 font-mono text-xs"
+                    />
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Ao clicar em &quot;Atualizar Agora&quot;, o proprietário fará o download da nova compilação.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">
+                      Notas da Versão / Novidades
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="- Novo dashboard financeiro&#10;- Gestão de licenças aprimorada"
+                      value={versionForm['condobox-master'].notes}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-master': { ...prev['condobox-master'], notes: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-amber-500 resize-none text-xs"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={versionForm['condobox-master'].mandatory}
+                      onChange={e =>
+                        setVersionForm(prev => ({
+                          ...prev,
+                          'condobox-master': { ...prev['condobox-master'], mandatory: e.target.checked }
+                        }))
+                      }
+                      className="rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500"
+                    />
+                    <span className="text-slate-300 text-xs font-medium">
+                      Atualização crítica recomendada
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleSaveVersion('condobox-master')}
+                disabled={savingVersionApp === 'condobox-master'}
+                className="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold rounded-2xl text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 disabled:opacity-50"
+              >
+                {savingVersionApp === 'condobox-master' ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Publicando Versão na Nuvem...
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} /> Publicar Atualização do SaaS Master
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
