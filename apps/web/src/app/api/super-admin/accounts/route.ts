@@ -17,7 +17,7 @@ function getSupabaseAdmin() {
   );
 }
 
-// Verifica se o usuário autenticado na requisição é ADMIN
+// Verifica se o usuário autenticado na requisição é o Dono do Sistema (Master Admin)
 async function verifyAdminAuth() {
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
@@ -28,12 +28,19 @@ async function verifyAdminAuth() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, role, name')
+    .select('id, role, name, condo_id')
     .eq('id', session.user.id)
     .single();
 
-  if (!profile || profile.role !== 'ADMIN') {
-    return { error: 'Acesso negado. Apenas administradores podem acessar o painel master.', status: 403 };
+  const userEmail = (session.user.email || '').toLowerCase();
+  const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+    .split(',')
+    .map(e => e.trim().toLowerCase());
+
+  const isMaster = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+
+  if (!isMaster) {
+    return { error: 'Acesso negado. Apenas o Dono do Sistema tem acesso ao Painel Master.', status: 403 };
   }
 
   return { user: session.user, profile };
@@ -295,7 +302,7 @@ export async function POST(request: Request) {
         email_confirm: true,
         user_metadata: {
           name: syndicName.trim(),
-          role: 'ADMIN',
+          role: 'SYNDIC',
         },
       });
 
@@ -305,7 +312,7 @@ export async function POST(request: Request) {
           condo_id: newCondo.id,
           name: syndicName.trim(),
           phone: cleanPhone,
-          role: 'ADMIN',
+          role: 'SYNDIC',
         }, { onConflict: 'id' });
       }
     }

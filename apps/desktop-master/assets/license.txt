@@ -1,0 +1,15 @@
+TERMOS DE USO E LICENÇA DE SOFTWARE — CONDOBOX PORTARIA
+
+1. LICENÇA DE USO
+O software CondoBox Portaria é licenciado para uso exclusivo em portarias de condomínios residenciais e comerciais autorizados.
+
+2. PRIVACIDADE E PROTEÇÃO DE DADOS (LGPD)
+O CondoBox realiza o armazenamento local seguro de dados de encomendas, nomes de moradores, unidades e registros de entrega. As fotos de comprovantes e assinaturas digitais são processadas localmente e utilizadas exclusivamente para a finalidade de confirmação e auditoria de retirada de mercadorias.
+
+3. DISPAROS DE NOTIFICAÇÕES VIA WHATSAPP
+O sistema utiliza integração para notificação direta aos moradores sobre o recebimento de encomendas. O condomínio é responsável por manter os números de telefone atualizados.
+
+4. SEGURANÇA E INTEGRIDADE
+O software opera em conformidade com as políticas de segurança do Windows. Ao aceitar este termo, você autoriza o aplicativo a criar atalhos de inicialização rápida, salvar registros no banco de dados local e utilizar a câmera do dispositivo para leitura óptica de etiquetas (OCR).
+
+Copyright © 2026 CondoBox Tecnologia Condominial. Todos os direitos reservados.

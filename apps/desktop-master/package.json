@@ -1,0 +1,36 @@
+{
+  "name": "condobox-master",
+  "version": "1.0.0",
+  "description": "CondoBox SaaS Master - Painel Exclusivo do Proprietário",
+  "main": "src/main.js",
+  "author": "CondoBox Tecnologia",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^32.0.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.condobox.master",
+    "productName": "CondoBox SaaS Master",
+    "copyright": "Copyright © 2026 CondoBox Tecnologia",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": ["nsis"],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "CondoBox SaaS Master",
+      "runAfterFinish": true
+    }
+  }
+}

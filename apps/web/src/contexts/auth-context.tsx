@@ -164,10 +164,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const role = profile?.role;
-  const isSuperAdmin = role === 'ADMIN';
-  const isPortaria = role === 'ADMIN' || role === 'SYNDIC' || role === 'GUARD';
-  const isAdmin = role === 'ADMIN' || role === 'SYNDIC';
-  const isMorador = role === 'RESIDENT';
+
+  // Lista de e-mails de super administradores (Dono do Sistema / Proprietário do SaaS)
+  const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+    .split(',')
+    .map(e => e.trim().toLowerCase());
+
+  const userEmail = user?.email?.toLowerCase() || '';
+  const isMasterByEmail = !!userEmail && superAdminEmails.includes(userEmail);
+
+  // O Dono do Sistema tem acesso Master apenas se for perfil de sistema ou estiver na lista de e-mails do proprietário
+  const isSuperAdmin = (role === 'ADMIN' && (!profile?.condo_id || isMasterByEmail)) || isMasterByEmail;
+  const isPortaria = isSuperAdmin || role === 'SYNDIC' || role === 'GUARD';
+  const isAdmin = isSuperAdmin || role === 'SYNDIC';
+  const isMorador = isSuperAdmin || role === 'RESIDENT' || role === 'SYNDIC';
   const effectiveCondoId = impersonatedCondo?.id || profile?.condo_id || null;
   const isImpersonating = !!impersonatedCondo;
 

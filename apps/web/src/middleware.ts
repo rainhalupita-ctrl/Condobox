@@ -3,9 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 // Mapeamento de permissões por papel
 const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
-  ADMIN:    ['/portaria', '/admin', '/morador'],
+  ADMIN:    ['/super-admin', '/portaria', '/admin', '/morador'],
   SYNDIC:   ['/portaria', '/admin', '/morador'],
-  GUARD:    ['/portaria', '/admin', '/morador'],
+  GUARD:    ['/portaria'],
   RESIDENT: ['/morador'],
 };
 
@@ -60,7 +60,7 @@ export async function middleware(request: NextRequest) {
         .eq('id', user.id)
         .single();
       const role = profile.data?.role || 'RESIDENT';
-      const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
+      const dest = role === 'RESIDENT' ? '/morador' : role === 'GUARD' ? '/portaria' : role === 'ADMIN' ? '/super-admin' : '/admin';
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
@@ -73,11 +73,20 @@ export async function middleware(request: NextRequest) {
     }
     const profile = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, condo_id')
       .eq('id', user.id)
       .single();
     const role = profile.data?.role || 'RESIDENT';
-    const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
+    const userEmail = (user.email || '').toLowerCase();
+    const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+      .split(',')
+      .map(e => e.trim().toLowerCase());
+    const isMasterOwner = (role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+
+    if (isMasterOwner) {
+      return NextResponse.redirect(new URL('/super-admin', request.url));
+    }
+    const dest = role === 'RESIDENT' ? '/morador' : role === 'GUARD' ? '/portaria' : '/admin';
     return NextResponse.redirect(new URL(dest, request.url));
   }
 
@@ -92,9 +101,24 @@ export async function middleware(request: NextRequest) {
   // Buscar perfil do usuário para checar permissão
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, condo_id')
     .eq('id', user.id)
     .single();
+
+  const userEmail = (user.email || '').toLowerCase();
+  const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+    .split(',')
+    .map(e => e.trim().toLowerCase());
+  const isMasterOwner = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+
+  // Proteção estrita para o Painel Master (/super-admin) - APENAS o Dono do Sistema
+  if (pathname.startsWith('/super-admin')) {
+    if (!isMasterOwner) {
+      const dest = profile?.role === 'RESIDENT' ? '/morador' : profile?.role === 'GUARD' ? '/portaria' : '/admin';
+      return NextResponse.redirect(new URL(dest, request.url));
+    }
+    return supabaseResponse;
+  }
 
   const role = (profile?.role as string) || 'RESIDENT';
   const allowedPaths = ROLE_ALLOWED_PATHS[role] || ['/morador'];
@@ -102,8 +126,8 @@ export async function middleware(request: NextRequest) {
   const hasAccess = allowedPaths.some(allowed => pathname.startsWith(allowed));
 
   if (!hasAccess) {
-    // Morador tentando acessar /portaria ou /admin → redireciona para /morador
-    const fallback = role === 'RESIDENT' ? '/morador' : '/portaria';
+    // Redireciona para o destino padrão do papel
+    const fallback = role === 'RESIDENT' ? '/morador' : role === 'GUARD' ? '/portaria' : '/admin';
     return NextResponse.redirect(new URL(fallback, request.url));
   }
 

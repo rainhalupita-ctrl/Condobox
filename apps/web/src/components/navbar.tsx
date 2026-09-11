@@ -17,11 +17,20 @@ export function Navbar() {
     );
   }
 
-  const navLinks = isPortaria
+  const navLinks = isSuperAdmin
+    ? [
+        { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
+        { href: '/admin', label: 'Gestão Local', icon: LayoutDashboard },
+        { href: '/portaria', label: 'Portaria', icon: Shield },
+      ]
+    : isAdmin
+    ? [
+        { href: '/admin', label: 'Administração do Condomínio', icon: LayoutDashboard },
+        { href: '/portaria', label: 'Portaria', icon: Shield },
+      ]
+    : isPortaria
     ? [
         { href: '/portaria', label: 'Portaria', icon: Shield },
-        { href: '/admin', label: 'Painel de Gestão', icon: LayoutDashboard },
-        ...(isSuperAdmin ? [{ href: '/super-admin', label: 'Painel Master', icon: ShieldAlert }] : []),
       ]
     : [
         { href: '/morador', label: 'Minhas Encomendas', icon: Package },
@@ -83,11 +92,12 @@ export function Navbar() {
                 </div>
                 <span className="hidden md:block max-w-[120px] truncate text-xs font-semibold">{profile.name}</span>
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase ${
+                  isSuperAdmin ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                   isAdmin ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
                   isPortaria ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
                   'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                 }`}>
-                  {isAdmin ? 'Admin' : isPortaria ? 'Portaria' : 'Morador'}
+                  {isSuperAdmin ? 'Dono' : isAdmin ? 'Síndico' : isPortaria ? 'Portaria' : 'Morador'}
                 </span>
                 <ChevronDown size={13} className="text-slate-500" />
               </button>
