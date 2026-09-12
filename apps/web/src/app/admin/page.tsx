@@ -44,6 +44,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
+import { PackageCard } from '../../components/package-card';
 import { VoiceService } from '../../lib/voice';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
@@ -55,7 +56,9 @@ export default function AdminPage() {
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'METRICS' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM' | 'AUTOMATIONS'>('METRICS');
+  const [activeTab, setActiveTab] = useState<'METRICS' | 'PACKAGES' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM' | 'AUTOMATIONS'>('METRICS');
+  const [packageSearchQuery, setPackageSearchQuery] = useState('');
+  const [packageStatusFilter, setPackageStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED'>('ALL');
 
   // Automações & Utilidades (Python & JS)
   const [reportResult, setReportResult] = useState<any>(null);
@@ -259,7 +262,8 @@ export default function AdminPage() {
       const { data: pData } = await supabase
         .from('packages')
         .select('*, unit:units(*), resident:residents(*)')
-        .eq('condo_id', effectiveCondoId);
+        .eq('condo_id', effectiveCondoId)
+        .order('received_at', { ascending: false });
 
       if (uData) {
         // Deduplica unidades caso existam registros repetidos
@@ -917,6 +921,19 @@ export default function AdminPage() {
   const deliveredCount = packages.filter(p => p.status === 'DELIVERED').length;
   const totalCount = packages.length;
 
+  const filteredPackages = packages.filter((pkg) => {
+    if (packageStatusFilter === 'PENDING' && pkg.status === 'DELIVERED') return false;
+    if (packageStatusFilter === 'DELIVERED' && pkg.status !== 'DELIVERED') return false;
+
+    if (!packageSearchQuery.trim()) return true;
+    const q = packageSearchQuery.toLowerCase();
+    const unitMatch = pkg.unit ? `${pkg.unit.block} ${pkg.unit.unit_number}`.toLowerCase().includes(q) : false;
+    const nameMatch = (pkg.resident?.name || pkg.recipient_name_ocr || '').toLowerCase().includes(q);
+    const codeMatch = (pkg.pickup_code || '').toLowerCase().includes(q) || (pkg.tracking_code || '').toLowerCase().includes(q);
+    const carrierMatch = (pkg.carrier || '').toLowerCase().includes(q);
+    return unitMatch || nameMatch || codeMatch || carrierMatch;
+  });
+
   return (
     <div className="space-y-6">
       {/* Header do Painel */}
@@ -968,6 +985,16 @@ export default function AdminPage() {
             }`}
           >
             <TrendingUp className="w-4 h-4" /> Métricas
+          </button>
+          <button
+            onClick={() => setActiveTab('PACKAGES')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
+              activeTab === 'PACKAGES'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Package className="w-4 h-4" /> Encomendas ({packages.length})
           </button>
           <button
             onClick={() => setActiveTab('UNITS')}
@@ -1026,57 +1053,197 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* ABA 1: MÉTRICAS E INDICADORES */}
-      {activeTab === 'METRICS' && (
+      {/* ABA 1 & 2: MÉTRICAS E ENCOMENDAS */}
+      {(activeTab === 'METRICS' || activeTab === 'PACKAGES') && (
         <div className="space-y-6 animate-fade-in">
+          {/* Métricas do Condomínio (Cards Interativos com Filtro Rápido) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Card 1 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+            {/* Card 1: Aguardando Retirada */}
+            <button
+              type="button"
+              onClick={() => setPackageStatusFilter(packageStatusFilter === 'PENDING' ? 'ALL' : 'PENDING')}
+              className={`text-left bg-slate-900 border rounded-3xl p-5 shadow-xl transition flex items-center justify-between group ${
+                packageStatusFilter === 'PENDING'
+                  ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-950/20'
+                  : 'border-slate-800 hover:border-amber-500/40'
+              }`}
+              title="Filtrar apenas encomendas aguardando retirada"
+            >
               <div>
                 <span className="text-xs font-semibold text-slate-400 block">Aguardando Retirada</span>
                 <span className="text-3xl font-black text-amber-400 mt-1 block">{pendingCount}</span>
                 <span className="text-[11px] text-slate-500">Na portaria agora</span>
               </div>
-              <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
+              <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20 group-hover:scale-110 transition-transform">
                 <Clock className="w-6 h-6" />
               </div>
-            </div>
+            </button>
 
-            {/* Card 2 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+            {/* Card 2: Entregues com Sucesso */}
+            <button
+              type="button"
+              onClick={() => setPackageStatusFilter(packageStatusFilter === 'DELIVERED' ? 'ALL' : 'DELIVERED')}
+              className={`text-left bg-slate-900 border rounded-3xl p-5 shadow-xl transition flex items-center justify-between group ${
+                packageStatusFilter === 'DELIVERED'
+                  ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-950/20'
+                  : 'border-slate-800 hover:border-emerald-500/40'
+              }`}
+              title="Filtrar apenas encomendas entregues"
+            >
               <div>
                 <span className="text-xs font-semibold text-slate-400 block">Entregues com Sucesso</span>
                 <span className="text-3xl font-black text-emerald-400 mt-1 block">{deliveredCount}</span>
                 <span className="text-[11px] text-slate-500">Com assinatura</span>
               </div>
-              <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
+              <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20 group-hover:scale-110 transition-transform">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
-            </div>
+            </button>
 
-            {/* Card 3 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+            {/* Card 3: Total de Encomendas */}
+            <button
+              type="button"
+              onClick={() => { setPackageStatusFilter('ALL'); setPackageSearchQuery(''); }}
+              className={`text-left bg-slate-900 border rounded-3xl p-5 shadow-xl transition flex items-center justify-between group ${
+                packageStatusFilter === 'ALL' && !packageSearchQuery
+                  ? 'border-sky-500/60 bg-sky-950/20'
+                  : 'border-slate-800 hover:border-sky-500/40'
+              }`}
+              title="Exibir todas as encomendas"
+            >
               <div>
                 <span className="text-xs font-semibold text-slate-400 block">Total de Encomendas</span>
                 <span className="text-3xl font-black text-sky-400 mt-1 block">{totalCount}</span>
                 <span className="text-[11px] text-slate-500">Histórico registrado</span>
               </div>
-              <div className="p-3 bg-sky-500/10 text-sky-400 rounded-2xl border border-sky-500/20">
+              <div className="p-3 bg-sky-500/10 text-sky-400 rounded-2xl border border-sky-500/20 group-hover:scale-110 transition-transform">
                 <Package className="w-6 h-6" />
               </div>
-            </div>
+            </button>
 
-            {/* Card 4 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+            {/* Card 4: Moradores Ativos */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('RESIDENTS')}
+              className="text-left bg-slate-900 border border-slate-800 hover:border-indigo-500/40 rounded-3xl p-5 shadow-xl transition flex items-center justify-between group"
+              title="Ver lista de moradores"
+            >
               <div>
                 <span className="text-xs font-semibold text-slate-400 block">Moradores Ativos</span>
                 <span className="text-3xl font-black text-indigo-400 mt-1 block">{residents.length}</span>
                 <span className="text-[11px] text-slate-500">Em {units.length} unidades</span>
               </div>
-              <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20">
+              <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20 group-hover:scale-110 transition-transform">
                 <Users className="w-6 h-6" />
               </div>
+            </button>
+          </div>
+
+          {/* Painel Completo de Encomendas do Condomínio */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                  <Package className="w-5 h-5 text-indigo-400" />
+                  Encomendas do Condomínio ({packages.length})
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Histórico completo com fotos da etiqueta, assinaturas de retirada, transportadora e avisos de WhatsApp.
+                </p>
+              </div>
+
+              {/* Filtros e Busca */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Buscar morador, apto, código..."
+                    value={packageSearchQuery}
+                    onChange={(e) => setPackageSearchQuery(e.target.value)}
+                    className="pl-9 pr-8 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition w-full sm:w-64"
+                  />
+                  {packageSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPackageSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPackageStatusFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                      packageStatusFilter === 'ALL'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Todas ({totalCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPackageStatusFilter('PENDING')}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                      packageStatusFilter === 'PENDING'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Aguardando ({pendingCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPackageStatusFilter('DELIVERED')}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                      packageStatusFilter === 'DELIVERED'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Entregues ({deliveredCount})
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={loadData}
+                  className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition shrink-0"
+                  title="Atualizar lista"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
             </div>
+
+            {/* Grid de Encomendas */}
+            {filteredPackages.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredPackages.map((pkg) => (
+                  <PackageCard
+                    key={pkg.id}
+                    pkg={pkg}
+                    onPackageUpdated={loadData}
+                    showActions={true}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 border border-dashed border-slate-800 rounded-2xl bg-slate-950/40">
+                <Package className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-300">Nenhuma encomenda encontrada</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {packageSearchQuery || packageStatusFilter !== 'ALL'
+                    ? 'Tente ajustar os filtros ou o termo de busca.'
+                    : 'As encomendas registradas na portaria aparecerão aqui automaticamente.'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
