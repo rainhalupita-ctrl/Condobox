@@ -19,6 +19,12 @@ import { whatsAppEngineService } from './services/whatsapp-engine.service.js';
 import { syncService } from './services/sync.service.js';
 import { BackupService } from './services/backup.service.js';
 import { queueConsumerService } from './services/queue-consumer.service.js';
+process.on('uncaughtException', (err) => {
+    console.error('💥 [Server Uncaught Exception]:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('💥 [Server Unhandled Rejection]:', reason?.message || reason);
+});
 const fastify = Fastify({
     logger: {
         transport: {

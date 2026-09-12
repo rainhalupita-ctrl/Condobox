@@ -21,6 +21,14 @@ import { databaseService } from './services/database.service.js';
 import { BackupService } from './services/backup.service.js';
 import { queueConsumerService } from './services/queue-consumer.service.js';
 
+process.on('uncaughtException', (err: any) => {
+  console.error('💥 [Server Uncaught Exception]:', err?.message || err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('💥 [Server Unhandled Rejection]:', reason?.message || reason);
+});
+
 const fastify = Fastify({
   logger: {
     transport: {

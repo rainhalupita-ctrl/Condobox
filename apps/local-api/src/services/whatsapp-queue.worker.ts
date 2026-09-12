@@ -14,6 +14,7 @@ export class WhatsAppQueueWorker {
   private intervalId: NodeJS.Timeout | null = null;
   private processedArrivalIds = new Set<string>();
   private processedDeliveryIds = new Set<string>();
+  private arrivalAttempts = new Map<string, number>();
 
   start() {
     if (this.isRunning) return;
@@ -303,6 +304,13 @@ export class WhatsAppQueueWorker {
             .from('packages')
             .update({ status: 'NOTIFIED' })
             .eq('id', packageId);
+        }
+      } else {
+        const count = (this.arrivalAttempts.get(packageId) || 0) + 1;
+        this.arrivalAttempts.set(packageId, count);
+        if (count >= 3) {
+          this.processedArrivalIds.add(packageId);
+          console.warn(`⚠️ [WhatsApp Worker] Notificação de Chegada para ${packageId} interrompida após 3 tentativas.`);
         }
       }
     } catch (err: any) {
