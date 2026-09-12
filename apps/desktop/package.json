@@ -46,6 +46,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh",
+      "warningsAsErrors": false,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "installerHeaderIcon": "assets/icon.ico",
