@@ -20,7 +20,8 @@ import {
   Sparkles,
   RefreshCw,
   QrCode,
-  MessageSquare
+  MessageSquare,
+  X
 } from 'lucide-react';
 
 interface PublicPackageData {
@@ -727,21 +728,40 @@ export default function PublicPackagePage() {
       {/* Modal de Foto Ampliada */}
       {modalImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in"
           onClick={() => setModalImage(null)}
         >
-          <div className="relative max-w-lg w-full bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-2xl flex flex-col items-center space-y-3">
-            <img
-              src={modalImage}
-              alt="Foto da Etiqueta"
-              className="max-h-[70vh] w-auto object-contain rounded-2xl"
-            />
-            <button
-              onClick={() => setModalImage(null)}
-              className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition"
-            >
-              Fechar Foto
-            </button>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-lg w-full max-h-[90vh] bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/90 shrink-0">
+              <span className="text-xs font-bold text-slate-200">Foto da Etiqueta</span>
+              <button
+                type="button"
+                onClick={() => setModalImage(null)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 transition"
+                title="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 p-3 sm:p-4 flex items-center justify-center bg-slate-950/70 overflow-hidden">
+              <img
+                src={modalImage}
+                alt="Foto da Etiqueta"
+                className="max-h-[50vh] sm:max-h-[55vh] w-auto max-w-full object-contain rounded-2xl shadow-md border border-slate-800/80"
+              />
+            </div>
+            <div className="p-3 border-t border-slate-800 bg-slate-900 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setModalImage(null)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition"
+              >
+                Fechar Foto
+              </button>
+            </div>
           </div>
         </div>
       )}

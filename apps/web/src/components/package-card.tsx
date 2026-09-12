@@ -17,7 +17,10 @@ import {
   Loader2,
   RefreshCw,
   PhoneCall,
-  AlertTriangle
+  AlertTriangle,
+  X,
+  ExternalLink,
+  User
 } from 'lucide-react';
 
 interface PackageCardProps {
@@ -62,6 +65,16 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     window.addEventListener('condobox:close-modals', onCloseModals);
     return () => window.removeEventListener('condobox:close-modals', onCloseModals);
   }, [pkg.id, pkg.status]);
+
+  // Fecha modal ao pressionar ESC
+  useEffect(() => {
+    if (!modalImage) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModalImage(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [modalImage]);
 
   const getCarrierColor = (carrier: string) => {
     const c = carrier.toLowerCase();
@@ -331,39 +344,138 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
       {/* Modal de visualização de foto ampliada */}
       {modalImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md"
           onClick={() => setModalImage(null)}
         >
-          <div className="relative max-w-2xl w-full max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl p-4 flex flex-col items-center">
-            <img
-              src={modalImage}
-              alt="Visualização"
-              className="max-h-[75vh] w-auto object-contain rounded-xl"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                if (!target.dataset.triedFallback) {
-                  target.dataset.triedFallback = 'true';
-                  target.src = LocalApiClient.getLocalFallbackUrl(
-                    modalImage.includes('signature') ? pkg.signature_image_path : pkg.label_image_path
-                  );
-                } else {
-                  target.style.display = 'none';
-                  const parent = target.parentElement;
-                  if (parent && !parent.querySelector('.img-error')) {
-                    const span = document.createElement('span');
-                    span.className = 'img-error text-slate-400 font-medium py-12 block text-center';
-                    span.innerHTML = '🚫<br/>Imagem não encontrada<br/><span class="text-xs text-slate-500 font-normal mt-2 block">Pode ter sido apagada na limpeza automática.</span>';
-                    parent.insertBefore(span, target);
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-xl max-h-[90vh] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* Cabeçalho do Modal com botão X de fechar */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 gap-2 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
+                  {modalImage.includes('signature') ? (
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <Package className="w-4 h-4 text-amber-400" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-slate-100 truncate">
+                    {modalImage.includes('signature') ? 'Assinatura de Entrega' : 'Foto da Etiqueta'}
+                  </h3>
+                  <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400">
+                    <span className={`px-1.5 py-0.5 rounded font-semibold border ${getCarrierColor(pkg.carrier)}`}>
+                      {pkg.carrier}
+                    </span>
+                    <span>•</span>
+                    <span className="font-medium text-slate-300">
+                      {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Unidade'}
+                    </span>
+                    <span>•</span>
+                    <span className="font-mono font-bold text-emerald-400">
+                      {pkg.pickup_code}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botão de Fechar X */}
+              <button
+                type="button"
+                onClick={() => setModalImage(null)}
+                className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 transition shrink-0"
+                title="Fechar visualização (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Imagem Central (Tamanho responsivo que não corta na tela) */}
+            <div className="relative flex-1 min-h-0 w-full p-2 sm:p-4 flex items-center justify-center bg-slate-950/80 overflow-hidden">
+              <img
+                src={modalImage}
+                alt="Visualização da Encomenda"
+                className="max-h-[46vh] sm:max-h-[50vh] max-w-full w-auto object-contain rounded-xl shadow-lg border border-slate-800/80 transition select-none"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  if (!target.dataset.triedFallback) {
+                    target.dataset.triedFallback = 'true';
+                    target.src = LocalApiClient.getLocalFallbackUrl(
+                      modalImage.includes('signature') ? pkg.signature_image_path : pkg.label_image_path
+                    );
+                  } else {
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent && !parent.querySelector('.img-error')) {
+                      const span = document.createElement('span');
+                      span.className = 'img-error text-slate-400 font-medium py-12 block text-center';
+                      span.innerHTML = '🚫<br/>Imagem não encontrada<br/><span class="text-xs text-slate-500 font-normal mt-2 block">Pode ter sido apagada na limpeza automática.</span>';
+                      parent.insertBefore(span, target);
+                    }
                   }
-                }
-              }}
-            />
-            <button
-              onClick={() => setModalImage(null)}
-              className="mt-4 px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-medium transition"
-            >
-              Fechar Visualização
-            </button>
+                }}
+              />
+            </div>
+
+            {/* Rodapé com Informações do Morador e Ações (Fechar e Enviar) */}
+            <div className="p-3 sm:p-4 bg-slate-900 border-t border-slate-800 flex flex-col gap-2.5 shrink-0">
+              {whatsAppFeedback && (
+                <div className="text-xs px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 font-medium text-slate-200">
+                  {whatsAppFeedback}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-xs text-slate-400 flex-wrap gap-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <User className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  <span className="text-slate-200 font-semibold truncate">{residentName}</span>
+                  {rawPhone && (
+                    <span className="text-slate-400 font-mono text-[11px]">({rawPhone})</span>
+                  )}
+                </div>
+                <div>{getStatusBadge()}</div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 flex-wrap sm:flex-nowrap pt-1">
+                <button
+                  type="button"
+                  onClick={() => setModalImage(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition"
+                >
+                  Fechar
+                </button>
+
+                {directWhatsAppUrl && (
+                  <a
+                    href={directWhatsAppUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition shadow-sm"
+                    title={`Abrir conversa no WhatsApp Web com ${residentName}`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Conversar</span>
+                  </a>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleSendWhatsApp(true)}
+                  disabled={isSendingWhatsApp}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-lg shadow-emerald-950 transition"
+                  title="Disparar notificação automática via WhatsApp da portaria"
+                >
+                  {isSendingWhatsApp ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isEffectivelyNotified ? 'Reenviar Notificação' : 'Enviar pro Morador'}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
