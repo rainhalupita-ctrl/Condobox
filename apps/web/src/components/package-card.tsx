@@ -15,7 +15,9 @@ import {
   MessageSquare,
   Send,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  PhoneCall,
+  AlertTriangle
 } from 'lucide-react';
 
 interface PackageCardProps {
@@ -23,9 +25,10 @@ interface PackageCardProps {
   onSelectDeliver?: (pkg: PackageType) => void;
   onPackageUpdated?: () => void;
   showActions?: boolean;
+  staleDaysThreshold?: number;
 }
 
-export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showActions = true }: PackageCardProps) {
+export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showActions = true, staleDaysThreshold = 5 }: PackageCardProps) {
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [whatsAppFeedback, setWhatsAppFeedback] = useState<string | null>(null);
@@ -152,13 +155,42 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
 
   const isEffectivelyNotified = pkg.status === 'NOTIFIED' || wasNotified === true;
 
+  const receivedTime = new Date(pkg.received_at || Date.now()).getTime();
+  const ageDays = Math.floor(Math.max(0, Date.now() - receivedTime) / (1000 * 60 * 60 * 24));
+  const isStale = pkg.status !== 'DELIVERED' && ageDays >= (staleDaysThreshold || 5);
+
+  const resident = pkg.resident || (pkg.unit?.residents?.find((r) => r.is_primary) || pkg.unit?.residents?.[0]);
+  const rawPhone = resident?.phone || (pkg as any).phone;
+  const residentName = resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
+  
+  let cleanPhone = (rawPhone || '').replace(/\D/g, '');
+  if (cleanPhone && !cleanPhone.startsWith('55') && cleanPhone.length >= 10) {
+    cleanPhone = `55${cleanPhone}`;
+  }
+
+  const directReminderText =
+    `👋 Olá, *${residentName}*! Tudo bem?\n\n` +
+    `Aqui é da *Portaria do Condomínio*.\n` +
+    `Sua encomenda da *${pkg.carrier}* (${pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'sua unidade'}) está disponível para retirada na portaria há *${ageDays} dias* (Código: *${pkg.pickup_code}*).\n\n` +
+    `Por favor, venha retirar na portaria quando puder! Obrigado.`;
+
+  const directWhatsAppUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(directReminderText)}` : null;
+
   return (
-    <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl hover:border-slate-700 transition flex flex-col justify-between gap-4">
+    <div className={`bg-slate-900/90 backdrop-blur-md rounded-2xl p-4 sm:p-5 shadow-xl transition flex flex-col justify-between gap-4 ${
+      isStale
+        ? 'border-2 border-rose-500/60 bg-gradient-to-b from-rose-950/20 via-slate-900/90 to-slate-900/90 shadow-rose-950/30 ring-1 ring-rose-500/30'
+        : 'border border-slate-800 hover:border-slate-700'
+    }`}>
       {/* Header do Card */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2.5 rounded-xl bg-slate-800 text-slate-300 border border-slate-700/50">
-            <Package className="w-5 h-5 text-emerald-400" />
+          <div className={`p-2.5 rounded-xl border ${
+            isStale
+              ? 'bg-rose-950/40 text-rose-300 border-rose-800/50'
+              : 'bg-slate-800 text-slate-300 border-slate-700/50'
+          }`}>
+            <Package className={`w-5 h-5 ${isStale ? 'text-rose-400' : 'text-emerald-400'}`} />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -166,6 +198,12 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
                 {pkg.carrier}
               </span>
               {getStatusBadge()}
+              {isStale && (
+                <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse shadow-sm">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Parada há {ageDays} {ageDays === 1 ? 'dia' : 'dias'}</span>
+                </span>
+              )}
             </div>
             <h4 className="text-base font-bold text-slate-100 mt-1">
               {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Unidade'}
@@ -187,7 +225,7 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
         <div className="min-w-0">
           <span className="text-slate-500 block text-[11px] font-medium">Destinatário:</span>
           <span className="font-semibold text-slate-200 truncate block text-xs mt-0.5">
-            {pkg.resident?.name || pkg.recipient_name_ocr || 'Não identificado'}
+            {residentName}
           </span>
         </div>
         <div className="min-w-0 text-right">
@@ -237,29 +275,45 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
           )}
         </div>
 
-        {/* Botão de WhatsApp */}
-        {pkg.status !== 'DELIVERED' && (
-          <button
-            type="button"
-            onClick={() => handleSendWhatsApp(isEffectivelyNotified)}
-            disabled={isSendingWhatsApp}
-            title={isEffectivelyNotified ? 'Reenviar notificação de WhatsApp' : 'Verificar e disparar mensagem WhatsApp'}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-50 ${
-              isEffectivelyNotified
-                ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
-                : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40 animate-pulse'
-            }`}
-          >
-            {isSendingWhatsApp ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : isEffectivelyNotified ? (
-              <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <Send className="w-3.5 h-3.5 text-emerald-400" />
-            )}
-            <span>{isEffectivelyNotified ? 'Reenviar WhatsApp' : 'Enviar WhatsApp'}</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Botão de Contato Direto para Encomendas Paradas */}
+          {isStale && directWhatsAppUrl && (
+            <a
+              href={directWhatsAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition shadow-sm"
+              title={`Chamar ${residentName} no WhatsApp para retirar encomenda parada`}
+            >
+              <PhoneCall className="w-3.5 h-3.5 text-amber-400" />
+              <span>Chamar Morador</span>
+            </a>
+          )}
+
+          {/* Botão de WhatsApp Oficial */}
+          {pkg.status !== 'DELIVERED' && (
+            <button
+              type="button"
+              onClick={() => handleSendWhatsApp(isEffectivelyNotified)}
+              disabled={isSendingWhatsApp}
+              title={isEffectivelyNotified ? 'Reenviar notificação de WhatsApp' : 'Verificar e disparar mensagem WhatsApp'}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-50 ${
+                isEffectivelyNotified
+                  ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
+                  : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40 animate-pulse'
+              }`}
+            >
+              {isSendingWhatsApp ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : isEffectivelyNotified ? (
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Send className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span>{isEffectivelyNotified ? 'Reenviar WhatsApp' : 'Enviar WhatsApp'}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Ações de Entrega */}

@@ -7,6 +7,7 @@ export interface Unit {
   block: string;
   unit_number: string;
   created_at?: string;
+  residents?: Resident[];
 }
 
 export interface Resident {
