@@ -7,8 +7,8 @@
   "scripts": {
     "prebuild": "powershell -ExecutionPolicy Bypass -Command \"if (!(Test-Path 'bin')) { New-Item -ItemType Directory -Path 'bin' }; if (!(Test-Path 'bin/node.exe')) { Copy-Item (Get-Command node).Source 'bin/node.exe' -Force }\"",
     "start": "electron .",
-    "pack": "npm run prebuild && electron-builder --dir",
-    "dist": "npm run prebuild && electron-builder && powershell -ExecutionPolicy Bypass -File ./scripts/sign_and_configure.ps1"
+    "pack": "npm run prebuild && npx electron-builder@24.13.3 --dir",
+    "dist": "npm run prebuild && npx electron-builder@24.13.3 && powershell -ExecutionPolicy Bypass -File ./scripts/sign_and_configure.ps1"
   },
   "dependencies": {
     "condo-local-api": "*"
@@ -39,13 +39,13 @@
       ],
       "icon": "assets/icon.ico",
       "legalTrademarks": "CondoBox",
-      "requestedExecutionLevel": "asInvoker",
       "publisherName": "CondoBox Tecnologia Condominial"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "installerHeaderIcon": "assets/icon.ico",
