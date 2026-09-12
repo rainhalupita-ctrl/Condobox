@@ -93,7 +93,7 @@ async function main() {
     await fastify.register(licenseRoutes);
     await fastify.register(utilitiesRoutes);
     // 5. Inicializar Serviços em Segundo Plano
-    setupCleanupCron(90);
+    setupCleanupCron(Number(process.env.CLEANUP_RETENTION_DAYS) || 30);
     setupReminderCron(); // Lembretes autônomos diários (10h e 18h para encomendas > 24h)
     BackupService.init();
     whatsAppQueueWorker.start(); // Worker legado (polling packages existentes)

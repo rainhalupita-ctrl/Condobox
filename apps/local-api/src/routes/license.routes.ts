@@ -4,6 +4,7 @@ import { licenseService } from '../services/license.service.js';
 import { adsService } from '../services/ads.service.js';
 import { databaseService } from '../services/database.service.js';
 import { supabaseService } from '../services/supabase.service.js';
+import { env } from '../config/env.js';
 
 export async function licenseRoutes(fastify: FastifyInstance) {
   /**
@@ -13,8 +14,9 @@ export async function licenseRoutes(fastify: FastifyInstance) {
   fastify.get('/api/license/status', async (request, reply) => {
     try {
       const { condoId } = (request.query as { condoId?: string }) || {};
-      const subscription = await licenseService.getSubscription(condoId);
-      let { units } = databaseService.getUnitsAndResidents(condoId);
+      const targetCondoId = condoId || env.CONDO_ID;
+      const subscription = await licenseService.getSubscription(targetCondoId);
+      let { units } = databaseService.getUnitsAndResidents(targetCondoId);
       
       const getUniqueCount = (unitsArray: any[]) => {
         const uniqueMap = new Map<string, boolean>();
@@ -30,7 +32,7 @@ export async function licenseRoutes(fastify: FastifyInstance) {
       // Se SQLite não tiver unidades mas Supabase tiver, sincroniza agora
       if (currentCount === 0 && supabaseService.isConfigured()) {
         try {
-          const cloudData = await supabaseService.getUnitsAndResidents(condoId);
+          const cloudData = await supabaseService.getUnitsAndResidents(targetCondoId);
           if (cloudData.units.length > 0) {
             databaseService.upsertUnitsAndResidents(cloudData.units, cloudData.residents);
             currentCount = getUniqueCount(cloudData.units);
@@ -38,7 +40,7 @@ export async function licenseRoutes(fastify: FastifyInstance) {
         } catch {}
       }
 
-      const unitCheck = await licenseService.canRegisterMoreUnits(currentCount, condoId);
+      const unitCheck = await licenseService.canRegisterMoreUnits(currentCount, targetCondoId);
 
       return reply.send({
         success: true,

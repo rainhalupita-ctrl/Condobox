@@ -58,6 +58,7 @@ export function SubscriptionGate({ children }: Props) {
     setLoading(true);
     try {
       let realUnitsCount = 0;
+      let unitsFetched = false;
       try {
         if (effectiveCondoId) {
           const supabase = createClient();
@@ -72,16 +73,22 @@ export function SubscriptionGate({ children }: Props) {
               uniqueMap.set(key, true);
             });
             realUnitsCount = uniqueMap.size;
+            unitsFetched = true;
           }
         }
       } catch {}
 
-      const res = await fetch('http://localhost:3001/api/license/status').catch(() => null);
+      const localApiUrl = effectiveCondoId
+        ? `http://localhost:3001/api/license/status?condoId=${encodeURIComponent(effectiveCondoId)}`
+        : 'http://localhost:3001/api/license/status';
+
+      const res = await fetch(localApiUrl).catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
         if (data.subscription) {
-          const currentCount = Math.max(data.unitsUsage?.current || 0, realUnitsCount);
-          const maxUnits = data.unitsUsage?.max || data.subscription.plan?.max_units || 250;
+          // A quantidade real de unidades do condomínio ativo tem precedência absoluta
+          const currentCount = unitsFetched ? realUnitsCount : (data.unitsUsage?.current ?? realUnitsCount);
+          const maxUnits = license?.max_apartments || data.unitsUsage?.max || data.subscription.plan?.max_units || 250;
           setSub(data.subscription);
           setUnitsUsage({
             current: currentCount,
