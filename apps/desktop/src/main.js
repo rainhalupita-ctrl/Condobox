@@ -106,6 +106,13 @@ function createWindow() {
         user-drag: none !important;
       }
     `);
+
+    // Injeta a URL da API local no localStorage para garantir comunicação imediata com o local-api
+    mainWindow.webContents.executeJavaScript(`
+      try {
+        localStorage.setItem('condo_local_api_url', 'http://localhost:3001');
+      } catch (e) {}
+    `);
   });
 
   // Carrega a URL da Portaria na nuvem

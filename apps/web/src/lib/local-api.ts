@@ -20,15 +20,33 @@ export interface OCRResponse {
 }
 
 export class LocalApiClient {
-  private static getBaseUrl(): string {
+  public static getBaseUrl(): string {
     if (typeof window !== 'undefined') {
       const savedIp = localStorage.getItem('condo_local_api_url');
       if (savedIp) return savedIp.replace(/\/$/, '');
-      // Se estamos acessando pelo browser fora do localhost (ex: celular no Vercel),
-      // não tenta localhost:3001 porque não existe servidor no celular
-      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        return '';
+
+      // 1. Detecta se está rodando dentro do aplicativo Electron Desktop
+      const isElectron =
+        (typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent)) ||
+        Boolean((window as any).process?.versions?.electron);
+
+      if (isElectron) {
+        return (process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001').replace(/\/$/, '');
       }
+
+      // 2. Se estiver acessando localmente no navegador (localhost ou 127.0.0.1)
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return (process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+      }
+
+      // 3. Se estiver acessando por IP de rede local (ex: 192.168.x.x ou 10.x.x.x)
+      if (/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(window.location.hostname)) {
+        return `http://${window.location.hostname}:3001`;
+      }
+
+      // 4. Se estamos acessando pelo browser fora do localhost (ex: celular no Vercel),
+      // não tenta localhost:3001 porque não existe servidor no celular
+      return '';
     }
     return (process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001').replace(/\/$/, '');
   }
@@ -351,7 +369,7 @@ export class LocalApiClient {
    * Verifica se a notificação da encomenda já foi enviada e envia no WhatsApp
    */
   static async notifyPackage(packageId: string, force = false) {
-    const baseUrl = this.getBaseUrl();
+    const baseUrl = this.getBaseUrl() || 'http://localhost:3001';
     if (baseUrl) {
       try {
         const res = await fetch(`${baseUrl}/api/packages/${packageId}/notify`, {
@@ -360,28 +378,37 @@ export class LocalApiClient {
           body: JSON.stringify({ force }),
           signal: AbortSignal.timeout(15000)
         });
-        if (res.ok) return await res.json();
-      } catch {}
+        const data = await res.json().catch(() => null);
+        if (res.ok && data) return data;
+        if (data && data.error) return data;
+      } catch (localErr: any) {
+        console.warn('[LocalApiClient] Erro na API local ao notificar pacote:', localErr?.message);
+      }
     }
 
     try {
-      const fallbackRes = await fetch(`/api/package/${packageId}/notify`, {
+      const fallbackRes = await fetch(`/api/packages/${packageId}/notify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force }),
         signal: AbortSignal.timeout(15000)
       });
-      if (fallbackRes.ok) return await fallbackRes.json();
+      const data = await fallbackRes.json().catch(() => null);
+      if (fallbackRes.ok && data) return data;
+      if (data && data.error) return data;
     } catch {}
 
-    return { success: false, error: 'API local da portaria não conectada' };
+    return {
+      success: false,
+      error: 'API local da portaria não conectada. Abra o aplicativo CondoBox no computador da portaria.',
+    };
   }
 
   /**
    * Dispara notificações para todas as encomendas pendentes que ainda não foram enviadas
    */
   static async notifyPendingPackages() {
-    const baseUrl = this.getBaseUrl();
+    const baseUrl = this.getBaseUrl() || 'http://localhost:3001';
     if (baseUrl) {
       try {
         const res = await fetch(`${baseUrl}/api/packages/notify-pending`, {
@@ -390,10 +417,29 @@ export class LocalApiClient {
           body: '{}',
           signal: AbortSignal.timeout(30000)
         });
-        if (res.ok) return await res.json();
-      } catch {}
+        const data = await res.json().catch(() => null);
+        if (res.ok && data) return data;
+        if (data && data.error) return data;
+      } catch (localErr: any) {
+        console.warn('[LocalApiClient] Erro na API local ao notificar pendentes:', localErr?.message);
+      }
     }
 
-    return { success: false, error: 'API local da portaria não conectada' };
+    try {
+      const fallbackRes = await fetch('/api/packages/notify-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(30000)
+      });
+      const data = await fallbackRes.json().catch(() => null);
+      if (fallbackRes.ok && data) return data;
+      if (data && data.error) return data;
+    } catch {}
+
+    return {
+      success: false,
+      error: 'API local da portaria não conectada. Abra o aplicativo CondoBox no computador da portaria.',
+    };
   }
 }
