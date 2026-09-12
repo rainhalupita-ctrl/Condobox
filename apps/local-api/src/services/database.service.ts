@@ -427,17 +427,54 @@ export class DatabaseService {
     }
     const allMatching = Array.from(uniqueMap.values());
 
-    // Separa pacotes que ainda NÃO tiveram ciência confirmada
-    const unacknowledged = allMatching.filter(r => !r.notes?.includes('CIENTE:'));
+    // Funções auxiliares para verificar se já foi retirado/entregue ou já confirmado
+    const isDelivered = (p: any): boolean => {
+      return p.status === 'DELIVERED' ||
+             Boolean(p.delivered_at) ||
+             Boolean(p.notes?.includes('DELIVERY_NOTIFIED'));
+    };
 
-    // Se TODAS as encomendas já tiverem ciência e o morador não digitou um código específico:
-    if (unacknowledged.length === 0 && !mentionedCode) {
-      console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência de todas as ${allMatching.length} encomenda(s). Suprimindo envio duplicado.`);
-      return { pkg: null, pkgs: [], alreadyAcknowledged: true };
+    const isAcknowledged = (p: any): boolean => {
+      if (!p.notes) return false;
+      const n = p.notes.toUpperCase();
+      return n.includes('CIENTE:') ||
+             n.includes('CIÊNCIA CONFIRMADA') ||
+             n.includes('CIENCIA CONFIRMADA');
+    };
+
+    // 1. Remove qualquer encomenda que já tenha sido entregue / retirada pelo morador
+    const pendingDelivery = allMatching.filter(p => !isDelivered(p));
+    if (pendingDelivery.length === 0) {
+      console.log(`ℹ️ [DatabaseService] Todas as encomendas encontradas para ${clean} já foram retiradas/entregues.`);
+      return null;
     }
 
-    // Pacotes a confirmar nesta rodada (se há não confirmados, confirma todos eles)
-    const targetPkgs = unacknowledged.length > 0 ? unacknowledged : allMatching;
+    // 2. Separa apenas os pacotes que ainda NÃO tiveram ciência confirmada pelo morador
+    const unacknowledged = pendingDelivery.filter(p => !isAcknowledged(p));
+
+    let targetPkgs: any[] = [];
+
+    // Se o morador NÃO digitou um código específico:
+    if (!mentionedCode) {
+      // Se todas as encomendas pendentes já foram confirmadas anteriormente:
+      if (unacknowledged.length === 0) {
+        console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência de todas as ${pendingDelivery.length} encomenda(s). Suprimindo envio duplicado.`);
+        return { pkg: null, pkgs: [], alreadyAcknowledged: true };
+      }
+
+      // Envia SOMENTE as novas encomendas que ainda não tiveram ciência!
+      // Encomendas antigas cujo morador já recebeu o link/código anteriormente não são re-enviadas.
+      targetPkgs = unacknowledged;
+    } else {
+      // Se o morador digitou um código específico, busca especificamente aquela encomenda
+      const matched = pendingDelivery.find(p => p.pickup_code === mentionedCode || p.pickup_code?.toUpperCase() === mentionedCode.toUpperCase());
+      if (matched) {
+        targetPkgs = [matched];
+      } else {
+        targetPkgs = unacknowledged.length > 0 ? unacknowledged : [pendingDelivery[0]];
+      }
+    }
+
     const nowIso = new Date().toISOString();
 
     for (const row of targetPkgs) {
