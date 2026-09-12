@@ -291,7 +291,7 @@ export default function PublicPackagePage() {
     }
   };
 
-  const handleConfirmAndUnlock = () => {
+  const handleConfirmAndUnlock = async () => {
     if (!pkg) return;
     setConfirming(true);
 
@@ -320,22 +320,48 @@ export default function PublicPackagePage() {
 
     const destPhone = targetWhatsappPhone || '557398419901';
 
-    // 3. Registra a confirmação no backend em segundo plano
+    // 3. Dispara em tempo real via canal WebSocket do Supabase direto para a portaria
+    try {
+      const supabase = createClient();
+      const bridge = supabase.channel('whatsapp_bridge');
+      bridge.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          bridge.send({
+            type: 'broadcast',
+            event: 'send_message',
+            payload: {
+              phone: destPhone,
+              message,
+              packageId: pkg.id,
+            }
+          }).catch(() => {});
+          setTimeout(() => {
+            try { supabase.removeChannel(bridge); } catch {}
+          }, 1500);
+        }
+      });
+    } catch (err) {
+      console.warn('[Realtime] Erro ao transmitir:', err);
+    }
+
+    // 4. Aciona a API de confirmação para disparo via Evolution API / registro no banco
     try {
       const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
-      fetch(`/api/package/${cleanToken}/acknowledge`, {
+      const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: destPhone }),
-      }).catch(() => {});
-    } catch {}
+      });
 
-    // 4. Abre o WhatsApp do morador já com a conversa da portaria e a mensagem pronta
-    const whatsappUrl = `https://api.whatsapp.com/send?phone=${destPhone}&text=${encodeURIComponent(message)}`;
-    setTimeout(() => {
-      window.location.href = whatsappUrl;
+      if (res.ok) {
+        setConfirmedToast(true);
+        setTimeout(() => setConfirmedToast(false), 6000);
+      }
+    } catch (err) {
+      console.warn('[Confirm] Falha no disparo:', err);
+    } finally {
       setConfirming(false);
-    }, 150);
+    }
   };
 
   const labelUrl = pkg?.label_image_path ? LocalApiClient.getImageUrl(pkg.label_image_path) : null;
@@ -369,7 +395,17 @@ export default function PublicPackagePage() {
   ).replace(/\D/g, '');
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-4 sm:p-6 selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-4 sm:p-6 selection:bg-emerald-500 selection:text-slate-950 relative">
+      {/* Toast de Confirmação no WhatsApp */}
+      {confirmedToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-400/50 animate-bounce">
+          <Check className="w-5 h-5 text-white" />
+          <div className="text-xs font-bold">
+            Confirmação enviada no WhatsApp da portaria com sucesso!
+          </div>
+        </div>
+      )}
+
       {/* Topo / Marca Oficial */}
       <div className="w-full max-w-md flex items-center justify-between py-4 mb-2">
         <img
@@ -510,10 +546,10 @@ export default function PublicPackagePage() {
                         ) : (
                           <MessageSquare className="w-5 h-5 text-emerald-100" />
                         )}
-                        <span>{confirming ? 'Abrindo o WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
+                        <span>{confirming ? 'Enviando confirmação no WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
                       </div>
                       <span className="text-[10px] font-normal text-emerald-100/80">
-                        Abre o WhatsApp e libera a etiqueta na volta
+                        {confirming ? 'Disparando confirmação via WhatsApp...' : 'Envia a confirmação no WhatsApp e libera a etiqueta na hora'}
                       </span>
                     </button>
                   </div>
