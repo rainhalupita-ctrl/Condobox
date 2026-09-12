@@ -32,6 +32,8 @@ export class WhatsAppEngineService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private lidCache: Map<string, string> = new Map();
+  private processedMessageIds: Set<string> = new Set();
 
   constructor() {
     const baseDataDir = process.env.CONDOBOX_DATA_DIR || path.resolve(process.cwd(), 'data');
@@ -40,6 +42,32 @@ export class WhatsAppEngineService {
       fs.mkdirSync(this.sessionDir, { recursive: true });
     }
     console.log(`📱 [WhatsApp Engine] Diretório de sessão configurado em: ${this.sessionDir}`);
+    this.preloadLidMappings();
+  }
+
+  private preloadLidMappings(): void {
+    const dirs = [
+      this.sessionDir,
+      path.join(process.env.APPDATA || '', 'condobox-desktop', 'data', 'whatsapp_session'),
+      path.resolve(process.cwd(), 'data', 'whatsapp_session')
+    ];
+
+    for (const dir of dirs) {
+      try {
+        if (fs.existsSync(dir)) {
+          const files = fs.readdirSync(dir);
+          for (const f of files) {
+            if (f.startsWith('lid-mapping-') && f.endsWith('.json')) {
+              try {
+                const content = fs.readFileSync(path.join(dir, f), 'utf-8').trim().replace(/"/g, '');
+                const phone = f.replace('lid-mapping-', '').replace('.json', '');
+                this.lidCache.set(content, phone);
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+    }
   }
 
 
@@ -552,6 +580,13 @@ export class WhatsAppEngineService {
   private resolvePhoneFromRemoteJid(remoteJid: string): string {
     if (remoteJid.includes('@lid')) {
       const cleanLid = remoteJid.replace(/@lid|\D/g, '');
+
+      // Resposta instantânea da memória (0.001ms)
+      if (this.lidCache.has(cleanLid)) {
+        return this.lidCache.get(cleanLid)!;
+      }
+
+      // Se ainda não estiver em cache, faz leitura rápida do disco
       const dirs = [
         this.sessionDir,
         path.join(process.env.APPDATA || '', 'condobox-desktop', 'data', 'whatsapp_session'),
@@ -566,18 +601,19 @@ export class WhatsAppEngineService {
               if (f.startsWith('lid-mapping-') && f.endsWith('.json')) {
                 try {
                   const content = fs.readFileSync(path.join(dir, f), 'utf-8').trim().replace(/"/g, '');
-                  if (content === cleanLid) {
-                    const phone = f.replace('lid-mapping-', '').replace('.json', '');
-                    this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via ${f}`);
-                    return phone;
-                  }
+                  const phone = f.replace('lid-mapping-', '').replace('.json', '');
+                  this.lidCache.set(content, phone);
                 } catch {}
               }
             }
           }
-        } catch (err: any) {
-          this.logToFile(`Erro ao consultar diretório de LID mapping (${dir}): ${err.message}`);
-        }
+        } catch {}
+      }
+
+      if (this.lidCache.has(cleanLid)) {
+        const phone = this.lidCache.get(cleanLid)!;
+        this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone}`);
+        return phone;
       }
     }
 
@@ -612,17 +648,41 @@ export class WhatsAppEngineService {
     try {
       if (msg.key.fromMe) return;
       const remoteJid = msg.key.remoteJid || '';
-      if (!remoteJid || remoteJid.includes('@g.us')) return;
+      if (
+        !remoteJid ||
+        remoteJid === 'status@broadcast' ||
+        remoteJid.includes('@g.us') ||
+        remoteJid.includes('@newsletter') ||
+        remoteJid.includes('@broadcast')
+      ) return;
+
+      // Deduplicação: ignora se a mesma mensagem já foi processada
+      const msgId = msg.key.id;
+      if (msgId) {
+        if (this.processedMessageIds.has(msgId)) return;
+        this.processedMessageIds.add(msgId);
+        if (this.processedMessageIds.size > 200) {
+          const first = this.processedMessageIds.values().next().value;
+          if (first) this.processedMessageIds.delete(first);
+        }
+      }
 
       const text = this.extractTextFromMessage(msg).trim();
       if (!text) return;
 
       const cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid);
-      this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone Resolvido: ${cleanPhone}): "${text}"`);
+      this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone: ${cleanPhone}): "${text}"`);
 
-      // Código de 4 a 6 caracteres se o morador tiver digitado diretamente
+      // Extrai código somente se não for palavra comum de confirmação em português
+      const commonWords = ['OK', 'CIENTE', 'SIM', 'NAO', 'VALEU', 'BOA', 'RECEBI', 'CONFIRMO', 'CHEGANDO', 'VOU', 'OBRIGADO', 'OBRIGADA', 'SHOW', 'TA', 'TÁ'];
+      let mentionedCode: string | null = null;
       const codeMatch = text.match(/\b([0-9a-zA-Z]{4,6})\b/);
-      const mentionedCode = codeMatch ? codeMatch[1].toUpperCase() : null;
+      if (codeMatch) {
+        const potential = codeMatch[1].toUpperCase();
+        if (!commonWords.includes(potential)) {
+          mentionedCode = potential;
+        }
+      }
 
       // Import dinâmico do serviço de dados local/supabase
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
@@ -631,7 +691,7 @@ export class WhatsAppEngineService {
         return;
       }
 
-      this.logToFile(`Buscando encomenda pendente para telefone ${cleanPhone} (Código: ${mentionedCode || 'N/A'})...`);
+      this.logToFile(`Buscando encomenda pendente para telefone ${cleanPhone}...`);
       const result = await databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
 
       if (result && result.pkg) {
@@ -661,7 +721,22 @@ export class WhatsAppEngineService {
           `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
           `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
 
-        // Envia diretamente na conversa ativa do morador (seja @lid ou @s.whatsapp.net)
+        // ⏱️ Delay humanizado anti-banimento (1.8s) com presença "digitando..."
+        try {
+          if (this.socket) {
+            await this.socket.sendPresenceUpdate('composing', remoteJid);
+          }
+        } catch {}
+
+        await new Promise(resolve => setTimeout(resolve, 1800));
+
+        try {
+          if (this.socket) {
+            await this.socket.sendPresenceUpdate('paused', remoteJid);
+          }
+        } catch {}
+
+        // Envia resposta
         try {
           if (this.socket) {
             this.logToFile(`Enviando confirmação diretamente para conversa ativa: ${remoteJid}...`);
@@ -670,7 +745,7 @@ export class WhatsAppEngineService {
             await this.sendTextMessage(cleanPhone, replyText);
           }
         } catch (sendErr: any) {
-          this.logToFile(`Falha no envio para ${remoteJid}: ${sendErr.message}. Tentando via sendTextMessage(${cleanPhone})...`);
+          this.logToFile(`Fallback para sendTextMessage(${cleanPhone})...`);
           await this.sendTextMessage(cleanPhone, replyText);
         }
 
