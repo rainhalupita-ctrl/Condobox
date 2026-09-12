@@ -169,7 +169,20 @@ export class QueueConsumerService {
     console.log(`📦 [QueueConsumer] Processando encomenda da fila: ${id} | Unidade: ${unit_id}`);
 
     try {
-      // 1. Salvar no SQLite local (banco permanente da portaria)
+      // 1. Reivindicação atômica: remove da fila do Supabase com select('id')
+      // Se múltiplos terminais (PCs) estiverem rodando, apenas UM obterá claimed.length > 0
+      const { data: claimed, error: deleteErr } = await supabaseService.getClient()
+        .from('fila_encomendas')
+        .delete()
+        .eq('id', id)
+        .select('id');
+
+      if (deleteErr || !claimed || claimed.length === 0) {
+        console.log(`🔒 [QueueConsumer] Item ${id} já foi reivindicado/processado por outro terminal. Ignorando.`);
+        return;
+      }
+
+      // 2. Salvar no SQLite local (banco permanente da portaria)
       const pkg = databaseService.createPackage({
         condoId: condo_id || env.CONDO_ID,
         unitId: unit_id,
@@ -183,43 +196,14 @@ export class QueueConsumerService {
 
       console.log(`✅ [QueueConsumer] Encomenda salva no SQLite: ${pkg.id} (código: ${pkg.pickup_code})`);
 
-      // 2. Disparar WhatsApp se solicitado
+      // 3. Disparar WhatsApp se solicitado através do worker atômico
       if (send_whatsapp !== false) {
-        const whatsappPhone = phone || await this.getResidentPhone(resident_id, unit_id);
-        if (whatsappPhone && whatsAppEngineService.isConnected()) {
-          const unit = databaseService.getUnitById(unit_id);
-          const unitInfo = unit ? `Apto ${unit.unit_number} - ${unit.block}` : 'sua unidade';
-          const residentName = recipient_name_ocr || 'Morador(a)';
-
-          const message = this.buildArrivalMessage(carrier, unitInfo, residentName);
-          const waResult = await whatsAppEngineService.sendTextMessage(whatsappPhone, message);
-
-          if (waResult.success) {
-            databaseService.updatePackageStatus(pkg.id, 'NOTIFIED');
-            console.log(`📱 [QueueConsumer] WhatsApp enviado com sucesso para ${whatsappPhone}`);
-          } else {
-            console.warn(`⚠️ [QueueConsumer] WhatsApp falhou: ${waResult.error}`);
-          }
-        } else if (!whatsAppEngineService.isConnected()) {
-          console.warn('⚠️ [QueueConsumer] WhatsApp desconectado — encomenda salva mas sem notificação');
-        }
-      }
-
-      // 3. Deletar da fila do Supabase (manter a nuvem limpa)
-      const { error: deleteErr } = await supabaseService.getClient()
-        .from('fila_encomendas')
-        .delete()
-        .eq('id', id);
-
-      if (deleteErr) {
-        console.warn(`⚠️ [QueueConsumer] Falha ao deletar da fila: ${deleteErr.message}`);
-      } else {
-        console.log(`🗑️ [QueueConsumer] Item removido da fila Supabase: ${id}`);
+        const { whatsAppQueueWorker } = await import('./whatsapp-queue.worker.js');
+        await whatsAppQueueWorker.dispatchArrivalNotification(pkg.id, pkg);
       }
 
     } catch (err: any) {
       console.error(`❌ [QueueConsumer] Erro ao processar encomenda ${id}:`, err.message);
-      // Não deletar da fila em caso de erro — o polling vai tentar novamente
     }
   }
 
@@ -233,6 +217,17 @@ export class QueueConsumerService {
     console.log(`💬 [QueueConsumer] Processando mensagem ${tipo}: ${id} → ${phone}`);
 
     try {
+      // Reivindicação atômica da mensagem avulsa
+      const { data: claimed, error: delErr } = await supabaseService.getClient()
+        .from('fila_mensagens')
+        .delete()
+        .eq('id', id)
+        .select('id');
+
+      if (delErr || !claimed || claimed.length === 0) {
+        return;
+      }
+
       if (whatsAppEngineService.isConnected()) {
         const result = await whatsAppEngineService.sendTextMessage(phone, message);
         if (result.success) {
@@ -241,14 +236,8 @@ export class QueueConsumerService {
           console.warn(`⚠️ [QueueConsumer] Falha no envio: ${result.error}`);
         }
       } else {
-        console.warn('⚠️ [QueueConsumer] WhatsApp offline — mensagem descartada após 3 tentativas futuras');
+        console.warn('⚠️ [QueueConsumer] WhatsApp offline — mensagem descartada');
       }
-
-      // Deleta da fila independente do resultado (evita spam)
-      await supabaseService.getClient()
-        .from('fila_mensagens')
-        .delete()
-        .eq('id', id);
 
     } catch (err: any) {
       console.error(`❌ [QueueConsumer] Erro ao processar mensagem ${id}:`, err.message);

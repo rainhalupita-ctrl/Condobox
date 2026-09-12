@@ -371,15 +371,23 @@ export class DatabaseService {
         ORDER BY p.received_at DESC
       `).all() as any[];
 
+      let unacknowledgedCand: any = null;
+      let anyMatchingCand: any = null;
+
       for (const cand of candidates) {
         if (!cand.resident_phone) continue;
         const cleanCand = cand.resident_phone.replace(/\D/g, '');
         const candLast8 = cleanCand.slice(-8);
         if (candLast8 && (candLast8 === last8 || cleanCand.endsWith(last8) || clean.endsWith(candLast8))) {
-          row = cand;
-          break;
+          if (!anyMatchingCand) anyMatchingCand = cand;
+          if (!cand.notes?.includes('CIENTE:')) {
+            unacknowledgedCand = cand;
+            break;
+          }
         }
       }
+
+      row = unacknowledgedCand || anyMatchingCand;
     }
 
     // 3. Fallback na Nuvem (Supabase) se não encontrar no SQLite local
@@ -396,6 +404,9 @@ export class DatabaseService {
             .limit(30);
 
           if (cloudPkgs && cloudPkgs.length > 0) {
+            let unackCloud: any = null;
+            let anyCloud: any = null;
+
             for (const cPkg of cloudPkgs) {
               if (mentionedCode && (cPkg.pickup_code === mentionedCode || cPkg.pickup_code?.toUpperCase() === mentionedCode.toUpperCase())) {
                 row = cPkg;
@@ -406,10 +417,17 @@ export class DatabaseService {
                 const cleanCloud = rPhone.replace(/\D/g, '');
                 const cloudLast8 = cleanCloud.slice(-8);
                 if (cloudLast8 && (cloudLast8 === last8 || cleanCloud.endsWith(last8) || clean.endsWith(cloudLast8))) {
-                  row = cPkg;
-                  break;
+                  if (!anyCloud) anyCloud = cPkg;
+                  if (!cPkg.notes?.includes('CIENTE:')) {
+                    unackCloud = cPkg;
+                    break;
+                  }
                 }
               }
+            }
+
+            if (!row) {
+              row = unackCloud || anyCloud;
             }
           }
         }
@@ -419,6 +437,12 @@ export class DatabaseService {
     }
 
     if (!row) return null;
+
+    const alreadyAcknowledged = Boolean(row.notes?.includes('CIENTE:'));
+    if (alreadyAcknowledged && !mentionedCode) {
+      console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência da encomenda ${row.pickup_code}. Suprimindo envio duplicado.`);
+      return { pkg: null, alreadyAcknowledged: true } as any;
+    }
 
     const nowIso = new Date().toISOString();
     const updatedNotes = row.notes?.includes('CIENTE:') ? row.notes : (row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`);
@@ -434,7 +458,7 @@ export class DatabaseService {
       `).run(updatedNotes, row.id);
     } catch {}
 
-    // Sincroniza em background com Supabase
+    // Sincroniza em background com Supabase com lock atômico
     try {
       const { supabaseService } = await import('./supabase.service.js');
       if (supabaseService.isConfigured()) {

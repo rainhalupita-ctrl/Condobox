@@ -34,6 +34,7 @@ export class WhatsAppEngineService {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private lidCache: Map<string, string> = new Map();
   private processedMessageIds: Set<string> = new Set();
+  private acknowledgmentCooldown: Map<string, number> = new Map();
 
   constructor() {
     const baseDataDir = process.env.CONDOBOX_DATA_DIR || path.resolve(process.cwd(), 'data');
@@ -684,6 +685,13 @@ export class WhatsAppEngineService {
         }
       }
 
+      // Se não for um código digitado expressamente e já houve confirmação enviada nos últimos 30 segundos, ignora
+      const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
+      if (!mentionedCode && Date.now() - lastAck < 30000) {
+        this.logToFile(`⏳ Ignorando mensagem de ${cleanPhone}: confirmação enviada recentemente (<30s). Evitando duplicata.`);
+        return;
+      }
+
       // Import dinâmico do serviço de dados local/supabase
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
       if (!databaseService) {
@@ -695,6 +703,7 @@ export class WhatsAppEngineService {
       const result = await databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
 
       if (result && result.pkg) {
+        this.acknowledgmentCooldown.set(cleanPhone, Date.now());
         const pkg = result.pkg;
         const webBaseUrl = this.getPublicWebUrl();
         const token = pkg.qr_token || pkg.pickup_code;
@@ -750,6 +759,9 @@ export class WhatsAppEngineService {
         }
 
         this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomenda: ${pkg.pickup_code})`);
+      } else if (result && (result as any).alreadyAcknowledged) {
+        this.acknowledgmentCooldown.set(cleanPhone, Date.now());
+        this.logToFile(`ℹ️ Ciência do morador (${cleanPhone}) já havia sido registrada. Envio repetido de QR Code suprimido.`);
       } else {
         this.logToFile(`⚠️ Nenhuma encomenda pendente encontrada para o telefone ${cleanPhone}.`);
       }

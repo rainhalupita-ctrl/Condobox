@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { storageService } from '../services/storage.service.js';
 import { databaseService } from '../services/database.service.js';
 import { supabaseService } from '../services/supabase.service.js';
-import { whatsappService } from '../services/whatsapp.service.js';
 const signaturePayloadSchema = z.object({
     packageId: z.string().min(1),
     signatureBase64: z.string().min(10, 'Assinatura inválida'),
@@ -100,29 +99,16 @@ export async function signatureRoutes(fastify) {
                 }
             }
             let whatsappSent = false;
-            // 4. Envia mensagem de confirmação via WhatsApp para o morador
-            const residentPhone = updatedPackage.resident?.phone;
-            if (body.sendWhatsAppConfirmation && residentPhone) {
-                const unitInfo = updatedPackage.unit
-                    ? `Apto ${updatedPackage.unit.unit_number} - ${updatedPackage.unit.block}`
-                    : 'Sua Unidade';
-                const nowFormatted = new Date().toLocaleString('pt-BR', {
-                    timeZone: 'America/Sao_Paulo',
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-                const notifyRes = await whatsappService.notifyPackageDelivered({
-                    phone: residentPhone,
-                    residentName: updatedPackage.resident?.name || updatedPackage.delivered_to_name || 'Morador',
-                    deliveredTo: body.deliveredToName,
-                    unitInfo: unitInfo,
-                    carrier: updatedPackage.carrier || 'Encomenda',
-                    deliveredAt: nowFormatted
-                });
-                whatsappSent = notifyRes.success;
+            // 4. Envia mensagem de confirmação via WhatsApp para o morador com lock atômico
+            if (body.sendWhatsAppConfirmation) {
+                try {
+                    const { whatsAppQueueWorker } = await import('../services/whatsapp-queue.worker.js');
+                    await whatsAppQueueWorker.dispatchDeliveryNotification(updatedPackage.id, updatedPackage);
+                    whatsappSent = true;
+                }
+                catch (delivErr) {
+                    console.warn('[SignatureRoutes] Erro no worker de confirmação de entrega:', delivErr.message);
+                }
             }
             return reply.send({
                 success: true,

@@ -180,7 +180,19 @@ export class WhatsAppQueueWorker {
       for (const logItem of pendingLogs || []) {
         if (logItem.recipient_phone && logItem.message_content) {
           try {
-            await client.from('notifications_log').update({ status: 'PROCESSING' }).eq('id', logItem.id);
+            // Lock atômico: só processa se ainda estiver com status PENDING no Supabase
+            const { data: claimed } = await client
+              .from('notifications_log')
+              .update({ status: 'PROCESSING' })
+              .eq('id', logItem.id)
+              .eq('status', 'PENDING')
+              .select('id');
+
+            if (!claimed || claimed.length === 0) {
+              // Outro PC já assumiu o processamento deste item
+              continue;
+            }
+
             const res = await whatsappService.sendMessage({
               phone: logItem.recipient_phone,
               message: logItem.message_content
@@ -211,14 +223,50 @@ export class WhatsAppQueueWorker {
     }
   }
 
+  public markArrivalProcessed(packageId: string) {
+    this.processedArrivalIds.add(packageId);
+  }
+
+  public markDeliveryProcessed(packageId: string) {
+    this.processedDeliveryIds.add(packageId);
+  }
+
   /**
    * Notificação de Chegada de Encomenda
    */
-  private async dispatchArrivalNotification(packageId: string, preloadedPkg?: any) {
+  public async dispatchArrivalNotification(packageId: string, preloadedPkg?: any) {
     if (this.processedArrivalIds.has(packageId)) return;
 
     try {
       const client = supabaseService.getClient();
+
+      // 🔒 LOCK ATÔMICO NO SUPABASE:
+      // Se múltiplos terminais (PCs ou celulares) estiverem conectados simultaneamente,
+      // apenas o primeiro a reivindicar de 'RECEIVED' -> 'NOTIFIED' terá sucesso.
+      // Os demais recebem 0 linhas afetadas e abortam imediatamente sem disparar duplicata!
+      if (supabaseService.isConfigured()) {
+        const { data: claimed, error: claimErr } = await client
+          .from('packages')
+          .update({ status: 'NOTIFIED' })
+          .eq('id', packageId)
+          .eq('status', 'RECEIVED')
+          .select('id');
+
+        if (claimErr || !claimed || claimed.length === 0) {
+          console.log(`🔒 [WhatsApp Worker] Pacote ${packageId} já foi reivindicado/notificado por outro terminal. Ignorando.`);
+          this.processedArrivalIds.add(packageId);
+          return;
+        }
+      }
+
+      this.processedArrivalIds.add(packageId);
+
+      // Sincroniza status no banco local SQLite
+      try {
+        const { databaseService } = await import('./database.service.js');
+        databaseService.updatePackageStatus(packageId, 'NOTIFIED');
+      } catch {}
+
       let pkg = preloadedPkg;
 
       if (!pkg) {
@@ -269,7 +317,6 @@ export class WhatsAppQueueWorker {
       }
 
       if (!phone) {
-        this.processedArrivalIds.add(packageId);
         return;
       }
 
@@ -291,25 +338,10 @@ export class WhatsAppQueueWorker {
 
       if (res.success) {
         console.log(`✅ [WhatsApp Worker] Notificação de Chegada enviada para ${phone}!`);
-        this.processedArrivalIds.add(packageId);
-        
-        // Atualiza no banco local e, por tabela, no Supabase
-        const { databaseService } = await import('./database.service.js');
-        databaseService.updatePackageStatus(packageId, 'NOTIFIED');
-        
-        // Também atualiza direto no Supabase para evitar race conditions com outros workers
-        const { supabaseService } = await import('./supabase.service.js');
-        if (supabaseService.isConfigured()) {
-          await supabaseService.getClient()
-            .from('packages')
-            .update({ status: 'NOTIFIED' })
-            .eq('id', packageId);
-        }
       } else {
         const count = (this.arrivalAttempts.get(packageId) || 0) + 1;
         this.arrivalAttempts.set(packageId, count);
         if (count >= 3) {
-          this.processedArrivalIds.add(packageId);
           console.warn(`⚠️ [WhatsApp Worker] Notificação de Chegada para ${packageId} interrompida após 3 tentativas.`);
         }
       }
@@ -321,7 +353,7 @@ export class WhatsAppQueueWorker {
   /**
    * Notificação de Retirada de Encomenda (ENCOMENDA RETIRADA COM SUCESSO)
    */
-  private async dispatchDeliveryNotification(packageId: string, preloadedPkg?: any) {
+  public async dispatchDeliveryNotification(packageId: string, preloadedPkg?: any) {
     if (this.processedDeliveryIds.has(packageId)) return;
 
     try {
@@ -335,6 +367,7 @@ export class WhatsAppQueueWorker {
             id,
             carrier,
             status,
+            notes,
             delivered_at,
             delivered_to_name,
             unit_id,
@@ -354,6 +387,33 @@ export class WhatsAppQueueWorker {
         if (!data) return;
         pkg = data;
       }
+
+      // Se já possui marcação de envio de retirada nas notas, não envia de novo
+      if (pkg.notes?.includes('DELIVERY_NOTIFIED')) {
+        this.processedDeliveryIds.add(packageId);
+        return;
+      }
+
+      // 🔒 LOCK ATÔMICO NO SUPABASE:
+      // Garante que apenas UM PC/terminal reivindique o envio de retirada
+      if (supabaseService.isConfigured()) {
+        const nowIso = new Date().toISOString();
+        const existingNotes = pkg.notes ? `${pkg.notes};DELIVERY_NOTIFIED:${nowIso}` : `DELIVERY_NOTIFIED:${nowIso}`;
+        const { data: claimed, error: claimErr } = await client
+          .from('packages')
+          .update({ notes: existingNotes })
+          .eq('id', packageId)
+          .or('notes.is.null,notes.not.ilike.%DELIVERY_NOTIFIED%')
+          .select('id');
+
+        if (claimErr || !claimed || claimed.length === 0) {
+          console.log(`🔒 [WhatsApp Worker] Pacote ${packageId} já teve confirmação de retirada enviada/reivindicada por outro terminal. Ignorando.`);
+          this.processedDeliveryIds.add(packageId);
+          return;
+        }
+      }
+
+      this.processedDeliveryIds.add(packageId);
 
       let phone = pkg.residents?.phone;
       let residentName = pkg.residents?.name || 'Morador(a)';
@@ -391,7 +451,6 @@ export class WhatsAppQueueWorker {
       }
 
       if (!phone) {
-        this.processedDeliveryIds.add(packageId);
         return;
       }
 
@@ -408,7 +467,6 @@ export class WhatsAppQueueWorker {
 
       if (res.success) {
         console.log(`✅ [WhatsApp Worker] Confirmação de Retirada enviada com sucesso para ${phone}!`);
-        this.processedDeliveryIds.add(packageId);
       } else {
         console.warn(`⚠️ [WhatsApp Worker] Falha ao enviar confirmação de retirada: ${res.error}`);
       }

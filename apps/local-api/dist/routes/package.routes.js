@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { databaseService } from '../services/database.service.js';
 import { supabaseService } from '../services/supabase.service.js';
-import { whatsappService } from '../services/whatsapp.service.js';
 import { whatsAppEngineService } from '../services/whatsapp-engine.service.js';
 const createPackageSchema = z.object({
     unitId: z.string().min(1),
@@ -83,51 +82,15 @@ export async function packageRoutes(fastify) {
             }
             let whatsappSent = false;
             let whatsappError = null;
-            // 3. Se marcado para enviar WhatsApp e temos os dados de contato
+            // 3. Se marcado para enviar WhatsApp, dispara através do worker com lock atômico
             if (body.sendWhatsApp) {
-                let phone = body.residentPhone;
-                let name = body.residentName || 'Morador';
-                let unitText = body.unitInfo || 'sua unidade';
-                // Se não tem telefone direto, busca no SQLite local
-                if (!phone && body.residentId) {
-                    const { residents } = databaseService.getUnitsAndResidents();
-                    const res = residents.find(r => r.id === body.residentId);
-                    if (res) {
-                        phone = res.phone;
-                        name = res.name;
-                    }
+                try {
+                    const { whatsAppQueueWorker } = await import('../services/whatsapp-queue.worker.js');
+                    await whatsAppQueueWorker.dispatchArrivalNotification(newPackage.id, newPackage);
+                    whatsappSent = true;
                 }
-                if (!phone && body.unitId) {
-                    const { residents } = databaseService.getUnitsAndResidents();
-                    const unitResidents = residents.filter(r => r.unit_id === body.unitId);
-                    if (unitResidents.length > 0) {
-                        const primary = unitResidents.find(r => r.is_primary === 1) || unitResidents[0];
-                        phone = primary.phone;
-                        if (!body.residentName)
-                            name = primary.name;
-                    }
-                }
-                if (phone) {
-                    const publicBase = whatsappService.getPublicWebUrl().replace(/\/$/, '');
-                    const labelUrl = body.labelImagePath
-                        ? (body.labelImagePath.startsWith('http')
-                            ? body.labelImagePath
-                            : `${publicBase}/images/${body.labelImagePath}`)
-                        : undefined;
-                    const notifyRes = await whatsappService.notifyPackageArrival({
-                        phone,
-                        residentName: name,
-                        unitInfo: unitText,
-                        carrier: body.carrier,
-                        pickupCode: newPackage.pickup_code,
-                        qrToken: newPackage.qr_token || newPackage.pickup_code,
-                        labelImageUrl: labelUrl
-                    });
-                    whatsappSent = notifyRes.success;
-                    whatsappError = notifyRes.error;
-                    if (whatsappSent) {
-                        databaseService.updatePackageStatus(newPackage.id, 'NOTIFIED');
-                    }
+                catch (queueErr) {
+                    whatsappError = queueErr.message;
                 }
             }
             return reply.status(201).send({
