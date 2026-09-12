@@ -160,6 +160,23 @@ export default function SuperAdminPage() {
   const [adLink, setAdLink] = useState('');
   const [adLoading, setAdLoading] = useState(false);
 
+  // Trava Anti-Cobrança & Armazenamento em Nuvem
+  const [storageQuota, setStorageQuota] = useState<{
+    allowed: boolean;
+    status: 'SAFE' | 'WARNING' | 'LOCKED';
+    usedBytes: number;
+    usedMB: number;
+    limitMB: number;
+    percentUsed: number;
+    fileCount: number;
+    provider: string;
+    lastChecked: string;
+    antiBillingProtectionActive: boolean;
+    message?: string;
+  } | null>(null);
+  const [purgingStorage, setPurgingStorage] = useState(false);
+  const [purgeResultMsg, setPurgeResultMsg] = useState<string | null>(null);
+
   useEffect(() => {
     document.title = 'CondoBox SaaS Master - Painel do Proprietário';
     if (!loading) {
@@ -262,10 +279,50 @@ export default function SuperAdminPage() {
 
       // 3. Carrega versões OTA dos aplicativos
       await loadVersions();
+
+      // 4. Carrega status de armazenamento e trava anti-cobrança
+      try {
+        const quotaRes = await fetch('/api/super-admin/storage-status', {
+          headers: { ...authHeaders },
+        });
+        if (quotaRes.ok) {
+          const qData = await quotaRes.json();
+          if (qData.quota) setStorageQuota(qData.quota);
+        }
+      } catch (quotaErr) {
+        console.warn('Falha ao carregar status da trava anti-cobrança:', quotaErr);
+      }
     } catch (e) {
       console.error('Erro ao carregar dados:', e);
     } finally {
       setLoadingData(false);
+    }
+  };
+
+  const handlePurgeStorage = async (days = 30) => {
+    if (!confirm(`Deseja limpar fotos antigas (+${days} dias) do armazenamento em nuvem para garantir custo zero permanente? As encomendas e histórico continuarão 100% salvos no banco.`)) {
+      return;
+    }
+    setPurgingStorage(true);
+    setPurgeResultMsg(null);
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/super-admin/storage-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
+        body: JSON.stringify({ days }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao executar limpeza');
+      if (data.quota) setStorageQuota(data.quota);
+      setPurgeResultMsg(data.message || `${data.purgedCount} fotos removidas, liberando ${data.freedMB} MB!`);
+    } catch (err: any) {
+      alert(`Erro na limpeza: ${err.message}`);
+    } finally {
+      setPurgingStorage(false);
     }
   };
 
@@ -762,6 +819,100 @@ export default function SuperAdminPage() {
               </span>
             </div>
           </button>
+        </div>
+      )}
+
+      {/* 🛡️ Cartão de Proteção Anti-Cobrança & Armazenamento em Nuvem */}
+      {storageQuota && (
+        <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-5 shadow-2xl relative overflow-hidden backdrop-blur-xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className={`p-3 rounded-2xl border ${
+                storageQuota.status === 'SAFE'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : storageQuota.status === 'WARNING'
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              }`}>
+                <ShieldCheck size={26} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                    Proteção Anti-Cobrança & Armazenamento
+                  </h2>
+                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                    storageQuota.status === 'SAFE'
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                      : storageQuota.status === 'WARNING'
+                      ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                      : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                  }`}>
+                    {storageQuota.status === 'SAFE'
+                      ? '🟢 100% Gratuito (Zero Risco de Cobrança)'
+                      : storageQuota.status === 'WARNING'
+                      ? '🟡 Atenção: 75%+ da Cota Segura'
+                      : '🔴 Trava Ativa: Upload Nuvem Pausado (Custo Zero Garantido)'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+                  {storageQuota.message} Imagens salvas em <strong className="text-slate-200">WebP super compactado (~60 KB)</strong> com rotação automática de 30 dias.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start md:self-center">
+              <button
+                type="button"
+                onClick={() => handlePurgeStorage(30)}
+                disabled={purgingStorage}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center gap-2 shadow-sm"
+                title="Remove fotos de encomendas entregues criadas há mais de 30 dias para liberar espaço"
+              >
+                {purgingStorage ? (
+                  <Loader2 size={14} className="animate-spin text-purple-400" />
+                ) : (
+                  <Trash2 size={14} className="text-rose-400" />
+                )}
+                <span>Limpar Fotos (+30 dias)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Barra de Progresso de Consumo */}
+          <div className="mt-4 pt-4 border-t border-slate-800/80">
+            <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
+              <span className="text-slate-300">
+                Uso do Storage em Nuvem: <strong className="text-white">{storageQuota.usedMB} MB</strong> de <strong className="text-slate-400">{storageQuota.limitMB} MB</strong> cota segura
+              </span>
+              <span className={`font-bold ${
+                storageQuota.percentUsed < 70 ? 'text-emerald-400' : storageQuota.percentUsed < 90 ? 'text-amber-400' : 'text-rose-400'
+              }`}>
+                {storageQuota.percentUsed}% utilizado ({storageQuota.fileCount} fotos)
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+              <div
+                className={`h-full transition-all duration-500 rounded-full ${
+                  storageQuota.percentUsed < 70
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                    : storageQuota.percentUsed < 90
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                    : 'bg-gradient-to-r from-rose-600 to-red-500'
+                }`}
+                style={{ width: `${Math.min(100, Math.max(2, storageQuota.percentUsed))}%` }}
+              />
+            </div>
+          </div>
+
+          {purgeResultMsg && (
+            <div className="mt-3 text-xs px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-xl flex items-center justify-between">
+              <span>{purgeResultMsg}</span>
+              <button type="button" onClick={() => setPurgeResultMsg(null)} className="text-emerald-400 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+          )}
         </div>
       )}
 

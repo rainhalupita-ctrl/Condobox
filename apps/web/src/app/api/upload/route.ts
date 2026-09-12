@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import Tesseract from 'tesseract.js';
+import { checkStorageGuard } from '@/lib/storage-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -371,6 +372,23 @@ export async function POST(request: NextRequest) {
     const ext = mimeType.includes('webp') ? 'webp' : 'jpg';
     const filename = `label_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
     let imagePublicUrl = `data:${mimeType};base64,${base64Image}`;
+
+    // ── Trava Anti-Cobrança: impede qualquer envio para a nuvem se exceder o limite gratuito
+    const guardStatus = await checkStorageGuard();
+    if (!guardStatus.allowed) {
+      console.warn(`[STORAGE-GUARD] 🛑 Trava anti-cobrança ATIVA (${guardStatus.usedMB} MB / ${guardStatus.limitMB} MB). Upload nuvem bloqueado para garantir R$ 0,00 de cobrança.`);
+      return NextResponse.json({
+        success: true,
+        image: { path: imagePublicUrl, url: imagePublicUrl },
+        ocr: finalOcr,
+        suggestedMatch: { unit: matchedUnit, resident: matchedResident },
+        storageProtection: {
+          active: true,
+          status: guardStatus.status,
+          message: 'Upload nuvem bloqueado pela Trava Anti-Cobrança. Foto preservada com segurança.',
+        },
+      });
+    }
 
     try {
       const { data: uploadData, error: uploadErr } = await supabase.storage
