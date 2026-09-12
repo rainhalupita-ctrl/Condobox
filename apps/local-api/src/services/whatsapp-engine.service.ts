@@ -724,33 +724,54 @@ export class WhatsAppEngineService {
       this.logToFile(`Buscando encomenda pendente para telefone ${cleanPhone}...`);
       const result = await databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
 
-      if (result && result.pkg) {
+      const pkgs: any[] = result?.pkgs && result.pkgs.length > 0 ? result.pkgs : (result?.pkg ? [result.pkg] : []);
+
+      if (pkgs.length > 0) {
         this.acknowledgmentCooldown.set(cleanPhone, Date.now());
-        const pkg = result.pkg;
         const webBaseUrl = this.getPublicWebUrl();
-        const token = pkg.qr_token || pkg.pickup_code;
-        const pickupUrl = `${webBaseUrl}/p/${token}`;
 
         let residentName = 'Morador(a)';
+        const firstPkg = pkgs[0];
         try {
-          if (pkg.resident?.name) {
-            residentName = pkg.resident.name;
-          } else if (pkg.resident_id) {
-            const r = databaseService.getResidentById(pkg.resident_id);
+          if (firstPkg.resident?.name) {
+            residentName = firstPkg.resident.name;
+          } else if (firstPkg.resident_id) {
+            const r = databaseService.getResidentById(firstPkg.resident_id);
             if (r?.name) residentName = r.name;
-          } else if (pkg.recipient_name_ocr) {
-            residentName = pkg.recipient_name_ocr;
+          } else if (firstPkg.recipient_name_ocr) {
+            residentName = firstPkg.recipient_name_ocr;
           }
         } catch {}
 
-        const carrierName = pkg.carrier || 'Encomenda';
+        let replyText = '';
 
-        const replyText =
-          `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-          `Que bom que você está ciente da sua encomenda da *${carrierName}*, *${residentName}*!\n\n` +
-          `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-          `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
-          `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
+        if (pkgs.length === 1) {
+          const pkg = pkgs[0];
+          const token = pkg.qr_token || pkg.pickup_code;
+          const pickupUrl = `${webBaseUrl}/p/${token}`;
+          const carrierName = pkg.carrier || 'Encomenda';
+
+          replyText =
+            `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
+            `Que bom que você está ciente da sua encomenda da *${carrierName}*, *${residentName}*!\n\n` +
+            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+            `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
+            `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
+        } else {
+          // Múltiplas encomendas juntas para o mesmo morador
+          const listItems = pkgs.map((pkg, idx) => {
+            const token = pkg.qr_token || pkg.pickup_code;
+            const pickupUrl = `${webBaseUrl}/p/${token}`;
+            const carrier = pkg.carrier || 'Encomenda';
+            return `📦 *${idx + 1}. ${carrier}*\n🔑 *Código:* *${pkg.pickup_code}*\n📱 *QR Code:* ${pickupUrl}`;
+          }).join('\n\n');
+
+          replyText =
+            `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
+            `Que bom que você está ciente das suas *${pkgs.length} encomendas*, *${residentName}*! Aqui estão os seus dados de retirada:\n\n` +
+            `${listItems}\n\n` +
+            `🏢 Apresente os códigos ou QR Codes na portaria para retirar todas as suas encomendas.`;
+        }
 
         // ⏱️ Delay humanizado anti-banimento (1.8s) com presença "digitando..."
         try {
@@ -780,7 +801,8 @@ export class WhatsAppEngineService {
           await this.sendTextMessage(cleanPhone, replyText);
         }
 
-        this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomenda: ${pkg.pickup_code})`);
+        const codes = pkgs.map(p => p.pickup_code).join(', ');
+        this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomendas: ${codes})`);
       } else if (result && (result as any).alreadyAcknowledged) {
         this.acknowledgmentCooldown.set(cleanPhone, Date.now());
         this.logToFile(`ℹ️ Ciência do morador (${cleanPhone}) já havia sido registrada. Envio repetido de QR Code suprimido.`);

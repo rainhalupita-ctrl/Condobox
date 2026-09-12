@@ -343,26 +343,28 @@ export class DatabaseService {
     }));
   }
 
-  public async acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): Promise<{ pkg?: any } | null> {
+  public async acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): Promise<{ pkg?: any; pkgs?: any[]; alreadyAcknowledged?: boolean } | null> {
     const clean = phone.replace(/\D/g, '');
     const last8 = clean.slice(-8);
 
-    let row: any = null;
+    let rows: any[] = [];
 
     // 1. Busca por código informado diretamente
     if (mentionedCode) {
       const query = `
-        SELECT p.*
+        SELECT p.*, r.name as resident_name, r.phone as resident_phone
         FROM packages p
+        LEFT JOIN residents r ON p.resident_id = r.id
         WHERE p.status != 'DELIVERED'
           AND (p.pickup_code = ? OR upper(p.pickup_code) = upper(?))
         LIMIT 1
       `;
-      row = this.db.prepare(query).get(mentionedCode, mentionedCode) as any;
+      const single = this.db.prepare(query).get(mentionedCode, mentionedCode) as any;
+      if (single) rows = [single];
     }
 
-    // 2. Busca local no SQLite por telefone do morador
-    if (!row && last8) {
+    // 2. Busca local no SQLite por telefone do morador (pode trazer 1 ou várias encomendas)
+    if (rows.length === 0 && last8) {
       const candidates = this.db.prepare(`
         SELECT p.*, r.name as resident_name, r.phone as resident_phone
         FROM packages p
@@ -371,27 +373,18 @@ export class DatabaseService {
         ORDER BY p.received_at DESC
       `).all() as any[];
 
-      let unacknowledgedCand: any = null;
-      let anyMatchingCand: any = null;
-
       for (const cand of candidates) {
         if (!cand.resident_phone) continue;
         const cleanCand = cand.resident_phone.replace(/\D/g, '');
         const candLast8 = cleanCand.slice(-8);
         if (candLast8 && (candLast8 === last8 || cleanCand.endsWith(last8) || clean.endsWith(candLast8))) {
-          if (!anyMatchingCand) anyMatchingCand = cand;
-          if (!cand.notes?.includes('CIENTE:')) {
-            unacknowledgedCand = cand;
-            break;
-          }
+          rows.push(cand);
         }
       }
-
-      row = unacknowledgedCand || anyMatchingCand;
     }
 
     // 3. Fallback na Nuvem (Supabase) se não encontrar no SQLite local
-    if (!row) {
+    if (rows.length === 0 && last8) {
       try {
         const { supabaseService } = await import('./supabase.service.js');
         if (supabaseService.isConfigured()) {
@@ -404,12 +397,9 @@ export class DatabaseService {
             .limit(30);
 
           if (cloudPkgs && cloudPkgs.length > 0) {
-            let unackCloud: any = null;
-            let anyCloud: any = null;
-
             for (const cPkg of cloudPkgs) {
               if (mentionedCode && (cPkg.pickup_code === mentionedCode || cPkg.pickup_code?.toUpperCase() === mentionedCode.toUpperCase())) {
-                row = cPkg;
+                rows.push(cPkg);
                 break;
               }
               const rPhone = cPkg.resident?.phone;
@@ -417,79 +407,90 @@ export class DatabaseService {
                 const cleanCloud = rPhone.replace(/\D/g, '');
                 const cloudLast8 = cleanCloud.slice(-8);
                 if (cloudLast8 && (cloudLast8 === last8 || cleanCloud.endsWith(last8) || clean.endsWith(cloudLast8))) {
-                  if (!anyCloud) anyCloud = cPkg;
-                  if (!cPkg.notes?.includes('CIENTE:')) {
-                    unackCloud = cPkg;
-                    break;
-                  }
+                  rows.push(cPkg);
                 }
               }
-            }
-
-            if (!row) {
-              row = unackCloud || anyCloud;
             }
           }
         }
       } catch (err: any) {
-        console.warn('[DatabaseService] Erro ao buscar pacote no Supabase:', err.message);
+        console.warn('[DatabaseService] Erro ao buscar pacotes no Supabase:', err.message);
       }
     }
 
-    if (!row) return null;
+    if (rows.length === 0) return null;
 
-    const alreadyAcknowledged = Boolean(row.notes?.includes('CIENTE:'));
-    if (alreadyAcknowledged && !mentionedCode) {
-      console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência da encomenda ${row.pickup_code}. Suprimindo envio duplicado.`);
-      return { pkg: null, alreadyAcknowledged: true } as any;
+    // Deduplica por ID
+    const uniqueMap = new Map<string, any>();
+    for (const r of rows) {
+      if (!uniqueMap.has(r.id)) uniqueMap.set(r.id, r);
+    }
+    const allMatching = Array.from(uniqueMap.values());
+
+    // Separa pacotes que ainda NÃO tiveram ciência confirmada
+    const unacknowledged = allMatching.filter(r => !r.notes?.includes('CIENTE:'));
+
+    // Se TODAS as encomendas já tiverem ciência e o morador não digitou um código específico:
+    if (unacknowledged.length === 0 && !mentionedCode) {
+      console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência de todas as ${allMatching.length} encomenda(s). Suprimindo envio duplicado.`);
+      return { pkg: null, pkgs: [], alreadyAcknowledged: true };
     }
 
+    // Pacotes a confirmar nesta rodada (se há não confirmados, confirma todos eles)
+    const targetPkgs = unacknowledged.length > 0 ? unacknowledged : allMatching;
     const nowIso = new Date().toISOString();
-    const updatedNotes = row.notes?.includes('CIENTE:') ? row.notes : (row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`);
 
-    // Atualiza SQLite local se existir no banco local
-    try {
-      this.db.prepare(`
-        UPDATE packages
-        SET status = CASE WHEN status = 'RECEIVED' THEN 'NOTIFIED' ELSE status END,
-            notes = ?,
-            sync_status = 'PENDING'
-        WHERE id = ?
-      `).run(updatedNotes, row.id);
-    } catch {}
+    for (const row of targetPkgs) {
+      const updatedNotes = row.notes?.includes('CIENTE:') ? row.notes : (row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`);
+      row.notes = updatedNotes;
 
-    // Sincroniza em background com Supabase com lock atômico
-    try {
-      const { supabaseService } = await import('./supabase.service.js');
-      if (supabaseService.isConfigured()) {
-        await supabaseService.getClient()
-          .from('packages')
-          .update({
-            notes: updatedNotes,
-            status: row.status === 'RECEIVED' ? 'NOTIFIED' : row.status
-          })
-          .eq('id', row.id);
+      // Atualiza SQLite local se existir no banco local
+      try {
+        this.db.prepare(`
+          UPDATE packages
+          SET status = CASE WHEN status = 'RECEIVED' THEN 'NOTIFIED' ELSE status END,
+              notes = ?,
+              sync_status = 'PENDING'
+          WHERE id = ?
+        `).run(updatedNotes, row.id);
+      } catch {}
+
+      // Sincroniza em background com Supabase com lock atômico
+      try {
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          await supabaseService.getClient()
+            .from('packages')
+            .update({
+              notes: updatedNotes,
+              status: row.status === 'RECEIVED' ? 'NOTIFIED' : row.status
+            })
+            .eq('id', row.id);
+        }
+      } catch (err: any) {
+        console.warn('[DatabaseService] Erro ao sincronizar ciência no Supabase:', err.message);
       }
-    } catch (err: any) {
-      console.warn('[DatabaseService] Erro ao sincronizar ciência no Supabase:', err.message);
     }
 
-    const localPkg = this.getPackageById(row.id);
-    if (localPkg) {
-      return { pkg: localPkg };
-    }
-
-    return {
-      pkg: {
+    const finalPkgs = targetPkgs.map(row => {
+      const local = this.getPackageById(row.id);
+      if (local) return local;
+      return {
         id: row.id,
         pickup_code: row.pickup_code,
         qr_token: row.qr_token || row.pickup_code,
         carrier: row.carrier,
         recipient_name_ocr: row.recipient_name_ocr || row.resident?.name,
-        notes: updatedNotes,
+        notes: row.notes,
         status: 'NOTIFIED',
         resident: row.resident
-      }
+      };
+    });
+
+    return {
+      pkg: finalPkgs[0],
+      pkgs: finalPkgs,
+      alreadyAcknowledged: false
     };
   }
 
