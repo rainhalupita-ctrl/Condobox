@@ -146,6 +146,8 @@ export async function POST(request: NextRequest) {
         `👤 *Retirado por:* ${deliveredTo}\n` +
         `🕒 *Data/Hora:* ${formattedDeliveredAt}\n` +
         `✍️ *Assinatura digital arquivada com segurança no sistema.*\n\n` +
+        `⚠️ *Não foi você quem retirou?*\n` +
+        `Se você não recebeu esta encomenda, você pode clicar no link enviado na mensagem anterior para contestar e entrar em contato com a portaria.\n\n` +
         `🏢 Portaria do Condomínio`;
 
       const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';

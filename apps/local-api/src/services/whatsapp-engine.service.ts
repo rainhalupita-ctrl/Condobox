@@ -542,6 +542,8 @@ export class WhatsAppEngineService {
     unitInfo: string;
     carrier: string;
     deliveredAt: string;
+    pickupCode?: string;
+    qrToken?: string;
   }): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const text =
       `✅ *ENCOMENDA RETIRADA COM SUCESSO*\n\n` +
@@ -550,6 +552,8 @@ export class WhatsAppEngineService {
       `👤 *Retirado por:* ${params.deliveredTo}\n` +
       `🕒 *Data/Hora:* ${params.deliveredAt}\n` +
       `✍️ *Assinatura digital arquivada no sistema da portaria.*\n\n` +
+      `⚠️ *Não foi você quem retirou?*\n` +
+      `Se você não recebeu esta encomenda, você pode clicar no link enviado na mensagem anterior para contestar e entrar em contato com a portaria.\n\n` +
       `🏢 Portaria do Condomínio`;
 
     // Simulação humanizada de digitação ("digitando...")

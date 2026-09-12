@@ -58,6 +58,8 @@ export class WhatsAppService {
     unitInfo: string;
     carrier: string;
     deliveredAt: string;
+    pickupCode?: string;
+    qrToken?: string;
   }): Promise<{ success: boolean; messageId?: string; error?: string }> {
     return whatsAppEngineService.notifyPackageDelivered(params);
   }

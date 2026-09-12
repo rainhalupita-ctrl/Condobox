@@ -424,6 +424,8 @@ export class WhatsAppQueueWorker {
             delivered_to_name,
             unit_id,
             resident_id,
+            pickup_code,
+            qr_token,
             units (
               block,
               unit_number
@@ -514,7 +516,9 @@ export class WhatsAppQueueWorker {
         unitInfo,
         deliveredTo,
         carrier: pkg.carrier || 'Encomenda',
-        deliveredAt: deliveredAtFormatted
+        deliveredAt: deliveredAtFormatted,
+        pickupCode: pkg.pickup_code,
+        qrToken: pkg.qr_token
       });
 
       if (res.success) {
