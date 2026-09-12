@@ -102,11 +102,10 @@ export async function POST(request: NextRequest) {
         const pickupUrl = `${webBaseUrl}/p/${newPackage.qr_token || newPackage.pickup_code}`;
 
         const messageText = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
-          `Olá, *${name}*!\n\n` +
-          `Uma encomenda de *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
-          `📱 *Link com QR Code de retirada:*\n` +
-          `${pickupUrl}\n\n` +
-          `_Apresente o QR Code ou informe o código de 6 dígitos na portaria._\n\n` +
+          `Olá, *${name}*! 👋\n\n` +
+          `Uma encomenda da *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
+          `📸 *Foto da etiqueta anexada acima.*\n\n` +
+          `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*\n\n` +
           `🏢 Portaria do Condomínio`;
 
         const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';

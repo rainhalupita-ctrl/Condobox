@@ -191,7 +191,7 @@ export class QueueConsumerService {
           const unitInfo = unit ? `Apto ${unit.unit_number} - ${unit.block}` : 'sua unidade';
           const residentName = recipient_name_ocr || 'Morador(a)';
 
-          const message = this.buildArrivalMessage(pkg.pickup_code, carrier, unitInfo, residentName);
+          const message = this.buildArrivalMessage(carrier, unitInfo, residentName);
           const waResult = await whatsAppEngineService.sendTextMessage(whatsappPhone, message);
 
           if (waResult.success) {
@@ -272,20 +272,17 @@ export class QueueConsumerService {
     return null;
   }
 
-  private buildArrivalMessage(pickupCode: string, carrier: string, unitInfo: string, residentName: string): string {
+  private buildArrivalMessage(carrier: string, unitInfo: string, residentName: string): string {
     return [
-      `📦 *Nova Encomenda na Portaria!*`,
+      `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*`,
       ``,
       `Olá, *${residentName}*! 👋`,
       ``,
-      `Chegou uma encomenda para *${unitInfo}*.`,
+      `Uma encomenda da *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitInfo}*).`,
       ``,
-      `🏷️ *Transportadora:* ${carrier}`,
-      `🔑 *Código de Retirada:* \`${pickupCode}\``,
+      `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*`,
       ``,
-      `Compareça à portaria com um documento de identificação.`,
-      ``,
-      `_CondoBox — Sistema de Gestão Condominial_ 🏢`
+      `🏢 Portaria do Condomínio`
     ].join('\n');
   }
 }

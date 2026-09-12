@@ -482,10 +482,10 @@ export class WhatsAppEngineService {
 
     const text =
       `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
-      `Olá, *${params.residentName}*!\n\n` +
-      `Uma encomenda de *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
-      `📱 *Link do QR Code:*\n${pickupUrl}\n\n` +
-      `_Apresente o QR Code ou informe o código de 6 dígitos na portaria ao retirar._\n\n` +
+      `Olá, *${params.residentName}*! 👋\n\n` +
+      `Uma encomenda da *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
+      `📸 *Foto da etiqueta anexada acima.*\n\n` +
+      `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*\n\n` +
       `🏢 Portaria do Condomínio${adFooter}`;
 
     if (params.labelImageUrl) {
@@ -554,37 +554,44 @@ export class WhatsAppEngineService {
 
       if (!text.trim()) return;
 
-      console.log(`📩 [WhatsApp Engine] Mensagem de ${cleanPhone}: "${text}"`);
+      console.log(`📩 [WhatsApp Engine] Resposta recebida de ${cleanPhone}: "${text}"`);
 
-      const normalized = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const isCiente =
-        normalized.includes('ciente') ||
-        normalized.includes('ok') ||
-        normalized.includes('sim') ||
-        normalized.includes('recebido') ||
-        normalized.includes('obrigado') ||
-        normalized.includes('valeu');
-
-      if (!isCiente) return;
-
-      // Código de 4 dígitos se mencionado
-      const codeMatch = text.match(/\b\d{4}\b/);
-      const mentionedCode = codeMatch ? codeMatch[0] : null;
+      // Código de 4 a 6 caracteres se o morador tiver digitado diretamente
+      const codeMatch = text.match(/\b([0-9a-zA-Z]{4,6})\b/);
+      const mentionedCode = codeMatch ? codeMatch[1].toUpperCase() : null;
 
       // Import dinâmico do serviço de dados local/supabase
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
-      if (databaseService) {
-        const result = databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
-        if (result && result.pkg) {
-          const pkg = result.pkg;
-          const replyText =
-            `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-            `Registramos sua confirmação para a encomenda *${pkg.carrier}*.\n\n` +
-            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n` +
-            `🏢 Portaria ciente da sua resposta!`;
+      if (!databaseService) return;
 
-          await this.sendTextMessage(cleanPhone, replyText);
-        }
+      const result = databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
+      if (result && result.pkg) {
+        const pkg = result.pkg;
+        const webBaseUrl = this.getPublicWebUrl();
+        const token = pkg.qr_token || pkg.pickup_code;
+        const pickupUrl = `${webBaseUrl}/p/${token}`;
+
+        let residentName = 'Morador(a)';
+        try {
+          if (pkg.resident_id) {
+            const r = databaseService.getResidentById(pkg.resident_id);
+            if (r?.name) residentName = r.name;
+          } else if (pkg.recipient_name_ocr) {
+            residentName = pkg.recipient_name_ocr;
+          }
+        } catch {}
+
+        const carrierName = pkg.carrier || 'Encomenda';
+
+        const replyText =
+          `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
+          `Que bom que você está ciente da sua encomenda da *${carrierName}*, *${residentName}*!\n\n` +
+          `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+          `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
+          `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
+
+        await this.sendTextMessage(cleanPhone, replyText);
+        console.log(`✅ [WhatsApp Engine] Ciência confirmada e QR Code enviado para ${cleanPhone} (Encomenda: ${pkg.pickup_code})`);
       }
     } catch (err: any) {
       console.warn('[WhatsApp Engine] Erro ao tratar mensagem recebida:', err.message);

@@ -167,6 +167,12 @@ export default function PublicPackagePage() {
               updated.qr_token === pkg?.qr_token ||
               updated.pickup_code === pkg?.pickup_code)
           ) {
+            if (
+              updated.notes?.includes('CIENTE:') ||
+              updated.notes?.toLowerCase().includes('ciência confirmada')
+            ) {
+              setIsUnlocked(true);
+            }
             if (updated.status === 'DELIVERED') {
               try {
                 if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -200,17 +206,26 @@ export default function PublicPackagePage() {
         fetch(`/api/package/${urlToken}?_t=${Date.now()}`, { cache: 'no-store' })
           .then((res) => res.json())
           .then((data) => {
-            if (data.package && data.package.status === 'DELIVERED') {
-              setPkg((prev) => {
-                if (prev?.status !== 'DELIVERED') {
-                  try {
-                    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-                      navigator.vibrate([100, 50, 100]);
-                    }
-                  } catch {}
-                }
-                return data.package;
-              });
+            if (data.package) {
+              if (
+                data.package.notes?.includes('CIENTE:') ||
+                data.package.notes?.toLowerCase().includes('ciência confirmada') ||
+                data.package.status === 'DELIVERED'
+              ) {
+                setIsUnlocked(true);
+              }
+              if (data.package.status === 'DELIVERED') {
+                setPkg((prev) => {
+                  if (prev?.status !== 'DELIVERED') {
+                    try {
+                      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                        navigator.vibrate([100, 50, 100]);
+                      }
+                    } catch {}
+                  }
+                  return data.package;
+                });
+              }
             }
           })
           .catch(() => {});
@@ -259,8 +274,16 @@ export default function PublicPackagePage() {
         if (data.ad) {
           setAd(data.ad);
         }
-        // Verifica se o usuário já desbloqueou este QR code localmente
-        if (typeof window !== 'undefined' && localStorage.getItem(`unlocked_${data.package.pickup_code}`) === 'true') {
+        // Se a ciência já foi confirmada pelo WhatsApp ou o morador já desbloqueou no navegador
+        const isAlreadyConfirmed =
+          data.package.status === 'DELIVERED' ||
+          data.package.notes?.includes('CIENTE:') ||
+          data.package.notes?.toLowerCase().includes('ciência confirmada');
+
+        if (
+          isAlreadyConfirmed ||
+          (typeof window !== 'undefined' && localStorage.getItem(`unlocked_${data.package.pickup_code}`) === 'true')
+        ) {
           setIsUnlocked(true);
         }
       } else {

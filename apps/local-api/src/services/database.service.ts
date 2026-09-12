@@ -347,31 +347,36 @@ export class DatabaseService {
     const clean = phone.replace(/\D/g, '');
     const last8 = clean.slice(-8);
 
-    let query = `
-      SELECT p.*
-      FROM packages p
-      JOIN residents r ON p.resident_id = r.id
-      WHERE p.status != 'DELIVERED'
-        AND substr(r.phone, -8) = ?
-      ORDER BY p.received_at DESC
-      LIMIT 1
-    `;
+    let row: any = null;
 
     if (mentionedCode) {
-      query = `
+      const query = `
         SELECT p.*
         FROM packages p
         WHERE p.status != 'DELIVERED'
-          AND p.pickup_code = ?
+          AND (p.pickup_code = ? OR p.pickup_code ILIKE ?)
         LIMIT 1
       `;
+      row = this.db.prepare(query).get(mentionedCode, mentionedCode) as any;
     }
 
-    const row = this.db.prepare(query).get(mentionedCode || last8) as any;
+    if (!row && last8) {
+      const query = `
+        SELECT p.*
+        FROM packages p
+        LEFT JOIN residents r ON p.resident_id = r.id
+        WHERE p.status != 'DELIVERED'
+          AND (substr(r.phone, -8) = ? OR substr(p.phone, -8) = ?)
+        ORDER BY p.received_at DESC
+        LIMIT 1
+      `;
+      row = this.db.prepare(query).get(last8, last8) as any;
+    }
+
     if (!row) return null;
 
     const nowIso = new Date().toISOString();
-    const updatedNotes = row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`;
+    const updatedNotes = row.notes?.includes('CIENTE:') ? row.notes : (row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`);
 
     this.db.prepare(`
       UPDATE packages
@@ -380,6 +385,20 @@ export class DatabaseService {
           sync_status = 'PENDING'
       WHERE id = ?
     `).run(updatedNotes, row.id);
+
+    // Sincroniza em background com Supabase
+    try {
+      import('./supabase.service.js').then(({ supabaseService }) => {
+        if (supabaseService.isConfigured()) {
+          Promise.resolve(
+            supabaseService.getClient()
+              .from('packages')
+              .update({ notes: updatedNotes, status: 'NOTIFIED' })
+              .eq('id', row.id)
+          ).catch(() => {});
+        }
+      }).catch(() => {});
+    } catch {}
 
     return { pkg: this.getPackageById(row.id) };
   }
