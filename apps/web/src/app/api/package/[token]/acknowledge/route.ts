@@ -232,13 +232,13 @@ export async function POST(
     // Se não tiver telefone do morador mas tiver o da portaria, usa o da portaria para notificar
     const targetPhone = recipientPhone || condoPhone;
 
-    // Monta o texto formal de confirmação de ciência
+    // Monta o texto de confirmação de ciência na voz do morador para a portaria
     const message =
-      `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-      `Olá, *${residentName}*!\n` +
-      `Registramos com sucesso sua confirmação para a encomenda da *${carrier}* (${unitText}).\n\n` +
+      `👍 *CONFIRMAÇÃO DE CIÊNCIA - MORADOR*\n\n` +
+      `Olá, Portaria!\n` +
+      `Eu, *${residentName}* (${unitText}), confirmo que recebi o aviso e estou ciente da minha encomenda da *${carrier}*.\n\n` +
       `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-      `🏢 *Portaria:* Notificação confirmada. Apresente o QR Code no balcão para retirar.`;
+      `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
 
     // 3. Dispara a mensagem para o WhatsApp do morador
     let whatsappSent = false;

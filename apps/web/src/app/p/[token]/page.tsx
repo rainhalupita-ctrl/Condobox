@@ -312,11 +312,11 @@ export default function PublicPackagePage() {
     const carrier = pkg.carrier || 'Encomenda';
 
     const message =
-      `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-      `Olá, *${residentName}*!\n` +
-      `Registramos com sucesso sua confirmação para a encomenda da *${carrier}* (${unitText}).\n\n` +
+      `👍 *CONFIRMAÇÃO DE CIÊNCIA - MORADOR*\n\n` +
+      `Olá, Portaria!\n` +
+      `Eu, *${residentName}* (${unitText}), confirmo que recebi o aviso e estou ciente da minha encomenda da *${carrier}*.\n\n` +
       `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-      `🏢 *Portaria:* Notificação confirmada. Apresente o QR Code no balcão para retirar.`;
+      `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
 
     const destPhone = targetWhatsappPhone || '557398419901';
 
