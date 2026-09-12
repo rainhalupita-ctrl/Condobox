@@ -291,7 +291,13 @@ export default function PublicPackagePage() {
     }
   };
 
-  const handleConfirmAndUnlock = async () => {
+  const targetWhatsappPhone = (
+    connectedWhatsappPhone ||
+    (pkg?.condo_phone && pkg.condo_phone !== '5511988887777' ? pkg.condo_phone : null) ||
+    '557398419901'
+  ).replace(/\D/g, '');
+
+  const handleConfirmAndUnlock = () => {
     if (!pkg) return;
     setConfirming(true);
 
@@ -301,7 +307,7 @@ export default function PublicPackagePage() {
       localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
     }
 
-    // 2. Monta a mensagem exata com os dados da encomenda
+    // 2. Monta a mensagem exata na voz do morador para a portaria
     const rawBlock = pkg.unit?.block || '';
     const blockText = rawBlock
       ? (rawBlock.toLowerCase().startsWith('bloco') ? rawBlock : `Bloco ${rawBlock}`)
@@ -320,48 +326,33 @@ export default function PublicPackagePage() {
 
     const destPhone = targetWhatsappPhone || '557398419901';
 
-    // 3. Dispara em tempo real via canal WebSocket do Supabase direto para a portaria
-    try {
-      const supabase = createClient();
-      const bridge = supabase.channel('whatsapp_bridge');
-      bridge.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          bridge.send({
-            type: 'broadcast',
-            event: 'send_message',
-            payload: {
-              phone: destPhone,
-              message,
-              packageId: pkg.id,
-            }
-          }).catch(() => {});
-          setTimeout(() => {
-            try { supabase.removeChannel(bridge); } catch {}
-          }, 1500);
-        }
-      });
-    } catch (err) {
-      console.warn('[Realtime] Erro ao transmitir:', err);
-    }
-
-    // 4. Aciona a API de confirmação para disparo via Evolution API / registro no banco
+    // 3. Notifica o backend em segundo plano para registrar a ciência no sistema
     try {
       const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
-      const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
+      fetch(`/api/package/${cleanToken}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: destPhone }),
-      });
-
-      if (res.ok) {
-        setConfirmedToast(true);
-        setTimeout(() => setConfirmedToast(false), 6000);
-      }
+      }).catch(() => {});
     } catch (err) {
-      console.warn('[Confirm] Falha no disparo:', err);
-    } finally {
-      setConfirming(false);
+      console.warn('[Confirm] Falha no registro em background:', err);
     }
+
+    // 4. Abre o WhatsApp no aparelho de quem clicou (morador enviando para a portaria)
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${destPhone}&text=${encodeURIComponent(message)}`;
+    const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      window.location.href = whatsappUrl;
+    } else {
+      window.open(whatsappUrl, '_blank');
+    }
+
+    setConfirmedToast(true);
+    setTimeout(() => {
+      setConfirmedToast(false);
+      setConfirming(false);
+    }, 4000);
   };
 
   const labelUrl = pkg?.label_image_path ? LocalApiClient.getImageUrl(pkg.label_image_path) : null;
@@ -388,11 +379,6 @@ export default function PublicPackagePage() {
     : '';
 
   const isDelivered = pkg?.status === 'DELIVERED';
-  const targetWhatsappPhone = (
-    connectedWhatsappPhone ||
-    (pkg?.condo_phone && pkg.condo_phone !== '5511988887777' ? pkg.condo_phone : null) ||
-    ''
-  ).replace(/\D/g, '');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-4 sm:p-6 selection:bg-emerald-500 selection:text-slate-950 relative">
@@ -546,10 +532,10 @@ export default function PublicPackagePage() {
                         ) : (
                           <MessageSquare className="w-5 h-5 text-emerald-100" />
                         )}
-                        <span>{confirming ? 'Enviando confirmação no WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
+                        <span>{confirming ? 'Abrindo WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
                       </div>
                       <span className="text-[10px] font-normal text-emerald-100/80">
-                        {confirming ? 'Disparando confirmação via WhatsApp...' : 'Envia a confirmação no WhatsApp e libera a etiqueta na hora'}
+                        {confirming ? 'Abrindo conversa com a portaria...' : 'Abre o WhatsApp e libera a etiqueta na volta'}
                       </span>
                     </button>
                   </div>
