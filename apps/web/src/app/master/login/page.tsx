@@ -63,7 +63,7 @@ function MasterLoginForm() {
       // 2. Se NÃO for o Dono do Sistema, desloga imediatamente
       if (!isMaster) {
         await supabase.auth.signOut();
-        setError('Acesso Negado: Esta conta não possui privilégios de Dono do SaaS.');
+        setError('Acesso Negado: Esta conta não possui privilégios de Sócio Proprietário do SaaS.');
         setLoading(false);
         return;
       }
