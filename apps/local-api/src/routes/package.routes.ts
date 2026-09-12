@@ -92,11 +92,14 @@ export async function packageRoutes(fastify: FastifyInstance) {
       let whatsappSent = false;
       let whatsappError = null;
 
-      // 3. Se marcado para enviar WhatsApp, dispara através do worker com lock atômico
+      // 3. Se marcado para enviar WhatsApp, enfileira no worker de envio sequencial
       if (body.sendWhatsApp) {
         try {
           const { whatsAppQueueWorker } = await import('../services/whatsapp-queue.worker.js');
-          await whatsAppQueueWorker.dispatchArrivalNotification(newPackage.id, newPackage);
+          // Enfileira em background para liberar o scanner do porteiro imediatamente
+          whatsAppQueueWorker.dispatchArrivalNotification(newPackage.id, newPackage).catch((err) => {
+            console.warn('[PackageRoutes] Erro na fila de envio de WhatsApp:', err.message);
+          });
           whatsappSent = true;
         } catch (queueErr: any) {
           whatsappError = queueErr.message;

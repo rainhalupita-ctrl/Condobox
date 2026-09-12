@@ -2,9 +2,16 @@ import { supabaseService } from './supabase.service.js';
 import { whatsappService } from './whatsapp.service.js';
 import { env } from '../config/env.js';
 
+interface QueuedArrivalItem {
+  packageId: string;
+  preloadedPkg?: any;
+  resolve?: (val: any) => void;
+  reject?: (err: any) => void;
+}
+
 /**
  * Worker que monitora pacotes no Supabase e dispara o WhatsApp
- * usando a Evolution API local conectada no computador da portaria:
+ * usando a Evolution API / Baileys local conectada no computador da portaria:
  * 1. Chegada de Encomenda (INSERT / status: RECEIVED)
  * 2. Retirada de Encomenda (UPDATE / status: DELIVERED)
  */
@@ -15,6 +22,8 @@ export class WhatsAppQueueWorker {
   private processedArrivalIds = new Set<string>();
   private processedDeliveryIds = new Set<string>();
   private arrivalAttempts = new Map<string, number>();
+  private arrivalQueue: QueuedArrivalItem[] = [];
+  private isProcessingArrivalQueue = false;
 
   start() {
     if (this.isRunning) return;
@@ -232,9 +241,52 @@ export class WhatsAppQueueWorker {
   }
 
   /**
-   * Notificação de Chegada de Encomenda
+   * Enfileira notificação de chegada de encomenda para disparo sequencial humanizado.
+   * Se o porteiro escanear múltiplos pacotes em sequência, eles entram na fila e são
+   * processados de um em um, com presença de digitação ativa e intervalos anti-spam entre moradores.
    */
-  public async dispatchArrivalNotification(packageId: string, preloadedPkg?: any) {
+  public async dispatchArrivalNotification(packageId: string, preloadedPkg?: any): Promise<any> {
+    if (this.processedArrivalIds.has(packageId)) return;
+    if (this.arrivalQueue.some(item => item.packageId === packageId)) return;
+
+    return new Promise((resolve, reject) => {
+      this.arrivalQueue.push({ packageId, preloadedPkg, resolve, reject });
+      console.log(`📥 [WhatsApp Worker] Encomenda ${packageId} na fila de envio. Total aguardando: ${this.arrivalQueue.length}`);
+      this.processArrivalQueue().catch(reject);
+    });
+  }
+
+  private async processArrivalQueue(): Promise<void> {
+    if (this.isProcessingArrivalQueue) return;
+    this.isProcessingArrivalQueue = true;
+
+    try {
+      while (this.arrivalQueue.length > 0) {
+        const item = this.arrivalQueue.shift()!;
+        try {
+          const res = await this.executeArrivalDispatch(item.packageId, item.preloadedPkg);
+          if (item.resolve) item.resolve(res);
+        } catch (err: any) {
+          if (item.reject) item.reject(err);
+        }
+
+        // Se ainda restarem pacotes na fila aguardando para outros moradores:
+        // Aguarda uma pausa natural entre um morador e o próximo (ex: 2.5s a 4.0s)
+        if (this.arrivalQueue.length > 0) {
+          const pauseMs = Math.floor(Math.random() * 1500) + 2500;
+          console.log(`⏳ [WhatsApp Worker] Envio concluído. Aguardando ${(pauseMs / 1000).toFixed(1)}s antes de iniciar para o próximo morador da fila (${this.arrivalQueue.length} restantes)...`);
+          await new Promise(r => setTimeout(r, pauseMs));
+        }
+      }
+    } finally {
+      this.isProcessingArrivalQueue = false;
+    }
+  }
+
+  /**
+   * Executa o disparo de chegada individual com lock atômico no Supabase
+   */
+  private async executeArrivalDispatch(packageId: string, preloadedPkg?: any) {
     if (this.processedArrivalIds.has(packageId)) return;
 
     try {

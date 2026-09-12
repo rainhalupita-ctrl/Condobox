@@ -517,6 +517,17 @@ export class WhatsAppEngineService {
       `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*\n\n` +
       `🏢 Portaria do Condomínio${adFooter}`;
 
+    // Simulação humanizada de digitação ("digitando...")
+    try {
+      if (this.socket && this.currentStatus === 'CONNECTED') {
+        const jid = await this.resolveJid(params.phone);
+        await this.socket.sendPresenceUpdate('composing', jid);
+        const typingDelay = Math.floor(Math.random() * 1200) + 2000; // 2.0s a 3.2s
+        await new Promise(r => setTimeout(r, typingDelay));
+        await this.socket.sendPresenceUpdate('paused', jid);
+      }
+    } catch {}
+
     if (params.labelImageUrl) {
       return this.sendImageMessage(params.phone, params.labelImageUrl, text);
     } else {
@@ -540,6 +551,17 @@ export class WhatsAppEngineService {
       `🕒 *Data/Hora:* ${params.deliveredAt}\n` +
       `✍️ *Assinatura digital arquivada no sistema da portaria.*\n\n` +
       `🏢 Portaria do Condomínio`;
+
+    // Simulação humanizada de digitação ("digitando...")
+    try {
+      if (this.socket && this.currentStatus === 'CONNECTED') {
+        const jid = await this.resolveJid(params.phone);
+        await this.socket.sendPresenceUpdate('composing', jid);
+        const typingDelay = Math.floor(Math.random() * 800) + 1500; // 1.5s a 2.3s
+        await new Promise(r => setTimeout(r, typingDelay));
+        await this.socket.sendPresenceUpdate('paused', jid);
+      }
+    } catch {}
 
     return this.sendTextMessage(params.phone, text);
   }
