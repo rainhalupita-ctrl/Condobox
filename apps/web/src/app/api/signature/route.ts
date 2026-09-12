@@ -150,27 +150,35 @@ export async function POST(request: NextRequest) {
         `Se você não recebeu esta encomenda, você pode clicar no link enviado na mensagem anterior para contestar e entrar em contato com a portaria.\n\n` +
         `🏢 Portaria do Condomínio`;
 
-      const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-      const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
+      const evolutionUrl = process.env.EVOLUTION_API_URL;
+      const evolutionKey = process.env.EVOLUTION_API_KEY;
       const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
 
-      try {
-        const sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': evolutionKey
-          },
-          body: JSON.stringify({
-            number: cleanPhone,
-            text: messageText
-          }),
-          signal: AbortSignal.timeout(8000)
-        });
-        if (sendRes.ok) {
-          whatsappDeliveredSent = true;
-        }
-      } catch {}
+      const isRemoteEvolution = Boolean(
+        evolutionUrl &&
+        !evolutionUrl.includes('localhost') &&
+        !evolutionUrl.includes('127.0.0.1')
+      );
+
+      if (isRemoteEvolution) {
+        try {
+          const sendRes = await fetch(`${evolutionUrl!.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': evolutionKey || ''
+            },
+            body: JSON.stringify({
+              number: cleanPhone,
+              text: messageText
+            }),
+            signal: AbortSignal.timeout(3000)
+          });
+          if (sendRes.ok) {
+            whatsappDeliveredSent = true;
+          }
+        } catch {}
+      }
     }
 
     return NextResponse.json({

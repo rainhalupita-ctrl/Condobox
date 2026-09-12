@@ -73,6 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     let whatsappSent = false;
+    let whatsappQueued = false;
     let whatsappError: string | undefined;
 
     // 3. Disparo de WhatsApp se solicitado
@@ -108,76 +109,88 @@ export async function POST(request: NextRequest) {
           `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*\n\n` +
           `🏢 Portaria do Condomínio`;
 
-        const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-        const evolutionKey = process.env.EVOLUTION_API_KEY || 'condobox_evolution_secret_key_2026';
+        const evolutionUrl = process.env.EVOLUTION_API_URL;
+        const evolutionKey = process.env.EVOLUTION_API_KEY;
         const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
         const labelImageUrl = labelImagePath && (labelImagePath.startsWith('http://') || labelImagePath.startsWith('https://'))
           ? labelImagePath
           : undefined;
 
-        try {
-          let sendRes: Response | null = null;
+        // Só tenta conexão HTTP direta se houver uma URL remota válida (não localhost/127.0.0.1)
+        const isRemoteEvolution = Boolean(
+          evolutionUrl &&
+          !evolutionUrl.includes('localhost') &&
+          !evolutionUrl.includes('127.0.0.1')
+        );
 
-          // 1. Tenta enviar como mensagem com Imagem (Evolution API v2)
-          if (labelImageUrl) {
-            try {
-              sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
+        if (isRemoteEvolution) {
+          try {
+            let sendRes: Response | null = null;
+
+            // 1. Tenta enviar como mensagem com Imagem
+            if (labelImageUrl) {
+              try {
+                sendRes = await fetch(`${evolutionUrl!.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': evolutionKey || ''
+                  },
+                  body: JSON.stringify({
+                    number: cleanPhone,
+                    media: labelImageUrl,
+                    mediatype: 'image',
+                    mimetype: 'image/jpeg',
+                    caption: messageText,
+                    fileName: 'etiqueta.jpg'
+                  }),
+                  signal: AbortSignal.timeout(3500)
+                });
+              } catch (mediaErr) {
+                console.warn('[WhatsApp] Falha no sendMedia remoto:', mediaErr);
+              }
+            }
+
+            // 2. Se não tinha imagem ou se sendMedia falhou, envia mensagem de texto padrão
+            if (!sendRes || !sendRes.ok) {
+              sendRes = await fetch(`${evolutionUrl!.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'apikey': evolutionKey
+                  'apikey': evolutionKey || ''
                 },
                 body: JSON.stringify({
                   number: cleanPhone,
-                  media: labelImageUrl,
-                  mediatype: 'image',
-                  mimetype: 'image/jpeg',
-                  caption: messageText,
-                  fileName: 'etiqueta.jpg'
+                  text: messageText
                 }),
-                signal: AbortSignal.timeout(12000)
+                signal: AbortSignal.timeout(3000)
               });
-            } catch (mediaErr) {
-              console.warn('[WhatsApp] Falha no sendMedia, tentando sendText fallback:', mediaErr);
             }
-          }
 
-          // 2. Se não tinha imagem ou se sendMedia falhou, envia mensagem de texto padrão
-          if (!sendRes || !sendRes.ok) {
-            sendRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': evolutionKey
-              },
-              body: JSON.stringify({
-                number: cleanPhone,
-                text: messageText
-              }),
-              signal: AbortSignal.timeout(8000)
-            });
+            if (sendRes && sendRes.ok) {
+              whatsappSent = true;
+              await supabase.from('packages').update({ status: 'NOTIFIED' }).eq('id', newPackage.id);
+              newPackage.status = 'NOTIFIED';
+            } else if (sendRes) {
+              const errData = await sendRes.json().catch(() => ({}));
+              whatsappError = errData.response?.message || 'Falha no envio';
+            }
+          } catch (e: any) {
+            whatsappError = e.message;
           }
-
-          if (sendRes && sendRes.ok) {
-            whatsappSent = true;
-            await supabase.from('packages').update({ status: 'NOTIFIED' }).eq('id', newPackage.id);
-            newPackage.status = 'NOTIFIED';
-          } else if (sendRes) {
-            const errData = await sendRes.json().catch(() => ({}));
-            whatsappError = errData.response?.message || 'Falha no envio';
-          }
-        } catch (e: any) {
-          whatsappError = e.message;
         }
 
-        // Registra log na tabela notifications_log
+        // Se o WhatsApp não foi enviado diretamente pela nuvem, a encomenda permanece RECEIVED
+        // e é registrada em notifications_log como PENDING.
+        // O WhatsAppQueueWorker da portaria (com Baileys nativo) consome via Realtime em milissegundos.
+        whatsappQueued = !whatsappSent;
         await supabase.from('notifications_log').insert({
           package_id: newPackage.id,
           resident_id: newPackage.resident_id || null,
           channel: 'WHATSAPP',
           recipient_phone: cleanPhone,
           message_content: messageText,
-          status: whatsappSent ? 'SENT' : 'FAILED',
+          status: whatsappSent ? 'SENT' : 'PENDING',
           error_message: whatsappError || null,
           sent_at: whatsappSent ? new Date().toISOString() : null
         });
@@ -188,6 +201,7 @@ export async function POST(request: NextRequest) {
       package: newPackage,
       whatsapp: {
         sent: whatsappSent,
+        queued: whatsappQueued,
         error: whatsappError
       }
     });

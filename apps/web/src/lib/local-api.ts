@@ -24,6 +24,11 @@ export class LocalApiClient {
     if (typeof window !== 'undefined') {
       const savedIp = localStorage.getItem('condo_local_api_url');
       if (savedIp) return savedIp.replace(/\/$/, '');
+      // Se estamos acessando pelo browser fora do localhost (ex: celular no Vercel),
+      // não tenta localhost:3001 porque não existe servidor no celular
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        return '';
+      }
     }
     return (process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001').replace(/\/$/, '');
   }
@@ -69,24 +74,27 @@ export class LocalApiClient {
     const formData = new FormData();
     formData.append('file', file, 'label.jpg');
 
-    try {
-      const targetUrl = baseUrl ? `${baseUrl}/api/upload` : '/api/upload';
-      const res = await fetch(targetUrl, {
-        method: 'POST',
-        body: formData,
-      });
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/upload`, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(3500)
+        });
 
-      if (res.ok) {
-        return await res.json();
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (localErr) {
+        console.warn('[LocalApiClient] API local indisponível, tentando OCR em nuvem /api/upload...');
       }
-    } catch (localErr) {
-      console.warn('[LocalApiClient] API local indisponível, tentando OCR em nuvem /api/upload...');
     }
 
     // Fallback garantido na nuvem Vercel
     const fallbackRes = await fetch('/api/upload', {
       method: 'POST',
       body: formData,
+      signal: AbortSignal.timeout(12000)
     });
 
     if (!fallbackRes.ok) {
@@ -116,44 +124,35 @@ export class LocalApiClient {
   }) {
     const baseUrl = this.getBaseUrl();
 
-    // 1. Tenta diretamente na API local (computador da portaria — mais rápido e completo)
-    try {
-      const targetUrl = baseUrl ? `${baseUrl}/api/packages` : null;
-      if (targetUrl) {
-        const res = await fetch(targetUrl, {
+    // 1. Tenta diretamente na API local (se estiver no computador da portaria ou com IP local configurado)
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/packages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(8000)
+          signal: AbortSignal.timeout(3000)
         });
         if (res.ok) return await res.json();
+      } catch {
+        console.info('[LocalApiClient] API local offline — salvando via nuvem...');
       }
-    } catch {
-      console.info('[LocalApiClient] API local offline — publicando na fila do Supabase...');
     }
 
-    // 2. Fallback: publica na fila do Supabase (o local-api vai consumir via Realtime)
-    const queueRes = await fetch('/api/packages/queue', {
+    // 2. Salva diretamente na rota padrão Next.js (/api/packages) na nuvem
+    const res = await fetch('/api/packages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(12000)
     });
 
-    if (!queueRes.ok) {
-      // 3. Último fallback: rota padrão Next.js
-      const fallbackRes = await fetch('/api/packages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!fallbackRes.ok) {
-        const err = await fallbackRes.json().catch(() => ({ error: 'Erro ao salvar' }));
-        throw new Error(err.details || err.error || 'Falha ao registrar encomenda');
-      }
-      return fallbackRes.json();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText || 'Erro ao salvar' }));
+      throw new Error(err.details || err.error || 'Falha ao registrar encomenda');
     }
 
-    return queueRes.json();
+    return res.json();
   }
 
   /**

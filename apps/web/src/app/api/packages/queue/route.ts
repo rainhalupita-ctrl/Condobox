@@ -52,31 +52,67 @@ export async function POST(request: NextRequest) {
       notes: notes || null,
     };
 
+    let queueId = '';
+    let pickupCode = '----';
+
     const { data, error } = await supabase
       .from('fila_encomendas')
       .insert(payload)
       .select('id')
       .single();
 
-    if (error) {
-      console.error('[API/packages/queue] Erro ao inserir na fila:', error.message);
-      return NextResponse.json(
-        { success: false, error: `Erro na fila: ${error.message}` },
-        { status: 500 }
-      );
-    }
+    if (!error && data?.id) {
+      queueId = data.id;
+      console.log(`[API/packages/queue] Encomenda publicada na fila: ${data.id}`);
+    } else {
+      console.warn('[API/packages/queue] Fila indisponível, gravando diretamente na tabela packages:', error?.message);
+      pickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
+      const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    console.log(`[API/packages/queue] Encomenda publicada na fila: ${data?.id}`);
+      let targetCondoId = null;
+      if (unitId) {
+        const { data: u } = await supabase.from('units').select('condo_id').eq('id', unitId).single();
+        targetCondoId = u?.condo_id || null;
+      }
+
+      const { data: pkgData, error: pkgErr } = await supabase
+        .from('packages')
+        .insert({
+          condo_id: targetCondoId,
+          unit_id: unitId,
+          resident_id: residentId || null,
+          carrier: carrier || 'Transportadora',
+          tracking_code: trackingCode || null,
+          recipient_name_ocr: recipientNameOcr || null,
+          label_image_path: labelImagePath || null,
+          notes: notes || null,
+          pickup_code: pickupCode,
+          qr_token: qrToken,
+          status: 'RECEIVED',
+          received_at: new Date().toISOString()
+        })
+        .select('id, pickup_code, status')
+        .single();
+
+      if (pkgErr || !pkgData) {
+        return NextResponse.json(
+          { success: false, error: pkgErr?.message || error?.message || 'Erro ao gravar encomenda' },
+          { status: 500 }
+        );
+      }
+      queueId = pkgData.id;
+      pickupCode = pkgData.pickup_code;
+    }
 
     return NextResponse.json({
       success: true,
       queued: true,
-      queueId: data?.id,
-      message: 'Encomenda publicada na fila. O sistema da portaria irá processar e notificar o morador.',
+      queueId,
+      message: 'Encomenda registrada com sucesso.',
       package: {
-        id: data?.id,
-        pickup_code: '----', // Será gerado pelo local-api ao processar
-        status: 'QUEUED'
+        id: queueId,
+        pickup_code: pickupCode,
+        status: 'RECEIVED'
       },
       whatsapp: {
         sent: false,
