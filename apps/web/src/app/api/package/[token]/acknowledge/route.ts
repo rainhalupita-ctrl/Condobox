@@ -78,7 +78,19 @@ async function dispatchWhatsAppMessage({
     }
   }
 
-  // 3. Registra na tabela notifications_log (status: PENDING) como fila de persistência
+  // 3. Fila de mensagens em tempo real (fila_mensagens) consumida pelo CondoBox no PC da portaria
+  try {
+    await supabase.from('fila_mensagens').insert({
+      phone: formattedPhone,
+      message,
+      tipo: 'CIENCIA_MORADOR'
+    });
+    console.log(`[Acknowledge] Mensagem inserida na fila_mensagens para ${formattedPhone}`);
+  } catch (err: any) {
+    console.warn(`[Acknowledge] Falha ao enfileirar em fila_mensagens:`, err.message);
+  }
+
+  // 4. Registra na tabela notifications_log (status: PENDING) como fila de persistência
   let logId: string | undefined;
   try {
     const { data: logRow, error: logErr } = await supabase
@@ -229,8 +241,12 @@ export async function POST(
     const unitText = [blockText, aptoText].filter(Boolean).join(' - ') || 'sua unidade';
     const carrier = pkg.carrier || 'Transportadora';
 
-    // Se não tiver telefone do morador mas tiver o da portaria, usa o da portaria para notificar
-    const targetPhone = recipientPhone || condoPhone;
+    // O número de destino da confirmação de ciência é o número cadastrado da portaria
+    const targetPortariaPhone = (
+      body?.phone ||
+      condoPhone ||
+      '557398419901'
+    ).replace(/\D/g, '');
 
     // Monta o texto de confirmação de ciência na voz do morador para a portaria
     const message =
@@ -240,32 +256,28 @@ export async function POST(
       `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
       `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
 
-    // 3. Dispara a mensagem para o WhatsApp do morador
+    // 3. Dispara a mensagem para o WhatsApp cadastrado da portaria via Evolution API / Fila / Realtime
     let whatsappSent = false;
     let dispatchMethod = 'none';
 
-    if (targetPhone) {
+    if (targetPortariaPhone) {
       const result = await dispatchWhatsAppMessage({
         supabase,
         packageId: pkg.id,
-        phone: targetPhone,
+        phone: targetPortariaPhone,
         message,
       });
       whatsappSent = result.success;
       dispatchMethod = result.method;
     }
 
-    // Se o condomínio tiver número próprio e for diferente do morador, envia também o aviso para a portaria
-    if (condoPhone && condoPhone.replace(/\D/g, '') !== recipientPhone?.replace(/\D/g, '')) {
-      const portariaAlert =
-        `🔔 *CIÊNCIA DE ENCOMENDA CONFIRMADA*\n\n` +
-        `Morador(a) *${residentName}* (${unitText}) confirmou que está ciente da encomenda *${carrier}* (Código: *${pkg.pickup_code}*).`;
-
+    // Se o morador tiver telefone cadastrado e for diferente da portaria, envia também para o morador
+    if (recipientPhone && recipientPhone.replace(/\D/g, '') !== targetPortariaPhone) {
       dispatchWhatsAppMessage({
         supabase,
         packageId: pkg.id,
-        phone: condoPhone,
-        message: portariaAlert,
+        phone: recipientPhone,
+        message,
       }).catch(() => {});
     }
 

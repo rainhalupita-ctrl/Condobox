@@ -297,7 +297,7 @@ export default function PublicPackagePage() {
     '557398419901'
   ).replace(/\D/g, '');
 
-  const handleConfirmAndUnlock = () => {
+  const handleConfirmAndUnlock = async () => {
     if (!pkg) return;
     setConfirming(true);
 
@@ -326,33 +326,48 @@ export default function PublicPackagePage() {
 
     const destPhone = targetWhatsappPhone || '557398419901';
 
-    // 3. Notifica o backend em segundo plano para registrar a ciência no sistema
+    // 3. Disparo ultra-rápido via WebSocket Realtime Bridge direto para a portaria
+    try {
+      const supabase = createClient();
+      const bridge = supabase.channel('whatsapp_bridge');
+      bridge.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          bridge.send({
+            type: 'broadcast',
+            event: 'send_message',
+            payload: {
+              phone: destPhone,
+              message,
+              packageId: pkg.id,
+            }
+          }).catch(() => {});
+          setTimeout(() => {
+            try { supabase.removeChannel(bridge); } catch {}
+          }, 1500);
+        }
+      });
+    } catch (err) {
+      console.warn('[Realtime Bridge] Erro ao transmitir:', err);
+    }
+
+    // 4. Requisição POST para a Evolution API / Backend (sem abrir aplicativo no celular)
     try {
       const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
-      fetch(`/api/package/${cleanToken}/acknowledge`, {
+      const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: destPhone }),
-      }).catch(() => {});
+      });
+
+      if (res.ok) {
+        setConfirmedToast(true);
+        setTimeout(() => setConfirmedToast(false), 5000);
+      }
     } catch (err) {
-      console.warn('[Confirm] Falha no registro em background:', err);
-    }
-
-    // 4. Abre o WhatsApp no aparelho de quem clicou (morador enviando para a portaria)
-    const whatsappUrl = `https://api.whatsapp.com/send?phone=${destPhone}&text=${encodeURIComponent(message)}`;
-    const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-    if (isMobile) {
-      window.location.href = whatsappUrl;
-    } else {
-      window.open(whatsappUrl, '_blank');
-    }
-
-    setConfirmedToast(true);
-    setTimeout(() => {
-      setConfirmedToast(false);
+      console.warn('[Confirm] Falha no disparo via API:', err);
+    } finally {
       setConfirming(false);
-    }, 4000);
+    }
   };
 
   const labelUrl = pkg?.label_image_path ? LocalApiClient.getImageUrl(pkg.label_image_path) : null;
@@ -532,10 +547,10 @@ export default function PublicPackagePage() {
                         ) : (
                           <MessageSquare className="w-5 h-5 text-emerald-100" />
                         )}
-                        <span>{confirming ? 'Abrindo WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
+                        <span>{confirming ? 'Enviando via Evolution API...' : 'Confirmar e Liberar QR Code'}</span>
                       </div>
                       <span className="text-[10px] font-normal text-emerald-100/80">
-                        {confirming ? 'Abrindo conversa com a portaria...' : 'Abre o WhatsApp e libera a etiqueta na volta'}
+                        {confirming ? 'Disparando confirmação na portaria...' : 'Disparo automático via API • Libera a etiqueta na hora'}
                       </span>
                     </button>
                   </div>
