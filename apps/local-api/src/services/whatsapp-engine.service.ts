@@ -171,7 +171,7 @@ export class WhatsAppEngineService {
 
       // Listener de respostas dos moradores (Confirmação de Ciência automática)
       this.socket.ev.on('messages.upsert', async (m) => {
-        if (m.type !== 'notify') return;
+        this.logToFile(`messages.upsert recebido: type=${m.type}, count=${m.messages?.length || 0}`);
         for (const msg of m.messages) {
           await this.handleIncomingMessage(msg);
         }
@@ -540,21 +540,85 @@ export class WhatsAppEngineService {
     return this.sendTextMessage(params.phone, text);
   }
 
+  private logToFile(logMessage: string): void {
+    try {
+      const logPath = path.join(this.sessionDir, '..', 'whatsapp_flow.log');
+      const time = new Date().toISOString();
+      fs.appendFileSync(logPath, `[${time}] ${logMessage}\n`);
+      console.log(`[WhatsApp Engine] ${logMessage}`);
+    } catch {}
+  }
+
+  private resolvePhoneFromRemoteJid(remoteJid: string): string {
+    if (remoteJid.includes('@lid')) {
+      const cleanLid = remoteJid.replace(/@lid|\D/g, '');
+      const dirs = [
+        this.sessionDir,
+        path.join(process.env.APPDATA || '', 'condobox-desktop', 'data', 'whatsapp_session'),
+        path.resolve(process.cwd(), 'data', 'whatsapp_session')
+      ];
+
+      for (const dir of dirs) {
+        try {
+          if (fs.existsSync(dir)) {
+            const files = fs.readdirSync(dir);
+            for (const f of files) {
+              if (f.startsWith('lid-mapping-') && f.endsWith('.json')) {
+                try {
+                  const content = fs.readFileSync(path.join(dir, f), 'utf-8').trim().replace(/"/g, '');
+                  if (content === cleanLid) {
+                    const phone = f.replace('lid-mapping-', '').replace('.json', '');
+                    this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via ${f}`);
+                    return phone;
+                  }
+                } catch {}
+              }
+            }
+          }
+        } catch (err: any) {
+          this.logToFile(`Erro ao consultar diretório de LID mapping (${dir}): ${err.message}`);
+        }
+      }
+    }
+
+    return remoteJid.replace(/@s\.whatsapp\.net|@c\.us|@lid|\D/g, '');
+  }
+
+  private extractTextFromMessage(msg: WAMessage): string {
+    const m = msg.message;
+    if (!m) return '';
+    return (
+      m.conversation ||
+      m.extendedTextMessage?.text ||
+      m.ephemeralMessage?.message?.conversation ||
+      m.ephemeralMessage?.message?.extendedTextMessage?.text ||
+      m.viewOnceMessage?.message?.conversation ||
+      m.viewOnceMessage?.message?.extendedTextMessage?.text ||
+      m.viewOnceMessageV2?.message?.conversation ||
+      m.viewOnceMessageV2?.message?.extendedTextMessage?.text ||
+      m.imageMessage?.caption ||
+      m.documentMessage?.caption ||
+      m.videoMessage?.caption ||
+      m.buttonsResponseMessage?.selectedDisplayText ||
+      m.buttonsResponseMessage?.selectedButtonId ||
+      m.templateButtonReplyMessage?.selectedId ||
+      m.listResponseMessage?.title ||
+      m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+      ''
+    );
+  }
+
   private async handleIncomingMessage(msg: WAMessage): Promise<void> {
     try {
       if (msg.key.fromMe) return;
       const remoteJid = msg.key.remoteJid || '';
       if (!remoteJid || remoteJid.includes('@g.us')) return;
 
-      const cleanPhone = remoteJid.replace(/@s\.whatsapp\.net|@c\.us|\D/g, '');
-      const text =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        '';
+      const text = this.extractTextFromMessage(msg).trim();
+      if (!text) return;
 
-      if (!text.trim()) return;
-
-      console.log(`📩 [WhatsApp Engine] Resposta recebida de ${cleanPhone}: "${text}"`);
+      const cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid);
+      this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone Resolvido: ${cleanPhone}): "${text}"`);
 
       // Código de 4 a 6 caracteres se o morador tiver digitado diretamente
       const codeMatch = text.match(/\b([0-9a-zA-Z]{4,6})\b/);
@@ -562,9 +626,14 @@ export class WhatsAppEngineService {
 
       // Import dinâmico do serviço de dados local/supabase
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
-      if (!databaseService) return;
+      if (!databaseService) {
+        this.logToFile('databaseService não pôde ser importado.');
+        return;
+      }
 
+      this.logToFile(`Buscando encomenda pendente para telefone ${cleanPhone} (Código: ${mentionedCode || 'N/A'})...`);
       const result = await databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
+
       if (result && result.pkg) {
         const pkg = result.pkg;
         const webBaseUrl = this.getPublicWebUrl();
@@ -573,7 +642,9 @@ export class WhatsAppEngineService {
 
         let residentName = 'Morador(a)';
         try {
-          if (pkg.resident_id) {
+          if (pkg.resident?.name) {
+            residentName = pkg.resident.name;
+          } else if (pkg.resident_id) {
             const r = databaseService.getResidentById(pkg.resident_id);
             if (r?.name) residentName = r.name;
           } else if (pkg.recipient_name_ocr) {
@@ -590,11 +661,25 @@ export class WhatsAppEngineService {
           `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
           `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
 
-        await this.sendTextMessage(cleanPhone, replyText);
-        console.log(`✅ [WhatsApp Engine] Ciência confirmada e QR Code enviado para ${cleanPhone} (Encomenda: ${pkg.pickup_code})`);
+        // Envia diretamente na conversa ativa do morador (seja @lid ou @s.whatsapp.net)
+        try {
+          if (this.socket) {
+            this.logToFile(`Enviando confirmação diretamente para conversa ativa: ${remoteJid}...`);
+            await this.socket.sendMessage(remoteJid, { text: replyText });
+          } else {
+            await this.sendTextMessage(cleanPhone, replyText);
+          }
+        } catch (sendErr: any) {
+          this.logToFile(`Falha no envio para ${remoteJid}: ${sendErr.message}. Tentando via sendTextMessage(${cleanPhone})...`);
+          await this.sendTextMessage(cleanPhone, replyText);
+        }
+
+        this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomenda: ${pkg.pickup_code})`);
+      } else {
+        this.logToFile(`⚠️ Nenhuma encomenda pendente encontrada para o telefone ${cleanPhone}.`);
       }
     } catch (err: any) {
-      console.warn('[WhatsApp Engine] Erro ao tratar mensagem recebida:', err.message);
+      this.logToFile(`❌ Erro ao tratar mensagem recebida: ${err.message}`);
     }
   }
 }
