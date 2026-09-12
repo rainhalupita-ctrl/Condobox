@@ -368,7 +368,8 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Salva a imagem no Supabase Storage (bucket público 'labels') ──────────
-    const filename = `label_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+    const ext = mimeType.includes('webp') ? 'webp' : 'jpg';
+    const filename = `label_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
     let imagePublicUrl = `data:${mimeType};base64,${base64Image}`;
 
     try {

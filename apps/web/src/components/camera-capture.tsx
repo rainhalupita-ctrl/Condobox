@@ -225,8 +225,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           onCapture(blob, previewUrl);
         }
       },
-      'image/jpeg',
-      0.82
+      'image/webp',
+      0.75
     );
   }, [onCapture, stopCamera]);
 
@@ -287,7 +287,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             if (!blob) return resolve(null);
             resolve({ blob, avgBrightness });
           },
-          'image/jpeg',
+          'image/webp',
           quality
         );
       });

@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { storageService } from './storage.service.js';
 
-export function setupCleanupCron(retentionDays: number = 90) {
+export function setupCleanupCron(retentionDays: number = 30) {
   // Executa todo dia às 03:00 da manhã
   cron.schedule('0 3 * * *', async () => {
     console.log(`[CleanupCron] Iniciando rotina de limpeza de etiquetas antigas (> ${retentionDays} dias)...`);
