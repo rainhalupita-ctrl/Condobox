@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Package as PackageType } from '../types/database';
 import { LocalApiClient } from '../lib/local-api';
 import { createClient } from '../lib/supabase/client';
@@ -37,6 +38,11 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
   const [whatsAppFeedback, setWhatsAppFeedback] = useState<string | null>(null);
   // true = confirmado que WhatsApp foi enviado em algum momento via notifications_log
   const [wasNotified, setWasNotified] = useState<boolean | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Verifica se existe log de notificação enviada (SENT) para este pacote
   useEffect(() => {
@@ -66,14 +72,18 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     return () => window.removeEventListener('condobox:close-modals', onCloseModals);
   }, [pkg.id, pkg.status]);
 
-  // Fecha modal ao pressionar ESC
+  // Fecha modal ao pressionar ESC e bloqueia scroll do fundo
   useEffect(() => {
     if (!modalImage) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setModalImage(null);
     };
+    document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [modalImage]);
 
   const getCarrierColor = (carrier: string) => {
@@ -341,18 +351,18 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
         </button>
       )}
 
-      {/* Modal de visualização de foto ampliada */}
-      {modalImage && (
+      {/* Modal de visualização de foto ampliada via Portal (livre de contain/transforms dos cards) */}
+      {modalImage && isMounted && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md"
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto"
           onClick={() => setModalImage(null)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-xl max-h-[90vh] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            className="relative w-full max-w-lg my-auto bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]"
           >
             {/* Cabeçalho do Modal com botão X de fechar */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 gap-2 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/95 gap-2 shrink-0">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="p-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
                   {modalImage.includes('signature') ? (
@@ -397,7 +407,7 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
               <img
                 src={modalImage}
                 alt="Visualização da Encomenda"
-                className="max-h-[46vh] sm:max-h-[50vh] max-w-full w-auto object-contain rounded-xl shadow-lg border border-slate-800/80 transition select-none"
+                className="max-h-[42vh] sm:max-h-[46vh] max-w-full w-auto object-contain rounded-xl shadow-lg border border-slate-800/80 transition select-none"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
                   if (!target.dataset.triedFallback) {
@@ -477,7 +487,8 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

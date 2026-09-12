@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { LocalApiClient } from '../../../lib/local-api';
@@ -66,6 +67,11 @@ export default function PublicPackagePage() {
   const [confirming, setConfirming] = useState(false);
   const [confirmedToast, setConfirmedToast] = useState(false);
   const [connectedWhatsappPhone, setConnectedWhatsappPhone] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Sincronização em tempo real do número ativo do WhatsApp conectado via QR Code na portaria
   useEffect(() => {
@@ -725,17 +731,17 @@ export default function PublicPackagePage() {
         )}
       </div>
 
-      {/* Modal de Foto Ampliada */}
-      {modalImage && (
+      {/* Modal de Foto Ampliada via Portal */}
+      {modalImage && isMounted && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto"
           onClick={() => setModalImage(null)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-w-lg w-full max-h-[90vh] bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            className="relative max-w-lg w-full my-auto max-h-[90vh] bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
           >
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/90 shrink-0">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/95 shrink-0">
               <span className="text-xs font-bold text-slate-200">Foto da Etiqueta</span>
               <button
                 type="button"
@@ -750,7 +756,7 @@ export default function PublicPackagePage() {
               <img
                 src={modalImage}
                 alt="Foto da Etiqueta"
-                className="max-h-[50vh] sm:max-h-[55vh] w-auto max-w-full object-contain rounded-2xl shadow-md border border-slate-800/80"
+                className="max-h-[46vh] sm:max-h-[50vh] w-auto max-w-full object-contain rounded-2xl shadow-md border border-slate-800/80"
               />
             </div>
             <div className="p-3 border-t border-slate-800 bg-slate-900 flex justify-end shrink-0">
@@ -763,17 +769,18 @@ export default function PublicPackagePage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Modal de Visualização da Assinatura Digital */}
-      {showSignatureModal && (
+      {/* Modal de Visualização da Assinatura Digital via Portal */}
+      {showSignatureModal && isMounted && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto"
           onClick={() => setShowSignatureModal(false)}
         >
           <div
-            className="relative max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center space-y-4"
+            className="relative max-w-sm w-full my-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center">
@@ -825,7 +832,8 @@ export default function PublicPackagePage() {
               Fechar Assinatura
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
