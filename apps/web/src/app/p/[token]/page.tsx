@@ -291,7 +291,7 @@ export default function PublicPackagePage() {
     }
   };
 
-  const handleConfirmAndUnlock = async () => {
+  const handleConfirmAndUnlock = () => {
     if (!pkg) return;
     setConfirming(true);
 
@@ -301,56 +301,41 @@ export default function PublicPackagePage() {
       localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
     }
 
-    // 2. Dispara a mensagem automática no WhatsApp via Evolution API / backend / Realtime Bridge
-    try {
-      // Disparo em paralelo via Realtime Broadcast direto do navegador para latência instantânea
-      try {
-        const supabase = createClient();
-        const bridge = supabase.channel('whatsapp_bridge');
-        bridge.subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            const resPhone = pkg.phone || (pkg.resident as any)?.phone;
-            const targetPhone = resPhone || targetWhatsappPhone;
-            const resName = (pkg.resident as any)?.name || pkg.recipient_name_ocr || 'Morador';
-            const unitInfo = pkg.unit ? `Bloco ${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : '';
-            if (targetPhone) {
-              bridge.send({
-                type: 'broadcast',
-                event: 'send_message',
-                payload: {
-                  phone: targetPhone,
-                  message: `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\nOlá, *${resName}*!\nRegistramos com sucesso sua confirmação para a encomenda da *${pkg.carrier || 'encomenda'}* (${unitInfo}).\n\n🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n🏢 *Portaria:* Notificação confirmada. Apresente o QR Code no balcão para retirar.`,
-                  packageId: pkg.id,
-                }
-              }).catch(() => {});
-            }
-            setTimeout(() => {
-              try { supabase.removeChannel(bridge); } catch {}
-            }, 1200);
-          }
-        });
-      } catch (e) {
-        console.warn('[Realtime Broadcast Error]', e);
-      }
+    // 2. Monta a mensagem exata com os dados da encomenda
+    const rawBlock = pkg.unit?.block || '';
+    const blockText = rawBlock
+      ? (rawBlock.toLowerCase().startsWith('bloco') ? rawBlock : `Bloco ${rawBlock}`)
+      : '';
+    const aptoText = pkg.unit?.unit_number ? `Apto ${pkg.unit.unit_number}` : '';
+    const unitText = [blockText, aptoText].filter(Boolean).join(' - ') || 'Minha Unidade';
+    const residentName = pkg.recipient_name || pkg.resident?.name || 'Morador(a)';
+    const carrier = pkg.carrier || 'Encomenda';
 
+    const message =
+      `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
+      `Olá, *${residentName}*!\n` +
+      `Registramos com sucesso sua confirmação para a encomenda da *${carrier}* (${unitText}).\n\n` +
+      `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+      `🏢 *Portaria:* Notificação confirmada. Apresente o QR Code no balcão para retirar.`;
+
+    const destPhone = targetWhatsappPhone || '557398419901';
+
+    // 3. Registra a confirmação no backend em segundo plano
+    try {
       const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
-      const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
+      fetch(`/api/package/${cleanToken}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: targetWhatsappPhone || undefined,
-        }),
-      });
+        body: JSON.stringify({ phone: destPhone }),
+      }).catch(() => {});
+    } catch {}
 
-      if (res.ok) {
-        setConfirmedToast(true);
-        setTimeout(() => setConfirmedToast(false), 6000);
-      }
-    } catch (err) {
-      console.warn('[Confirm] Falha ao notificar WhatsApp:', err);
-    } finally {
+    // 4. Abre o WhatsApp do morador já com a conversa da portaria e a mensagem pronta
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${destPhone}&text=${encodeURIComponent(message)}`;
+    setTimeout(() => {
+      window.location.href = whatsappUrl;
       setConfirming(false);
-    }
+    }, 150);
   };
 
   const labelUrl = pkg?.label_image_path ? LocalApiClient.getImageUrl(pkg.label_image_path) : null;
@@ -525,10 +510,10 @@ export default function PublicPackagePage() {
                         ) : (
                           <MessageSquare className="w-5 h-5 text-emerald-100" />
                         )}
-                        <span>{confirming ? 'Confirmando no WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
+                        <span>{confirming ? 'Abrindo o WhatsApp...' : 'Confirmar e Liberar QR Code'}</span>
                       </div>
                       <span className="text-[10px] font-normal text-emerald-100/80">
-                        {confirming ? 'Disparando confirmação automática...' : 'Confirma no WhatsApp automaticamente e libera o QR Code'}
+                        Abre o WhatsApp e libera a etiqueta na volta
                       </span>
                     </button>
                   </div>

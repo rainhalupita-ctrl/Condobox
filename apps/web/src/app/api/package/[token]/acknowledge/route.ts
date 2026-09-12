@@ -223,7 +223,10 @@ export async function POST(
 
     const condoPhone = pkg.condo?.phone && pkg.condo?.phone !== '5511988887777' ? pkg.condo.phone : null;
     const residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador';
-    const unitText = pkg.unit ? `Bloco ${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'sua unidade';
+    const rawBlock = pkg.unit?.block || '';
+    const blockText = rawBlock ? (rawBlock.toLowerCase().startsWith('bloco') ? rawBlock : `Bloco ${rawBlock}`) : '';
+    const aptoText = pkg.unit?.unit_number ? `Apto ${pkg.unit.unit_number}` : '';
+    const unitText = [blockText, aptoText].filter(Boolean).join(' - ') || 'sua unidade';
     const carrier = pkg.carrier || 'Transportadora';
 
     // Se não tiver telefone do morador mas tiver o da portaria, usa o da portaria para notificar
