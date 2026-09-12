@@ -7,6 +7,8 @@ node_modules/
 .next/
 out/
 build/
+!apps/desktop/build/
+!apps/desktop/build/**
 dist/
 
 # Local Environment Variables (Never commit secrets to git)
