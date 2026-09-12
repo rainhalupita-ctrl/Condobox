@@ -115,15 +115,9 @@ export class SyncService {
     try {
       const client = supabaseService.getClient();
 
-      let unitQuery = client
+      const { data: units } = await client
         .from('units')
         .select('id, condo_id, block, unit_number, created_at, updated_at');
-
-      if (env.CONDO_ID) {
-        unitQuery = unitQuery.eq('condo_id', env.CONDO_ID);
-      }
-
-      const { data: units } = await unitQuery;
 
       const { data: residents } = await client
         .from('residents')

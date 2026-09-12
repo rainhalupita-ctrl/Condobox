@@ -343,34 +343,79 @@ export class DatabaseService {
     }));
   }
 
-  public acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): { pkg?: any } | null {
+  public async acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): Promise<{ pkg?: any } | null> {
     const clean = phone.replace(/\D/g, '');
     const last8 = clean.slice(-8);
 
     let row: any = null;
 
+    // 1. Busca por código informado diretamente
     if (mentionedCode) {
       const query = `
         SELECT p.*
         FROM packages p
         WHERE p.status != 'DELIVERED'
-          AND (p.pickup_code = ? OR p.pickup_code ILIKE ?)
+          AND (p.pickup_code = ? OR upper(p.pickup_code) = upper(?))
         LIMIT 1
       `;
       row = this.db.prepare(query).get(mentionedCode, mentionedCode) as any;
     }
 
+    // 2. Busca local no SQLite por telefone do morador
     if (!row && last8) {
-      const query = `
-        SELECT p.*
+      const candidates = this.db.prepare(`
+        SELECT p.*, r.name as resident_name, r.phone as resident_phone
         FROM packages p
         LEFT JOIN residents r ON p.resident_id = r.id
         WHERE p.status != 'DELIVERED'
-          AND (substr(r.phone, -8) = ? OR substr(p.phone, -8) = ?)
         ORDER BY p.received_at DESC
-        LIMIT 1
-      `;
-      row = this.db.prepare(query).get(last8, last8) as any;
+      `).all() as any[];
+
+      for (const cand of candidates) {
+        if (!cand.resident_phone) continue;
+        const cleanCand = cand.resident_phone.replace(/\D/g, '');
+        const candLast8 = cleanCand.slice(-8);
+        if (candLast8 && (candLast8 === last8 || cleanCand.endsWith(last8) || clean.endsWith(candLast8))) {
+          row = cand;
+          break;
+        }
+      }
+    }
+
+    // 3. Fallback na Nuvem (Supabase) se não encontrar no SQLite local
+    if (!row) {
+      try {
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          const client = supabaseService.getClient();
+          const { data: cloudPkgs } = await client
+            .from('packages')
+            .select('*, resident:residents(*)')
+            .neq('status', 'DELIVERED')
+            .order('created_at', { ascending: false })
+            .limit(30);
+
+          if (cloudPkgs && cloudPkgs.length > 0) {
+            for (const cPkg of cloudPkgs) {
+              if (mentionedCode && (cPkg.pickup_code === mentionedCode || cPkg.pickup_code?.toUpperCase() === mentionedCode.toUpperCase())) {
+                row = cPkg;
+                break;
+              }
+              const rPhone = cPkg.resident?.phone;
+              if (rPhone && last8) {
+                const cleanCloud = rPhone.replace(/\D/g, '');
+                const cloudLast8 = cleanCloud.slice(-8);
+                if (cloudLast8 && (cloudLast8 === last8 || cleanCloud.endsWith(last8) || clean.endsWith(cloudLast8))) {
+                  row = cPkg;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[DatabaseService] Erro ao buscar pacote no Supabase:', err.message);
+      }
     }
 
     if (!row) return null;
@@ -378,29 +423,50 @@ export class DatabaseService {
     const nowIso = new Date().toISOString();
     const updatedNotes = row.notes?.includes('CIENTE:') ? row.notes : (row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`);
 
-    this.db.prepare(`
-      UPDATE packages
-      SET status = CASE WHEN status = 'RECEIVED' THEN 'NOTIFIED' ELSE status END,
-          notes = ?,
-          sync_status = 'PENDING'
-      WHERE id = ?
-    `).run(updatedNotes, row.id);
+    // Atualiza SQLite local se existir no banco local
+    try {
+      this.db.prepare(`
+        UPDATE packages
+        SET status = CASE WHEN status = 'RECEIVED' THEN 'NOTIFIED' ELSE status END,
+            notes = ?,
+            sync_status = 'PENDING'
+        WHERE id = ?
+      `).run(updatedNotes, row.id);
+    } catch {}
 
     // Sincroniza em background com Supabase
     try {
-      import('./supabase.service.js').then(({ supabaseService }) => {
-        if (supabaseService.isConfigured()) {
-          Promise.resolve(
-            supabaseService.getClient()
-              .from('packages')
-              .update({ notes: updatedNotes, status: 'NOTIFIED' })
-              .eq('id', row.id)
-          ).catch(() => {});
-        }
-      }).catch(() => {});
-    } catch {}
+      const { supabaseService } = await import('./supabase.service.js');
+      if (supabaseService.isConfigured()) {
+        await supabaseService.getClient()
+          .from('packages')
+          .update({
+            notes: updatedNotes,
+            status: row.status === 'RECEIVED' ? 'NOTIFIED' : row.status
+          })
+          .eq('id', row.id);
+      }
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao sincronizar ciência no Supabase:', err.message);
+    }
 
-    return { pkg: this.getPackageById(row.id) };
+    const localPkg = this.getPackageById(row.id);
+    if (localPkg) {
+      return { pkg: localPkg };
+    }
+
+    return {
+      pkg: {
+        id: row.id,
+        pickup_code: row.pickup_code,
+        qr_token: row.qr_token || row.pickup_code,
+        carrier: row.carrier,
+        recipient_name_ocr: row.recipient_name_ocr || row.resident?.name,
+        notes: updatedNotes,
+        status: 'NOTIFIED',
+        resident: row.resident
+      }
+    };
   }
 
   public getPendingSyncPackages(): LocalPackage[] {

@@ -108,21 +108,29 @@ function createWindow() {
     `);
   });
 
-  // Tenta carregar a URL local primeiro ou a URL da Vercel
+  // Carrega a URL da Portaria na nuvem
   const primaryUrl = "https://web-eight-rust-97.vercel.app/portaria";
-  const localFallbackUrl = "http://localhost:3001/portaria";
 
-  mainWindow.loadURL(primaryUrl).catch(() => {
-    console.log("⚠️ Alternando para porta local:", localFallbackUrl);
-    mainWindow.loadURL(localFallbackUrl).catch(() => {});
+  mainWindow.loadURL(primaryUrl).catch((err) => {
+    console.warn("⚠️ Falha ao carregar URL primária da Portaria:", err.message);
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.loadURL(primaryUrl).catch(() => {});
+      }
+    }, 3000);
   });
 
-  // Fallback se a internet cair durante o carregamento
+  // Fallback seguro: se a internet oscilar durante o carregamento
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    if (validatedURL !== localFallbackUrl) {
-      console.warn(`[CondoBox] Falha de rede (${errorCode}: ${errorDescription}). Alternando para porta local...`);
-      mainWindow.loadURL(localFallbackUrl).catch(() => {});
-    }
+    // -3 = ERR_ABORTED (comum durante redirecionamentos normais 307/302 para tela de login)
+    if (errorCode === -3 || errorCode === 0) return;
+
+    console.warn(`[CondoBox] Falha de conexão (${errorCode}: ${errorDescription}) em ${validatedURL}. Tentando reconectar...`);
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.loadURL(primaryUrl).catch(() => {});
+      }
+    }, 3000);
   });
 
   // Assim que a janela principal termina de carregar, esconde o splash e mostra a principal

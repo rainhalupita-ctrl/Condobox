@@ -564,7 +564,7 @@ export class WhatsAppEngineService {
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
       if (!databaseService) return;
 
-      const result = databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
+      const result = await databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
       if (result && result.pkg) {
         const pkg = result.pkg;
         const webBaseUrl = this.getPublicWebUrl();

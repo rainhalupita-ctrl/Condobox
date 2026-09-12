@@ -80,6 +80,21 @@ async function main() {
     });
   }
 
+  // 3.5. Redirecionamento de rotas web para a Vercel caso o Electron acesse localhost:3001
+  const webProductionUrl = 'https://web-eight-rust-97.vercel.app';
+  fastify.get('/portaria', async (_req, reply) => {
+    return reply.redirect(`${webProductionUrl}/portaria`);
+  });
+  fastify.get('/portaria/*', async (req, reply) => {
+    return reply.redirect(`${webProductionUrl}${req.url}`);
+  });
+  fastify.get('/master', async (_req, reply) => {
+    return reply.redirect(`${webProductionUrl}/master/login`);
+  });
+  fastify.get('/master/*', async (req, reply) => {
+    return reply.redirect(`${webProductionUrl}${req.url}`);
+  });
+
   // 4. Rotas da API
   await fastify.register(healthRoutes);
   await fastify.register(whatsappRoutes);
