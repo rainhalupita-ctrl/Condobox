@@ -14,8 +14,9 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [hasTorch, setHasTorch] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
-  const [hasZoom, setHasZoom] = useState(false);
-  const [currentZoom, setCurrentZoom] = useState(1);
+  const [hasZoom, setHasZoom] = useState(true);
+  const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(2);
   const [maxZoom, setMaxZoom] = useState(2);
   const [isScanned, setIsScanned] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -153,13 +154,19 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
             setHasTorch(true);
           }
 
-          // Suporte a Zoom óptico/digital da câmera (mantém 1x idêntico à Nova Encomenda)
+          // Suporte a Zoom óptico/digital da câmera (inicia obrigatoriamente em 2x)
           if (capabilities.zoom) {
+            setHasHardwareZoom(true);
             setHasZoom(true);
-            const zMax = Math.min(Number(capabilities.zoom.max) || 2, 3);
+            const zMax = Math.min(Number(capabilities.zoom.max) || 2, 5);
             setMaxZoom(zMax);
-            adv.zoom = 1; // Inicializa em 1x (sem zoom recortado)
-            setCurrentZoom(1);
+            const targetZ = Math.min(Math.max(2, capabilities.zoom.min || 1), zMax);
+            adv.zoom = targetZ; // Abre já com 2x no hardware!
+            setCurrentZoom(targetZ);
+          } else {
+            setHasHardwareZoom(false);
+            setHasZoom(true); // Permite alternar via CSS digital scale(2)
+            setCurrentZoom(2);
           }
 
           if (Object.keys(adv).length > 0) {
@@ -197,17 +204,18 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
     }
   };
 
-  // Alternar Zoom entre 1x e 2x
+  // Alternar Zoom entre 2x e 1x
   const toggleZoom = async () => {
-    if (!streamRef.current) return;
-    const track = streamRef.current.getVideoTracks()[0];
-    if (track && hasZoom) {
-      try {
-        const nextZoom = currentZoom === 1 ? Math.min(2, maxZoom) : 1;
-        await track.applyConstraints({ advanced: [{ zoom: nextZoom } as any] });
-        setCurrentZoom(nextZoom);
-      } catch (err) {
-        console.warn('Falha ao alternar zoom:', err);
+    const nextZoom = currentZoom === 2 ? 1 : 2;
+    setCurrentZoom(nextZoom);
+    if (hasHardwareZoom && streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints({ advanced: [{ zoom: nextZoom } as any] });
+        } catch (err) {
+          console.warn('Falha ao alternar zoom no hardware:', err);
+        }
       }
     }
   };
@@ -254,21 +262,7 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         lastScanTime = timestamp;
         attemptCount++;
 
-        // 1. Tenta Leitor Nativo por Hardware (0ms overhead)
-        if (nativeDetector) {
-          try {
-            const detectedCodes = await nativeDetector.detect(video);
-            if (detectedCodes && detectedCodes.length > 0) {
-              const raw = detectedCodes[0]?.rawValue?.trim();
-              if (raw && raw.length > 0) {
-                handleScanDetected(raw);
-                return;
-              }
-            }
-          } catch {}
-        }
-
-        // 2. Leitor jsQR em Canvas Offscreen Ultra Rápido (100% Free e Client-Side)
+        // 2. Leitor Ultra Rápido (Canvas Offscreen com suporte a Zoom 2x Nativo/Digital)
         try {
           if (!canvasRef.current) {
             canvasRef.current = document.createElement('canvas');
@@ -288,10 +282,29 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
 
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
           if (ctx) {
-            ctx.drawImage(video, 0, 0, targetW, targetH);
-            const imgData = ctx.getImageData(0, 0, targetW, targetH);
+            const isDigitalZoom2x = currentZoom === 2 && !hasHardwareZoom;
+            const sx = isDigitalZoom2x ? vw * 0.25 : 0;
+            const sy = isDigitalZoom2x ? vh * 0.25 : 0;
+            const sw = isDigitalZoom2x ? vw * 0.5 : vw;
+            const sh = isDigitalZoom2x ? vh * 0.5 : vh;
+            ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
-            // Alterna inversão de cor a cada 3 quadros para ler QR codes em modo escuro
+            // 1. Tenta Leitor Nativo por Hardware no canvas recortado
+            if (nativeDetector) {
+              try {
+                const detectedCodes = await nativeDetector.detect(canvas);
+                if (detectedCodes && detectedCodes.length > 0) {
+                  const raw = detectedCodes[0]?.rawValue?.trim();
+                  if (raw && raw.length > 0) {
+                    handleScanDetected(raw);
+                    return;
+                  }
+                }
+              } catch {}
+            }
+
+            // 2. Leitor jsQR em Canvas (100% Free e Client-Side)
+            const imgData = ctx.getImageData(0, 0, targetW, targetH);
             const inversionMode = attemptCount % 3 === 0 ? 'attemptBoth' : 'dontInvert';
             const qrCode = jsQR(imgData.data, imgData.width, imgData.height, {
               inversionAttempts: inversionMode,
@@ -318,7 +331,7 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [handleScanDetected]);
+  }, [handleScanDetected, currentZoom, hasHardwareZoom]);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -364,6 +377,11 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
           disablePictureInPicture
           // @ts-ignore
           webkit-playsinline="true"
+          style={{
+            transform: currentZoom === 2 && !hasHardwareZoom ? 'scale(2)' : 'scale(1)',
+            transformOrigin: 'center center',
+            transition: 'transform 0.2s ease-out',
+          }}
           className="w-full h-full object-cover pointer-events-none select-none"
         />
 
@@ -412,14 +430,14 @@ export function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
             <button
               type="button"
               onClick={toggleZoom}
-              className={`px-3 py-2 rounded-xl text-xs font-bold border backdrop-blur-md transition ${
-                currentZoom > 1
-                  ? 'bg-sky-500 text-white border-sky-400 shadow-md shadow-sky-500/30'
+              className={`px-3 py-2 rounded-xl text-xs font-black border backdrop-blur-md transition shadow-md ${
+                currentZoom === 2
+                  ? 'bg-sky-500 text-slate-950 border-sky-400 shadow-sky-500/30'
                   : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
               }`}
-              title="Alternar Zoom da Câmera"
+              title="Alternar Zoom da Câmera (Inicia em 2x)"
             >
-              {currentZoom > 1 ? '2x' : '1x'}
+              {currentZoom}x
             </button>
           )}
 

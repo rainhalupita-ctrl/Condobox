@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, X, Upload, Zap, ShieldCheck } from 'lucide-react';
+import { Camera, RefreshCw, X, Upload, Zap, ZapOff, ShieldCheck } from 'lucide-react';
 import { OCRResponse } from '../lib/local-api';
 
 interface CameraCaptureProps {
@@ -91,6 +91,13 @@ export function CameraCapture({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Estados de Zoom (inicia obrigatoriamente em 2x) e Lanterna
+  const [currentZoom, setCurrentZoom] = useState<number>(2);
+  const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
+  const [maxHardwareZoom, setMaxHardwareZoom] = useState(2);
+  const [hasTorch, setHasTorch] = useState(false);
+  const [isTorchOn, setIsTorchOn] = useState(false);
+
   // Estados de Análise Contínua em Tempo Real e Foco/Anti-Tremor
   const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
   const [isDetected, setIsDetected] = useState(false);
@@ -169,7 +176,7 @@ export function CameraCapture({
         return;
       }
 
-      // Tenta acionar foco contínuo e exposição de alta nitidez no hardware da câmera
+      // Tenta acionar foco contínuo, exposição de alta nitidez, lanterna e zoom 2x nativo no hardware da câmera
       try {
         const track = mediaStream.getVideoTracks()[0];
         if (track) {
@@ -180,6 +187,20 @@ export function CameraCapture({
           }
           if (capabilities.exposureMode && Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes('continuous')) {
             adv.exposureMode = 'continuous';
+          }
+          if ('torch' in capabilities) {
+            setHasTorch(true);
+          }
+          if (capabilities.zoom) {
+            setHasHardwareZoom(true);
+            const zMax = Math.min(Number(capabilities.zoom.max) || 2, 5);
+            setMaxHardwareZoom(zMax);
+            const targetZ = Math.min(Math.max(2, capabilities.zoom.min || 1), zMax);
+            adv.zoom = targetZ; // Abre já com 2x no hardware!
+            setCurrentZoom(targetZ);
+          } else {
+            setHasHardwareZoom(false);
+            setCurrentZoom(2); // Inicia com 2x digital
           }
           if (Object.keys(adv).length > 0) {
             await track.applyConstraints({ advanced: [adv] });
@@ -330,6 +351,35 @@ export function CameraCapture({
     }
   };
 
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (track && hasTorch) {
+      try {
+        const nextState = !isTorchOn;
+        await track.applyConstraints({ advanced: [{ torch: nextState } as any] });
+        setIsTorchOn(nextState);
+      } catch (err) {
+        console.warn('Falha ao alternar lanterna:', err);
+      }
+    }
+  };
+
+  const toggleZoom = async () => {
+    const nextZoom = currentZoom === 2 ? 1 : 2;
+    setCurrentZoom(nextZoom);
+    if (hasHardwareZoom && streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints({ advanced: [{ zoom: nextZoom } as any] });
+        } catch (err) {
+          console.warn('Falha ao alternar zoom no hardware:', err);
+        }
+      }
+    }
+  };
+
   // ─── Captura Rápida de Alta Fidelidade (Instantânea, ~15ms) ──────────────────
   const captureHighResShot = useCallback(async (
     targetDim = 1280,
@@ -355,11 +405,18 @@ export function CameraCapture({
     canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, w, h);
+
+    const isDigitalZoom2x = currentZoom === 2 && !hasHardwareZoom;
+    const sx = isDigitalZoom2x ? vw * 0.25 : 0;
+    const sy = isDigitalZoom2x ? vh * 0.25 : 0;
+    const sw = isDigitalZoom2x ? vw * 0.5 : vw;
+    const sh = isDigitalZoom2x ? vh * 0.5 : vh;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', quality));
     if (!blob) return null;
     return { blob, previewUrl: URL.createObjectURL(blob) };
-  }, []);
+  }, [currentZoom, hasHardwareZoom]);
 
   // ─── Captura em Rajada (Burst Best-Shot) Anti-Tremor para fotos manuais ─────
   const captureBestShot = useCallback(async (
@@ -394,7 +451,13 @@ export function CameraCapture({
       if (ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(video, 0, 0, width, height);
+
+        const isDigitalZoom2x = currentZoom === 2 && !hasHardwareZoom;
+        const sx = isDigitalZoom2x ? (video.videoWidth || width) * 0.25 : 0;
+        const sy = isDigitalZoom2x ? (video.videoHeight || height) * 0.25 : 0;
+        const sw = isDigitalZoom2x ? (video.videoWidth || width) * 0.5 : (video.videoWidth || width);
+        const sh = isDigitalZoom2x ? (video.videoHeight || height) * 0.5 : (video.videoHeight || height);
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
 
         const blob = await new Promise<Blob | null>((res) =>
           canvas.toBlob((b) => res(b), 'image/jpeg', quality)
@@ -417,7 +480,7 @@ export function CameraCapture({
     const previewUrl = URL.createObjectURL(best.blob);
 
     return { blob: best.blob, previewUrl, sharpness: best.sharpness };
-  }, []);
+  }, [currentZoom, hasHardwareZoom]);
 
   // Captura Manual com Anti-Tremor Instantânea
   const takeSnapshot = useCallback(async () => {
@@ -542,7 +605,14 @@ export function CameraCapture({
           if (!ctx) return resolve(null);
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'medium';
-          ctx.drawImage(video, 0, 0, w, h);
+
+          const isDigitalZoom2x = currentZoom === 2 && !hasHardwareZoom;
+          const sx = isDigitalZoom2x ? (video.videoWidth || w) * 0.25 : 0;
+          const sy = isDigitalZoom2x ? (video.videoHeight || h) * 0.25 : 0;
+          const sw = isDigitalZoom2x ? (video.videoWidth || w) * 0.5 : (video.videoWidth || w);
+          const sh = isDigitalZoom2x ? (video.videoHeight || h) * 0.5 : (video.videoHeight || h);
+          ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+
           c.toBlob((b) => resolve(b), 'image/jpeg', 0.70);
         });
 
@@ -665,7 +735,7 @@ export function CameraCapture({
       isActive = false;
       if (scanTimeout) clearTimeout(scanTimeout);
     };
-  }, [stream, capturedBlob, captureBestShot, onCapture, stopCamera]);
+  }, [stream, capturedBlob, captureBestShot, onCapture, stopCamera, currentZoom, hasHardwareZoom]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -777,8 +847,53 @@ export function CameraCapture({
               onCanPlay={() => {
                 videoRef.current?.play().catch(() => {});
               }}
+              style={{
+                transform: currentZoom === 2 && !hasHardwareZoom ? 'scale(2)' : 'scale(1)',
+                transformOrigin: 'center center',
+                transition: 'transform 0.2s ease-out',
+              }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
+
+            {/* Controles Flutuantes da Câmera (Lanterna, Zoom 2x/1x e Alternar Câmera) */}
+            <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+              {hasTorch && (
+                <button
+                  type="button"
+                  onClick={toggleTorch}
+                  className={`p-2.5 rounded-xl border backdrop-blur-md transition ${
+                    isTorchOn
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/40'
+                      : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                  }`}
+                  title="Alternar Lanterna"
+                >
+                  {isTorchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={toggleZoom}
+                className={`px-3 py-2 rounded-xl text-xs font-black border backdrop-blur-md transition shadow-md ${
+                  currentZoom === 2
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-emerald-500/30'
+                    : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+                title="Alternar Zoom da Câmera (Inicia em 2x)"
+              >
+                {currentZoom}x
+              </button>
+
+              <button
+                type="button"
+                onClick={switchCamera}
+                className="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700 backdrop-blur-md transition"
+                title="Alternar Câmera Traseira / Frontal"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
 
 
 
