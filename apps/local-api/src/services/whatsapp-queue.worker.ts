@@ -406,7 +406,7 @@ export class WhatsAppQueueWorker {
   /**
    * Notificação de Retirada de Encomenda (ENCOMENDA RETIRADA COM SUCESSO)
    */
-  public async dispatchDeliveryNotification(packageId: string, preloadedPkg?: any) {
+  public async dispatchDeliveryNotification(packageId: string, preloadedPkg?: any, hasMorePending?: boolean) {
     if (this.processedDeliveryIds.has(packageId)) return;
 
     try {
@@ -509,9 +509,34 @@ export class WhatsAppQueueWorker {
         return;
       }
 
-      console.log(`📦 [WhatsApp Worker] Encaminhando retirada para agrupamento inteligente (Debounce): ${residentName} (${phone}) - ${pkg.carrier}`);
+      // Verifica se há outras encomendas pendentes para este morador/unidade caso hasMorePending não tenha sido informado
+      let morePending = hasMorePending;
+      if (morePending === undefined && supabaseService.isConfigured() && client) {
+        try {
+          const filterCol = pkg.resident_id ? 'resident_id' : (pkg.unit_id ? 'unit_id' : null);
+          const filterVal = pkg.resident_id || pkg.unit_id;
+          if (filterCol && filterVal) {
+            const { count, error: countErr } = await client
+              .from('packages')
+              .select('id', { count: 'exact', head: true })
+              .in('status', ['RECEIVED', 'NOTIFIED'])
+              .is('delivered_at', null)
+              .neq('id', packageId)
+              .eq(filterCol, filterVal);
 
-      deliveryBatcherService.addDelivery({
+            if (!countErr && typeof count === 'number') {
+              morePending = count > 0;
+              console.log(`🔍 [WhatsApp Worker] Encomendas pendentes restantes no banco para ${residentName}: ${count}`);
+            }
+          }
+        } catch (checkErr: any) {
+          console.warn('[WhatsApp Worker] Falha ao verificar encomendas pendentes restantes:', checkErr.message);
+        }
+      }
+
+      console.log(`📦 [WhatsApp Worker] Encaminhando retirada para entrega inteligente: ${residentName} (${phone}) - ${pkg.carrier} (Mais pendentes: ${Boolean(morePending)})`);
+
+      await deliveryBatcherService.addDelivery({
         packageId,
         phone,
         residentName,
@@ -522,7 +547,7 @@ export class WhatsAppQueueWorker {
         pickupCode: pkg.pickup_code,
         qrToken: pkg.qr_token,
         condoId: pkg.condo_id
-      });
+      }, Boolean(morePending));
     } catch (err: any) {
       console.error(`❌ [WhatsApp Worker] Erro ao enfileirar confirmação de retirada ${packageId}:`, err.message);
     }

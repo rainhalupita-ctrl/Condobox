@@ -204,30 +204,6 @@ export default function PortariaDashboardPage() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
 
-      await LocalApiClient.submitSignature({
-        packageId: selectedForDelivery.id,
-        signatureBase64: signatureDataUrl,
-        deliveredToName: deliveredToName || 'Morador/Autorizado',
-        deliveredByUserId: user?.id,
-        sendWhatsAppConfirmation: true
-      });
-
-      // Dispara broadcast em tempo real para o site do morador
-      const broadcastChannel = supabase.channel(`public-package-${selectedForDelivery.id}`);
-      broadcastChannel.subscribe(async (status: string) => {
-        if (status === 'SUBSCRIBED') {
-          await broadcastChannel.send({
-            type: 'broadcast',
-            event: 'status-updated',
-            payload: { status: 'DELIVERED', packageId: selectedForDelivery.id }
-          }).catch(() => {});
-          setTimeout(() => supabase.removeChannel(broadcastChannel), 3000);
-        }
-      });
-
-      VoiceService.playSuccessBeep();
-      VoiceService.speak(`Entrega concluída para ${deliveredToName || 'o morador'}`);
-
       // Guarda os dados antes de limpar o modal atual
       const deliveredPkg = selectedForDelivery;
       const recipientName = deliveredToName || deliveredPkg.resident?.name || deliveredPkg.recipient_name_ocr || 'Morador';
@@ -247,10 +223,42 @@ export default function PortariaDashboardPage() {
             : deliveredPkg.unit_id && p.unit_id === deliveredPkg.unit_id)
       );
 
+      const hasMore = otherPending.length > 0;
+
+      await LocalApiClient.submitSignature({
+        packageId: selectedForDelivery.id,
+        signatureBase64: signatureDataUrl,
+        deliveredToName: deliveredToName || 'Morador/Autorizado',
+        deliveredByUserId: user?.id,
+        sendWhatsAppConfirmation: true,
+        hasMorePending: hasMore
+      });
+
+      // Se o morador NÃO possui outras pendentes, garante envio imediato de WhatsApp (sem delay de 75s)
+      if (!hasMore && phone) {
+        LocalApiClient.flushDeliveryBatch(phone, deliveredPkg.condo_id).catch(() => {});
+      }
+
+      // Dispara broadcast em tempo real para o site do morador
+      const broadcastChannel = supabase.channel(`public-package-${selectedForDelivery.id}`);
+      broadcastChannel.subscribe(async (status: string) => {
+        if (status === 'SUBSCRIBED') {
+          await broadcastChannel.send({
+            type: 'broadcast',
+            event: 'status-updated',
+            payload: { status: 'DELIVERED', packageId: selectedForDelivery.id }
+          }).catch(() => {});
+          setTimeout(() => supabase.removeChannel(broadcastChannel), 3000);
+        }
+      });
+
+      VoiceService.playSuccessBeep();
+      VoiceService.speak(`Entrega concluída para ${deliveredToName || 'o morador'}`);
+
       setSelectedForDelivery(null);
       loadPackages();
 
-      if (otherPending.length > 0) {
+      if (hasMore) {
         // Abre o Pop-up Interativo perguntando se deseja entregar o próximo pacote agora
         setAdditionalPendingPrompt({
           residentName: recipientName,
@@ -864,26 +872,36 @@ export default function PortariaDashboardPage() {
         {additionalPendingPrompt && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
             <div className="w-full max-w-lg bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-6 sm:p-7 shadow-2xl shadow-black/80 space-y-5">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-2xl shrink-0">
-                  <PackageCheck className="w-7 h-7" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">
-                      Atenção Porteiro
-                    </span>
-                    <span className="text-xs text-amber-400/90 font-bold">
-                      {additionalPendingPrompt.pendingPackages.length} encomenda(s) restante(s)
-                    </span>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-2xl shrink-0">
+                    <PackageCheck className="w-7 h-7" />
                   </div>
-                  <h3 className="text-lg sm:text-xl font-black text-white mt-1">
-                    Outra Encomenda Pendente Detectada!
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    O morador <strong className="text-white">{additionalPendingPrompt.residentName}</strong> ({additionalPendingPrompt.unitInfo}) acabou de retirar <strong className="text-white">{additionalPendingPrompt.deliveredCarrier}</strong>, mas ainda possui outro(s) pacote(s) aguardando retirada:
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">
+                        Atenção Porteiro
+                      </span>
+                      <span className="text-xs text-amber-400/90 font-bold">
+                        {additionalPendingPrompt.pendingPackages.length} encomenda(s) restante(s)
+                      </span>
+                    </div>
+                    <h3 className="text-lg sm:text-xl font-black text-white mt-1">
+                      Outra Encomenda Pendente Detectada!
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      O morador <strong className="text-white">{additionalPendingPrompt.residentName}</strong> ({additionalPendingPrompt.unitInfo}) acabou de retirar <strong className="text-white">{additionalPendingPrompt.deliveredCarrier}</strong>, mas ainda possui outro(s) pacote(s) aguardando retirada:
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleFinishWithoutAdditional}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition shrink-0 cursor-pointer"
+                  title="Finalizar atendimento e enviar confirmação"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
               {/* Lista dos Pacotes Pendentes Restantes (sem exibir o código secreto do morador) */}

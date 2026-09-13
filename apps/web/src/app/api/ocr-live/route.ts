@@ -193,7 +193,7 @@ DIRETRIZES:
 5. carrier = nome do remetente/loja (ex: "Mercado Livre").
 6. NUNCA use CEP (ex: 29168-322) como trackingCode.`;
 
-  const models = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
+  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite-preview', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
 
   for (const apiKey of apiKeys) {
     for (const model of models) {
@@ -205,9 +205,9 @@ DIRETRIZES:
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-              generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 800 },
+              generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 250 },
             }),
-            signal: AbortSignal.timeout(7500),
+            signal: AbortSignal.timeout(3200),
           }
         );
 
@@ -238,10 +238,14 @@ DIRETRIZES:
 // ─── Provider: NVIDIA NIM (Llama 3.2 Vision) ──────────────────────────────────
 async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) {
   const PROMPT = 'Extraia destinatario, apto, bloco, remetente e rastreio em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":0.95}. Diferencie 8 de 6. NUNCA use CEP no trackingCode.';
+
   try {
     const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         model: 'meta/llama-3.2-11b-vision-instruct',
         messages: [
@@ -257,7 +261,7 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
         max_tokens: 80,
         response_format: { type: 'json_object' },
       }),
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(3200),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -276,50 +280,54 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
   return null;
 }
 
-// ─── Provider: Mistral AI (Pixtral 12B Vision) ───────────────────────────────
+// ─── Provider: Mistral AI (Ministral / Pixtral Vision Ultrarrápido) ───────────
 async function tryMistral(base64Image: string, mimeType: string, apiKey: string) {
   const PROMPT = `Você é especialista em OCR de etiquetas residenciais brasileiras.
 Extraia em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":1.0}
 Diretrizes: Diferencie 8 de 6. Em "Avenida Civit I, 1770 - A805", o apto é "805" e o bloco é "Bloco A". NUNCA use CEP como trackingCode.`;
 
-  try {
-    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'pixtral-12b-2409',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: PROMPT },
-              { type: 'image_url', image_url: `data:${mimeType};base64,${base64Image}` },
-            ],
-          },
-        ],
-        temperature: 0,
-        response_format: { type: 'json_object' },
-        max_tokens: 500,
-      }),
-      signal: AbortSignal.timeout(6000),
-    });
+  const mistralModels = ['ministral-8b-latest', 'ministral-3b-latest', 'pixtral-12b-2409'];
 
-    if (!res.ok) return null;
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    const parsed = JSON.parse(jsonMatch[0]);
-    const result = formatOcrResult(parsed);
-    if (result.confidence > 0) {
-      console.log('[OCR-LIVE] ✅ Mistral Pixtral', result);
-      return { ...result, provider: 'mistral' };
+  for (const model of mistralModels) {
+    try {
+      const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: PROMPT },
+                { type: 'image_url', image_url: `data:${mimeType};base64,${base64Image}` },
+              ],
+            },
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' },
+          max_tokens: 250,
+        }),
+        signal: AbortSignal.timeout(3200),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) continue;
+      const parsed = JSON.parse(jsonMatch[0]);
+      const result = formatOcrResult(parsed);
+      if (result.confidence > 0) {
+        console.log(`[OCR-LIVE] ✅ Mistral [${model}]`, result);
+        return { ...result, provider: 'mistral' };
+      }
+    } catch (e: any) {
+      console.warn(`[OCR-LIVE] Mistral [${model}] falhou:`, e.message?.slice(0, 80));
     }
-  } catch (e: any) {
-    console.warn('[OCR-LIVE] Mistral falhou:', e.message?.slice(0, 80));
   }
   return null;
 }

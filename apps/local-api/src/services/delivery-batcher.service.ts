@@ -50,11 +50,40 @@ export class DeliveryBatcherService {
   }
 
   /**
-   * Adiciona uma entrega ao lote do morador.
-   * Se já houver entregas recentes para o mesmo telefone, agrupa e reseta o timer.
+   * Normaliza telefone para formato numérico limpo (com 55 se tiver DDD)
    */
-  public addDelivery(item: QueuedDeliveryItem): void {
-    const cleanPhone = (item.phone || '').replace(/\D/g, '');
+  public normalizePhone(phone: string): string {
+    let clean = (phone || '').replace(/\D/g, '');
+    if (!clean) return '';
+    if (!clean.startsWith('55') && (clean.length === 10 || clean.length === 11)) {
+      clean = `55${clean}`;
+    }
+    return clean;
+  }
+
+  /**
+   * Verifica se dois números de telefone correspondem (com/sem 55, com/sem DDD)
+   */
+  public isPhoneMatch(p1: string, p2: string): boolean {
+    const c1 = (p1 || '').replace(/\D/g, '');
+    const c2 = (p2 || '').replace(/\D/g, '');
+    if (!c1 || !c2) return false;
+    if (c1 === c2) return true;
+    if (c1.endsWith(c2) || c2.endsWith(c1)) return true;
+    // Compara os últimos 8 dígitos (número do celular/fixo sem DDD/DDI)
+    if (c1.length >= 8 && c2.length >= 8) {
+      if (c1.slice(-8) === c2.slice(-8)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Adiciona uma entrega ao lote do morador.
+   * Se hasMorePending for falso (encomenda única ou última do morador), dispara IMEDIATAMENTE.
+   * Se hasMorePending for verdadeiro, aguarda se o porteiro vai retirar mais alguma.
+   */
+  public async addDelivery(item: QueuedDeliveryItem, hasMorePending: boolean = false): Promise<void> {
+    const cleanPhone = this.normalizePhone(item.phone);
     if (!cleanPhone) {
       console.warn('⚠️ [DeliveryBatcher] Encomenda recebida sem telefone válido. Ignorando lote.');
       return;
@@ -76,23 +105,24 @@ export class DeliveryBatcherService {
         });
         batch.deliveredTo = item.deliveredTo || batch.deliveredTo;
         batch.unitInfo = item.unitInfo || batch.unitInfo;
-        console.log(`📦 [DeliveryBatcher] Adicionada encomenda ${item.carrier} ao lote existente de ${cleanPhone}. Total no lote: ${batch.packages.length}`);
+        console.log(`📦 [DeliveryBatcher] Adicionada encomenda ${item.carrier} ao lote de ${cleanPhone}. Total no lote: ${batch.packages.length}`);
       }
 
-      // Se já passou do tempo máximo de espera, dispara imediatamente
-      if (Date.now() - batch.firstAddedAt >= this.maxWaitMs) {
-        console.log(`⏰ [DeliveryBatcher] Tempo máximo de espera atingido para ${cleanPhone}. Disparando lote.`);
-        this.flushBatch(key);
+      // Se o morador NÃO possui mais nenhuma encomenda pendente (retirou todas), dispara IMEDIATAMENTE!
+      if (!hasMorePending || (Date.now() - batch.firstAddedAt >= this.maxWaitMs)) {
+        console.log(`🚀 [DeliveryBatcher] Disparando lote IMEDIATAMENTE para ${batch.residentName} (${cleanPhone}) - Motivo: ${!hasMorePending ? 'Todas as encomendas foram retiradas' : 'Tempo máximo atingido'}`);
+        await this.flushBatch(key);
         return;
       }
 
-      // Reinicia o timer de debounce para aguardar se o porteiro vai bipar mais alguma
+      // Se ainda possui mais encomendas pendentes, reinicia o timer de debounce
       if (batch.timer) {
         clearTimeout(batch.timer);
       }
       batch.timer = setTimeout(() => {
         this.flushBatch(key);
       }, this.debounceMs);
+      console.log(`⏳ [DeliveryBatcher] Aguardando próximas retiradas de ${batch.residentName} (${cleanPhone})...`);
 
     } else {
       // Inicia um novo lote
@@ -114,12 +144,21 @@ export class DeliveryBatcherService {
         timer: null
       };
 
+      this.batches.set(key, batch);
+
+      // Se NÃO tem mais nenhuma encomenda pendente (era a única encomenda):
+      if (!hasMorePending) {
+        console.log(`⚡ [DeliveryBatcher] Encomenda ÚNICA para ${item.residentName} (${cleanPhone}). Enviando WhatsApp IMEDIATAMENTE...`);
+        await this.flushBatch(key);
+        return;
+      }
+
+      // Se possui 2 ou mais pendentes, aguarda se o porteiro vai retirar as outras
       batch.timer = setTimeout(() => {
         this.flushBatch(key);
       }, this.debounceMs);
 
-      this.batches.set(key, batch);
-      console.log(`⏳ [DeliveryBatcher] Novo lote de retirada iniciado para ${item.residentName} (${cleanPhone}). Aguardando ${this.debounceMs / 1000}s para possíveis outras retiradas...`);
+      console.log(`⏳ [DeliveryBatcher] Novo lote de retirada com mais encomendas pendentes para ${item.residentName} (${cleanPhone}). Aguardando porteiro retirar demais ou finalizar...`);
     }
   }
 
@@ -201,22 +240,25 @@ export class DeliveryBatcherService {
     const cleanPhone = (phone || '').replace(/\D/g, '');
     if (!cleanPhone) return false;
 
-    const targetKey = condoId ? `${condoId}_${cleanPhone}` : null;
+    console.log(`⚡ [DeliveryBatcher] Solicitado envio imediato (flush) para telefone: ${phone} (condoId: ${condoId || 'qualquer'})`);
+
+    const targetKey = condoId ? `${condoId}_${this.normalizePhone(phone)}` : null;
     if (targetKey && this.batches.has(targetKey)) {
-      console.log(`⚡ [DeliveryBatcher] Envio imediato solicitado para chave exata ${targetKey}`);
+      console.log(`⚡ [DeliveryBatcher] Envio imediato disparado para chave exata ${targetKey}`);
       await this.flushBatch(targetKey);
       return true;
     }
 
-    // Busca por qualquer lote que termine com o telefone
-    for (const key of Array.from(this.batches.keys())) {
-      if (key.endsWith(`_${cleanPhone}`)) {
-        console.log(`⚡ [DeliveryBatcher] Envio imediato solicitado para chave correspondente ${key}`);
+    // Busca por qualquer lote ativo que coincida com o telefone do morador
+    for (const [key, batch] of Array.from(this.batches.entries())) {
+      if (this.isPhoneMatch(batch.phone, cleanPhone)) {
+        console.log(`⚡ [DeliveryBatcher] Envio imediato disparado para lote do morador ${batch.residentName} (${batch.phone}) na chave: ${key}`);
         await this.flushBatch(key);
         return true;
       }
     }
 
+    console.log(`ℹ️ [DeliveryBatcher] Nenhum lote pendente em memória para o telefone ${phone}. Pode já ter sido enviado imediatamente.`);
     return false;
   }
 

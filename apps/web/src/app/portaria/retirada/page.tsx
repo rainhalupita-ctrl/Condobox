@@ -149,42 +149,9 @@ export default function RetiradaPage() {
     setIsLoading(true);
 
     try {
-      const res = await LocalApiClient.submitSignature({
-        packageId: scannedPackage.id,
-        signatureBase64,
-        deliveredToName: deliveredToName || 'Morador',
-        sendWhatsAppConfirmation: true
-      });
-
-      // Dispara broadcast em tempo real para o site do morador em todos os canais
       const supabase = createClient();
-      const channelsToNotify = [
-        `public-package-${scannedPackage.id}`,
-        scannedPackage.qr_token ? `public-package-${scannedPackage.qr_token}` : null,
-        scannedPackage.pickup_code ? `public-package-${scannedPackage.pickup_code}` : null,
-        'packages-morador-live'
-      ].filter(Boolean) as string[];
 
-      channelsToNotify.forEach((chName) => {
-        const ch = supabase.channel(chName);
-        ch.subscribe(async (status: string) => {
-          if (status === 'SUBSCRIBED') {
-            await ch.send({
-              type: 'broadcast',
-              event: 'status-updated',
-              payload: {
-                status: 'DELIVERED',
-                packageId: scannedPackage.id,
-                qrToken: scannedPackage.qr_token,
-                pickupCode: scannedPackage.pickup_code
-              }
-            }).catch(() => {});
-            setTimeout(() => supabase.removeChannel(ch), 3000);
-          }
-        });
-      });
-
-      // Busca apenas encomendas que realmente NÃO foram recebidas/entregues ainda deste morador
+      // 1. Busca encomendas que realmente NÃO foram recebidas/entregues ainda deste morador
       let otherPending: PackageType[] = [];
       if (supabase && (scannedPackage.resident_id || scannedPackage.unit_id)) {
         try {
@@ -214,6 +181,50 @@ export default function RetiradaPage() {
           console.warn('[handleSaveSignature] Falha ao consultar outras encomendas pendentes:', queryErr);
         }
       }
+
+      const hasMore = otherPending.length > 0;
+
+      // 2. Submete a assinatura passando hasMorePending
+      const res = await LocalApiClient.submitSignature({
+        packageId: scannedPackage.id,
+        signatureBase64,
+        deliveredToName: deliveredToName || 'Morador',
+        sendWhatsAppConfirmation: true,
+        hasMorePending: hasMore
+      });
+
+      // 3. Se o morador NÃO possui outras pendentes, garante envio imediato de WhatsApp (sem delay)
+      const phone = scannedPackage.resident?.phone || (scannedPackage as any)?.phone;
+      if (!hasMore && phone) {
+        LocalApiClient.flushDeliveryBatch(phone, (scannedPackage.condo_id || effectiveCondoId) || undefined).catch(() => {});
+      }
+
+      // Dispara broadcast em tempo real para o site do morador em todos os canais
+      const channelsToNotify = [
+        `public-package-${scannedPackage.id}`,
+        scannedPackage.qr_token ? `public-package-${scannedPackage.qr_token}` : null,
+        scannedPackage.pickup_code ? `public-package-${scannedPackage.pickup_code}` : null,
+        'packages-morador-live'
+      ].filter(Boolean) as string[];
+
+      channelsToNotify.forEach((chName) => {
+        const ch = supabase.channel(chName);
+        ch.subscribe(async (status: string) => {
+          if (status === 'SUBSCRIBED') {
+            await ch.send({
+              type: 'broadcast',
+              event: 'status-updated',
+              payload: {
+                status: 'DELIVERED',
+                packageId: scannedPackage.id,
+                qrToken: scannedPackage.qr_token,
+                pickupCode: scannedPackage.pickup_code
+              }
+            }).catch(() => {});
+            setTimeout(() => supabase.removeChannel(ch), 3000);
+          }
+        });
+      });
 
       setAdditionalPendingPackages(otherPending);
       setReceiptData(res);
@@ -274,6 +285,14 @@ export default function RetiradaPage() {
   };
 
   const resetFlow = () => {
+    // Se havia encomendas pendentes que o porteiro optou por não retirar agora, dispara o flush imediatamente
+    if (additionalPendingPackages.length > 0) {
+      const phone = scannedPackage?.resident?.phone || (scannedPackage as any)?.phone;
+      if (phone) {
+        LocalApiClient.flushDeliveryBatch(phone, (scannedPackage?.condo_id || effectiveCondoId) || undefined).catch(() => {});
+      }
+    }
+
     setStep('SCAN');
     setScannedPackage(null);
     setDeliveredToName('');
@@ -537,7 +556,15 @@ export default function RetiradaPage() {
               <QrCode className="w-4 h-4" /> Realizar Outra Retirada
             </button>
             <button
-              onClick={() => router.push('/portaria')}
+              onClick={async () => {
+                if (additionalPendingPackages.length > 0) {
+                  const phone = scannedPackage?.resident?.phone || (scannedPackage as any)?.phone;
+                  if (phone) {
+                    await LocalApiClient.flushDeliveryBatch(phone, (scannedPackage?.condo_id || effectiveCondoId) || undefined).catch(() => {});
+                  }
+                }
+                router.push('/portaria');
+              }}
               className="py-3 px-6 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold text-sm transition"
             >
               Voltar ao Painel

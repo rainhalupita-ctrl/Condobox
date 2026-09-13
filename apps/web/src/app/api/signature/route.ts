@@ -11,7 +11,8 @@ export async function POST(request: NextRequest) {
       signatureBase64,
       deliveredToName,
       deliveredByUserId,
-      sendWhatsAppConfirmation = true
+      sendWhatsAppConfirmation = true,
+      hasMorePending
     } = body;
 
     if (!packageId || !signatureBase64) {
@@ -177,6 +178,19 @@ export async function POST(request: NextRequest) {
           if (sendRes.ok) {
             whatsappDeliveredSent = true;
           }
+        } catch {}
+      }
+
+      // Se não há mais encomendas pendentes e há API local ativa, garante o flush imediato
+      if (hasMorePending === false) {
+        try {
+          const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:3001';
+          fetch(`${localApiUrl.replace(/\/$/, '')}/api/delivery-batch/flush`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone, condoId: pkg.condo_id }),
+            signal: AbortSignal.timeout(2500)
+          }).catch(() => {});
         } catch {}
       }
     }

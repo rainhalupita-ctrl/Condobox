@@ -209,6 +209,7 @@ export class LocalApiClient {
     deliveredToName: string;
     deliveredByUserId?: string | null;
     sendWhatsAppConfirmation?: boolean;
+    hasMorePending?: boolean;
   }) {
     const baseUrl = this.getBaseUrl();
     try {
@@ -250,8 +251,21 @@ export class LocalApiClient {
       });
       if (res.ok) return await res.json();
     } catch (err) {
-      console.warn('[LocalApiClient] flushDeliveryBatch falhou:', err);
+      console.warn('[LocalApiClient] flushDeliveryBatch falhou via URL principal:', err);
     }
+
+    // Se falhou ou se baseUrl estava inacessível, tenta a rota local Next.js /api/delivery-batch/flush
+    try {
+      const fallbackRes = await fetch('/api/delivery-batch/flush', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, condoId }),
+      });
+      if (fallbackRes.ok) return await fallbackRes.json();
+    } catch (err) {
+      console.warn('[LocalApiClient] flushDeliveryBatch falhou via fallback /api:', err);
+    }
+
     return { success: false };
   }
 

@@ -272,8 +272,38 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     }
   };
 
-  // ─── Captura em Rajada (Burst Best-Shot) Anti-Tremor ───────────────────────
-  // Dispara 3 frames rápidos espaçados por 40ms e escolhe o de maior nitidez
+  // ─── Captura Rápida de Alta Fidelidade (Instantânea, ~15ms) ──────────────────
+  const captureHighResShot = useCallback(async (
+    targetDim = 1280,
+    quality = 0.82
+  ): Promise<{ blob: Blob; previewUrl: string } | null> => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return null;
+    const vw = video.videoWidth || targetDim;
+    const vh = video.videoHeight || Math.round(targetDim * 0.75);
+    let w = vw;
+    let h = vh;
+    if (w > targetDim || h > targetDim) {
+      if (w > h) {
+        h = Math.round((h * targetDim) / w);
+        w = targetDim;
+      } else {
+        w = Math.round((w * targetDim) / h);
+        h = targetDim;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, w, h);
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', quality));
+    if (!blob) return null;
+    return { blob, previewUrl: URL.createObjectURL(blob) };
+  }, []);
+
+  // ─── Captura em Rajada (Burst Best-Shot) Anti-Tremor para fotos manuais ─────
   const captureBestShot = useCallback(async (
     targetDim = 1440,
     quality = 0.88
@@ -324,7 +354,6 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
     if (candidates.length === 0) return null;
 
-    // Seleciona o frame com maior nitidez/menor tremor
     candidates.sort((a, b) => b.sharpness - a.sharpness);
     const best = candidates[0];
     const previewUrl = URL.createObjectURL(best.blob);
@@ -332,7 +361,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     return { blob: best.blob, previewUrl, sharpness: best.sharpness };
   }, []);
 
-  // Captura Manual com Anti-Tremor
+  // Captura Manual com Anti-Tremor Instantânea
   const takeSnapshot = useCallback(async () => {
     if (!videoRef.current || autoCaptureFiredRef.current || isProcessingRef.current) return;
     isProcessingRef.current = true;
@@ -343,19 +372,19 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       navigator.vibrate?.([40, 40, 80]);
     } catch {}
 
-    const bestShot = await captureBestShot(1440, 0.88);
-    if (!bestShot) {
+    const shot = (await captureHighResShot(1280, 0.84)) || (await captureBestShot(1280, 0.84));
+    if (!shot) {
       isProcessingRef.current = false;
       autoCaptureFiredRef.current = false;
       setIsDetected(false);
       return;
     }
 
-    setCapturedBlob(bestShot.blob);
-    setCapturedPreview(bestShot.previewUrl);
+    setCapturedBlob(shot.blob);
+    setCapturedPreview(shot.previewUrl);
     stopCamera();
-    onCapture(bestShot.blob, bestShot.previewUrl);
-  }, [captureBestShot, onCapture, stopCamera]);
+    onCapture(shot.blob, shot.previewUrl);
+  }, [captureHighResShot, captureBestShot, onCapture, stopCamera]);
 
   // ─── Análise em Tempo Real Ultra-Rápida e Sem Tremor ───────────────────────
   useEffect(() => {
@@ -390,23 +419,22 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
       // 1. Checagem instantânea de nitidez / tremor (< 1ms)
       const sharpnessMetrics = calculateFrameSharpness(video);
-      const isSharp = sharpnessMetrics.sharpness >= 22;
-      const isBrightEnough = sharpnessMetrics.brightness >= 16;
+      const isSharp = sharpnessMetrics.sharpness >= 15;
+      const isBrightEnough = sharpnessMetrics.brightness >= 14;
       
       setIsSteady(isSharp && isBrightEnough);
 
-      // Se a imagem estiver em movimento/borrada, NÃO desperdiça requisição!
-      // Aguarda o operador estabilizar o celular, garantindo 100% de precisão na leitura.
+      // Se a imagem estiver em movimento/borrada, aguarda estabilização rápida
       if (!isSharp || !isBrightEnough) {
         if (isActive && isMountedRef.current && !autoCaptureFiredRef.current) {
-          scanTimeout = setTimeout(runLiveScan, 260);
+          scanTimeout = setTimeout(runLiveScan, 180);
         }
         return;
       }
 
       // Economia inteligente de tokens (Detector de Câmera Parada / Anti-Idle):
       // Se a nitidez não variou (câmera parada apontada pro mesmo local sem etiqueta),
-      // desacelera as chamadas para poupar 75% dos tokens.
+      // desacelera as chamadas para poupar tokens.
       const sharpnessDelta = Math.abs(sharpnessMetrics.sharpness - lastSharpnessRef.current);
       lastSharpnessRef.current = sharpnessMetrics.sharpness;
       if (sharpnessDelta < 2.5) {
@@ -433,9 +461,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       setIsLiveAnalyzing(true);
 
       try {
-        // Captura frame de alta fidelidade (1080px JPEG) para envio ao OCR
+        // Captura frame otimizado e leve (720px JPEG @ 0.70 - ~45KB) para envio ultrarrápido ao OCR
         const frameBlob = await new Promise<Blob | null>((resolve) => {
-          const targetDim = 1080;
+          const targetDim = 720;
           let w = video.videoWidth || targetDim;
           let h = video.videoHeight || Math.round(targetDim * 0.75);
           if (w > targetDim || h > targetDim) {
@@ -453,9 +481,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           const ctx = c.getContext('2d');
           if (!ctx) return resolve(null);
           ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
+          ctx.imageSmoothingQuality = 'medium';
           ctx.drawImage(video, 0, 0, w, h);
-          c.toBlob((b) => resolve(b), 'image/jpeg', 0.85);
+          c.toBlob((b) => resolve(b), 'image/jpeg', 0.70);
         });
 
         if (!frameBlob || !isMountedRef.current || !isActive || autoCaptureFiredRef.current) {
@@ -468,7 +496,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const liveRes = await fetch('/api/ocr-live', {
           method: 'POST',
           body: fd,
-          signal: AbortSignal.timeout(6500),
+          signal: AbortSignal.timeout(4500),
         });
 
         if (!liveRes.ok || autoCaptureFiredRef.current || !isMountedRef.current || !isActive) {
@@ -478,7 +506,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const liveOcr = await liveRes.json();
         
         // Rastreia se estamos em modo fallback de OCR local
-        if (liveOcr?.provider === 'tesseract_local') {
+        if (liveOcr?.provider === 'tesseract_local' || liveOcr?.provider === 'easyocr_local') {
           setIsLocalOcrActive(true);
         } else if (liveOcr?.provider === 'gemini') {
           setIsLocalOcrActive(false);
@@ -496,10 +524,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         const hasTracking = typeof liveOcr?.trackingCode === 'string' && liveOcr.trackingCode.trim().length >= 5;
         const hasUnit = unitClean.length >= 1 && unitClean.length <= 5;
 
-        // Validação rigorosa para evitar leituras erradas ou falsos positivos
+        // Validação rigorosa e ágil para evitar leituras erradas
         const detected =
           (hasUnit || (hasRecipient && hasTracking)) &&
-          (typeof liveOcr.confidence === 'number' ? liveOcr.confidence >= 0.5 : true);
+          (typeof liveOcr.confidence === 'number' ? liveOcr.confidence >= 0.45 : true);
 
         if (!detected || autoCaptureFiredRef.current || isProcessingRef.current || !isMountedRef.current || !isActive) {
           return;
@@ -514,10 +542,10 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           navigator.vibrate?.([50, 50, 100]);
         } catch {}
 
-        // Tira o frame mais nítido da rajada (burst anti-tremor) para o registro final
-        const bestShot = await captureBestShot(1440, 0.88);
-        const finalBlob = bestShot?.blob || frameBlob;
-        const finalPreviewUrl = bestShot?.previewUrl || URL.createObjectURL(finalBlob);
+        // Captura instantânea em alta resolução sem atraso de rajada (~15ms)
+        const bestShot = (await captureHighResShot(1280, 0.84)) || { blob: frameBlob, previewUrl: URL.createObjectURL(frameBlob) };
+        const finalBlob = bestShot.blob;
+        const finalPreviewUrl = bestShot.previewUrl;
 
         setCapturedBlob(finalBlob);
         setCapturedPreview(finalPreviewUrl);
@@ -561,8 +589,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         if (isMountedRef.current && isActive) {
           setIsLiveAnalyzing(false);
           if (!autoCaptureFiredRef.current) {
-            // Cadência adaptativa inteligente: 1100ms normal, ou 2200ms se câmera parada sem etiqueta (poupa ~75% de tokens)
-            const nextDelay = consecutiveStaticRef.current >= 3 ? 2200 : 1100;
+            // Cadência adaptativa ultrarrápida: 450ms normal, ou 1200ms se câmera parada sem etiqueta
+            const nextDelay = consecutiveStaticRef.current >= 3 ? 1200 : 450;
             scanTimeout = setTimeout(runLiveScan, nextDelay);
           }
         }

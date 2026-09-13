@@ -10,7 +10,8 @@ const signaturePayloadSchema = z.object({
   signatureBase64: z.string().min(10, 'Assinatura inválida'),
   deliveredToName: z.string().min(2, 'Nome do recebedor é obrigatório'),
   deliveredByUserId: z.string().optional().nullable(),
-  sendWhatsAppConfirmation: z.boolean().default(true)
+  sendWhatsAppConfirmation: z.boolean().default(true),
+  hasMorePending: z.boolean().optional()
 });
 
 export async function signatureRoutes(fastify: FastifyInstance) {
@@ -114,7 +115,7 @@ export async function signatureRoutes(fastify: FastifyInstance) {
       if (body.sendWhatsAppConfirmation) {
         try {
           const { whatsAppQueueWorker } = await import('../services/whatsapp-queue.worker.js');
-          await whatsAppQueueWorker.dispatchDeliveryNotification(updatedPackage.id, updatedPackage);
+          await whatsAppQueueWorker.dispatchDeliveryNotification(updatedPackage.id, updatedPackage, body.hasMorePending);
           whatsappSent = true;
         } catch (delivErr: any) {
           console.warn('[SignatureRoutes] Erro no worker de confirmação de entrega:', delivErr.message);
