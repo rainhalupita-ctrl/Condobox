@@ -671,6 +671,197 @@ export class WhatsAppEngineService {
     );
   }
 
+  private extractQuotedTextFromMessage(msg: WAMessage): string {
+    const contextInfo =
+      msg.message?.extendedTextMessage?.contextInfo ||
+      msg.message?.imageMessage?.contextInfo ||
+      msg.message?.videoMessage?.contextInfo ||
+      (msg.message as any)?.ephemeralMessage?.message?.extendedTextMessage?.contextInfo;
+
+    const qm = contextInfo?.quotedMessage;
+    if (!qm) return '';
+
+    return (
+      qm.conversation ||
+      qm.extendedTextMessage?.text ||
+      qm.imageMessage?.caption ||
+      qm.videoMessage?.caption ||
+      ''
+    );
+  }
+
+  private classifyIncomingMessage(text: string, quotedText?: string): {
+    isAcknowledge: boolean;
+    isCodeRequest: boolean;
+    isContestation: boolean;
+    isUnrelated: boolean;
+    extractedCode: string | null;
+    reason: string;
+  } {
+    const trimmed = text.trim();
+    const normalized = trimmed
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    // 1. Verificação de Contestação (morador avisando que não é dele / não pediu / destinatário errado)
+    const contestationRegex = /\b(nao (e|eh) minh[ao]|nao pedi|encomenda errada|nao recebi|veio errad[ao]|nao sou eu|destinatario errado|pacote errado)\b/i;
+    if (contestationRegex.test(normalized)) {
+      return {
+        isAcknowledge: false,
+        isCodeRequest: false,
+        isContestation: true,
+        isUnrelated: false,
+        extractedCode: null,
+        reason: 'contestation'
+      };
+    }
+
+    // 2. Extração de código específico (#ABCDEF ou "codigo: ABCDEF" ou 5 a 7 caracteres alfanuméricos isolados)
+    let extractedCode: string | null = null;
+    const hashMatch = text.match(/#([a-zA-Z0-9]{4,8})\b/);
+    const codePrefixMatch = text.match(/\b(?:cod(?:igo)?|retirada)[:\s]+([a-zA-Z0-9]{4,8})\b/i);
+
+    if (hashMatch) {
+      extractedCode = hashMatch[1].toUpperCase();
+    } else if (codePrefixMatch) {
+      extractedCode = codePrefixMatch[1].toUpperCase();
+    } else if (/^[a-zA-Z0-9]{5,7}$/.test(trimmed)) {
+      // Se a mensagem inteira for apenas uma palavra de 5 a 7 caracteres, verifica se não é palavra comum em português
+      const commonWords = new Set([
+        'BOM', 'BOA', 'DIA', 'TARDE', 'NOITE', 'OLA', 'OLAA', 'OI', 'OII', 'OIII',
+        'TUDO', 'BEM', 'COMO', 'VAI', 'VALEU', 'VLW', 'OBRIGADO', 'OBRIGADA', 'OBG',
+        'SHOW', 'TOP', 'JOIA', 'BELEZA', 'BLZ', 'SIM', 'NAO', 'OK', 'OKK', 'OKEY',
+        'CIENTE', 'CONFIRMO', 'RECEBI', 'VOU', 'TESTE', 'FAVOR', 'AJUDA', 'AQUI',
+        'ONDE', 'QUEM', 'QUAL', 'PORTA', 'VAGA', 'CARRO', 'CASA', 'APTO', 'BLOCO',
+        'QUERO', 'SAIR', 'ENTRAR', 'DESCER', 'SUBIR', 'VENDO', 'PODE', 'PODEM'
+      ]);
+      const upperCandidate = trimmed.toUpperCase();
+      if (!commonWords.has(upperCandidate)) {
+        extractedCode = upperCandidate;
+      }
+    }
+
+    // 3. Pedido de Código / QR Code ("qual meu código?", "manda o qr code", "perdi meu código")
+    const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o qr\s?code)\b/i;
+    if (codeRequestRegex.test(normalized)) {
+      return {
+        isAcknowledge: false,
+        isCodeRequest: true,
+        isContestation: false,
+        isUnrelated: false,
+        extractedCode,
+        reason: 'code_request'
+      };
+    }
+
+    // 4. Assuntos diversos do condomínio (portão, vaga, síndico, boleto, interfone, barulho, etc.)
+    const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
+    if (!hashMatch && !codePrefixMatch && unrelatedCondoRegex.test(normalized)) {
+      return {
+        isAcknowledge: false,
+        isCodeRequest: false,
+        isContestation: false,
+        isUnrelated: true,
+        extractedCode: null,
+        reason: 'unrelated_condo_topic'
+      };
+    }
+
+    // 5. Perguntas gerais com ponto de interrogação que não sejam de código
+    if (text.includes('?') && !hashMatch && !codePrefixMatch && !codeRequestRegex.test(normalized)) {
+      return {
+        isAcknowledge: false,
+        isCodeRequest: false,
+        isContestation: false,
+        isUnrelated: true,
+        extractedCode: null,
+        reason: 'general_question'
+      };
+    }
+
+    // 6. Resposta direta a notificação citada (quotedMessage)
+    if (quotedText) {
+      const normQuoted = quotedText.toLowerCase();
+      const isQuotingPackage =
+        normQuoted.includes('encomenda') ||
+        normQuoted.includes('retirada') ||
+        normQuoted.includes('codigo') ||
+        normQuoted.includes('condobox') ||
+        normQuoted.includes('portaria');
+      if (isQuotingPackage && trimmed.length <= 40) {
+        return {
+          isAcknowledge: true,
+          isCodeRequest: false,
+          isContestation: false,
+          isUnrelated: false,
+          extractedCode,
+          reason: 'quoted_notification_reply'
+        };
+      }
+    }
+
+    // 7. Emojis afirmativos
+    const ackEmojis = ['👍', '👌', '📦', '✅', '🆗', '🤝', '🙏'];
+    const hasAckEmoji = ackEmojis.some(emoji => text.includes(emoji));
+
+    // 8. Expressões afirmativas explícitas (mensagens curtas <= 60 caracteres)
+    const ackKeywordsRegex = /\b(ciente|estou ciente|to ciente|tô ciente|ta ciente|tá ciente|ok|okk|okey|okay|confirmado|confirmo|confirmar|confirmada|recebido|recebi|entendido|entendi|obrigad[ao]|valeu|vlw|obg|agradecid[ao]|gratidao|show|show de bola|perfeito|maravilha|joia|beleza|blz|tranquilo|vou retirar|vou buscar|ja vou buscar|ja vou descer|estou descendo|to descendo|tô descendo|indo buscar|passo ai|passo aí|vou pegar|ja pego|pego mais tarde|logo busco)\b/i;
+
+    const isShortMessage = trimmed.length <= 60;
+    const isAckKeyword = isShortMessage && ackKeywordsRegex.test(normalized);
+    const isSimpleYes = isShortMessage && /^(sim|sim obrigado|sim valeu|sim ciente)$/i.test(normalized);
+
+    if (hasAckEmoji || isAckKeyword || isSimpleYes || extractedCode) {
+      return {
+        isAcknowledge: true,
+        isCodeRequest: false,
+        isContestation: false,
+        isUnrelated: false,
+        extractedCode,
+        reason: extractedCode ? 'extracted_code' : (hasAckEmoji ? 'ack_emoji' : 'ack_keyword')
+      };
+    }
+
+    // 9. Se for qualquer outro assunto ou saudação (ex: "Bom dia", "Olá")
+    return {
+      isAcknowledge: false,
+      isCodeRequest: false,
+      isContestation: false,
+      isUnrelated: true,
+      extractedCode: null,
+      reason: 'casual_or_unrelated'
+    };
+  }
+
+  private async sendWhatsAppReply(remoteJid: string, cleanPhone: string, replyText: string): Promise<void> {
+    try {
+      if (this.socket) {
+        await this.socket.sendPresenceUpdate('composing', remoteJid);
+      }
+    } catch {}
+
+    await new Promise(resolve => setTimeout(resolve, 1800));
+
+    try {
+      if (this.socket) {
+        await this.socket.sendPresenceUpdate('paused', remoteJid);
+      }
+    } catch {}
+
+    try {
+      if (this.socket) {
+        this.logToFile(`Enviando resposta diretamente para conversa ativa: ${remoteJid}...`);
+        await this.socket.sendMessage(remoteJid, { text: replyText });
+      } else {
+        await this.sendTextMessage(cleanPhone, replyText);
+      }
+    } catch (sendErr: any) {
+      this.logToFile(`Fallback para sendTextMessage(${cleanPhone})...`);
+      await this.sendTextMessage(cleanPhone, replyText);
+    }
+  }
+
   private async handleIncomingMessage(msg: WAMessage): Promise<void> {
     try {
       if (msg.key.fromMe) return;
@@ -697,42 +888,101 @@ export class WhatsAppEngineService {
       const text = this.extractTextFromMessage(msg).trim();
       if (!text) return;
 
+      const quotedText = this.extractQuotedTextFromMessage(msg);
       const cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid);
       this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone: ${cleanPhone}): "${text}"`);
 
-      // Extrai código somente se não for palavra comum de confirmação em português
-      const commonWords = ['OK', 'CIENTE', 'SIM', 'NAO', 'VALEU', 'BOA', 'RECEBI', 'CONFIRMO', 'CHEGANDO', 'VOU', 'OBRIGADO', 'OBRIGADA', 'SHOW', 'TA', 'TÁ'];
-      let mentionedCode: string | null = null;
-      const codeMatch = text.match(/\b([0-9a-zA-Z]{4,6})\b/);
-      if (codeMatch) {
-        const potential = codeMatch[1].toUpperCase();
-        if (!commonWords.includes(potential)) {
-          mentionedCode = potential;
-        }
-      }
+      // 🧠 CLASSIFICAÇÃO INTELIGENTE DE INTENÇÃO
+      const intent = this.classifyIncomingMessage(text, quotedText);
 
-      // Se não for um código digitado expressamente e já houve confirmação enviada nos últimos 30 segundos, ignora
-      const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
-      if (!mentionedCode && Date.now() - lastAck < 30000) {
-        this.logToFile(`⏳ Ignorando mensagem de ${cleanPhone}: confirmação enviada recentemente (<30s). Evitando duplicata.`);
+      // Se for contestação de morador avisando que não é dele:
+      if (intent.isContestation) {
+        this.logToFile(`⚠️ Mensagem de ${cleanPhone} classificada como contestação ("${text}"). Não confirmando ciência.`);
         return;
       }
 
-      // Import dinâmico do serviço de dados local/supabase
+      // Se NÃO for confirmação de ciência, NEM pedido de código, NEM código digitado:
+      if (!intent.isAcknowledge && !intent.isCodeRequest && !intent.extractedCode) {
+        this.logToFile(`ℹ️ Mensagem recebida de ${cleanPhone} ("${text}") ignorada para auto-resposta de encomenda (motivo: ${intent.reason}).`);
+        return;
+      }
+
+      // Import dinâmico do databaseService
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
       if (!databaseService) {
         this.logToFile('databaseService não pôde ser importado.');
         return;
       }
 
-      this.logToFile(`Buscando encomenda pendente para telefone ${cleanPhone}...`);
-      const result = await databaseService.acknowledgePackageByPhone(cleanPhone, mentionedCode);
+      const webBaseUrl = this.getPublicWebUrl();
+
+      // CASO 1: Morador pediu expressamente o código ou link de retirada ("qual meu código?", "manda o qr code")
+      if (intent.isCodeRequest) {
+        this.logToFile(`🔍 Morador ${cleanPhone} solicitou dados/QR Code da encomenda...`);
+        const pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone);
+        if (!pendingPkgs || pendingPkgs.length === 0) {
+          this.logToFile(`ℹ️ Nenhuma encomenda pendente encontrada para envio de código a ${cleanPhone}.`);
+          return;
+        }
+
+        let residentName = 'Morador(a)';
+        const firstPkg = pendingPkgs[0];
+        try {
+          if (firstPkg.resident?.name) {
+            residentName = firstPkg.resident.name;
+          } else if (firstPkg.recipient_name_ocr) {
+            residentName = firstPkg.recipient_name_ocr;
+          }
+        } catch {}
+
+        let replyText = '';
+        if (pendingPkgs.length === 1) {
+          const pkg = pendingPkgs[0];
+          const token = pkg.qr_token || pkg.pickup_code;
+          const pickupUrl = `${webBaseUrl}/p/${token}`;
+          const carrierName = pkg.carrier || 'Encomenda';
+
+          replyText =
+            `📦 *DADOS DA SUA ENCOMENDA*\n\n` +
+            `Olá, *${residentName}*! Aqui estão os dados para retirada da sua encomenda da *${carrierName}*:\n\n` +
+            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+            `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
+            `🏢 Apresente o código ou QR Code no balcão da portaria para retirar.`;
+        } else {
+          const listItems = pendingPkgs.map((pkg: any, idx: number) => {
+            const token = pkg.qr_token || pkg.pickup_code;
+            const pickupUrl = `${webBaseUrl}/p/${token}`;
+            const carrier = pkg.carrier || 'Encomenda';
+            return `📦 *${idx + 1}. ${carrier}*\n🔑 *Código:* *${pkg.pickup_code}*\n📱 *QR Code:* ${pickupUrl}`;
+          }).join('\n\n');
+
+          replyText =
+            `📦 *DADOS DAS SUAS ENCOMENDAS*\n\n` +
+            `Olá, *${residentName}*! Você possui *${pendingPkgs.length} encomendas pendentes* para retirada:\n\n` +
+            `${listItems}\n\n` +
+            `🏢 Apresente os códigos ou QR Codes na portaria para retirar todas as suas encomendas.`;
+        }
+
+        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
+        this.logToFile(`✅ Dados de retirada reenviados a pedido do morador ${cleanPhone}.`);
+        return;
+      }
+
+      // CASO 2: Confirmação de Ciência ou Envio de Código de Retirada
+      const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
+      if (!intent.extractedCode && Date.now() - lastAck < 30000) {
+        this.logToFile(`⏳ Ignorando confirmação de ${cleanPhone}: resposta enviada recentemente (<30s).`);
+        return;
+      }
+
+      this.logToFile(`Processando confirmação de ciência para ${cleanPhone} (Código mencionado: ${intent.extractedCode || 'nenhum'})...`);
+      const result = await databaseService.acknowledgePackageByPhone(cleanPhone, intent.extractedCode);
 
       const pkgs: any[] = result?.pkgs && result.pkgs.length > 0 ? result.pkgs : (result?.pkg ? [result.pkg] : []);
 
-      if (pkgs.length > 0) {
+      // Se confirmou ciência de novos pacotes:
+      if (pkgs.length > 0 && !result?.alreadyAcknowledged) {
         this.acknowledgmentCooldown.set(cleanPhone, Date.now());
-        const webBaseUrl = this.getPublicWebUrl();
 
         let residentName = 'Morador(a)';
         const firstPkg = pkgs[0];
@@ -777,41 +1027,34 @@ export class WhatsAppEngineService {
             `🏢 Apresente os códigos ou QR Codes na portaria para retirar todas as suas encomendas.`;
         }
 
-        // ⏱️ Delay humanizado anti-banimento (1.8s) com presença "digitando..."
-        try {
-          if (this.socket) {
-            await this.socket.sendPresenceUpdate('composing', remoteJid);
-          }
-        } catch {}
-
-        await new Promise(resolve => setTimeout(resolve, 1800));
-
-        try {
-          if (this.socket) {
-            await this.socket.sendPresenceUpdate('paused', remoteJid);
-          }
-        } catch {}
-
-        // Envia resposta
-        try {
-          if (this.socket) {
-            this.logToFile(`Enviando confirmação diretamente para conversa ativa: ${remoteJid}...`);
-            await this.socket.sendMessage(remoteJid, { text: replyText });
-          } else {
-            await this.sendTextMessage(cleanPhone, replyText);
-          }
-        } catch (sendErr: any) {
-          this.logToFile(`Fallback para sendTextMessage(${cleanPhone})...`);
-          await this.sendTextMessage(cleanPhone, replyText);
-        }
+        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
 
         const codes = pkgs.map(p => p.pickup_code).join(', ');
         this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomendas: ${codes})`);
-      } else if (result && (result as any).alreadyAcknowledged) {
-        this.acknowledgmentCooldown.set(cleanPhone, Date.now());
-        this.logToFile(`ℹ️ Ciência do morador (${cleanPhone}) já havia sido registrada. Envio repetido de QR Code suprimido.`);
+      } else if (result && result.alreadyAcknowledged) {
+        // Se o morador digitou expressamente o código da encomenda já confirmada, reenviamos os dados
+        if (intent.extractedCode && pkgs.length > 0) {
+          const pkg = pkgs[0];
+          const token = pkg.qr_token || pkg.pickup_code;
+          const pickupUrl = `${webBaseUrl}/p/${token}`;
+          const residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
+          const carrierName = pkg.carrier || 'Encomenda';
+
+          const replyText =
+            `📦 *DADOS DA SUA ENCOMENDA*\n\n` +
+            `Olá, *${residentName}*! A sua encomenda da *${carrierName}* está pronta para retirada na portaria:\n\n` +
+            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+            `📱 *Acesse seu QR Code aqui:*\n${pickupUrl}\n\n` +
+            `🏢 Apresente no balcão da portaria para retirar.`;
+
+          await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
+          this.logToFile(`ℹ️ Código digitado expressamente (${intent.extractedCode}). Dados de retirada reenviados para ${cleanPhone}.`);
+        } else {
+          this.acknowledgmentCooldown.set(cleanPhone, Date.now());
+          this.logToFile(`ℹ️ Ciência do morador (${cleanPhone}) já havia sido registrada. Envio repetido de QR Code suprimido para não ser repetitivo.`);
+        }
       } else {
-        this.logToFile(`⚠️ Nenhuma encomenda pendente encontrada para o telefone ${cleanPhone}.`);
+        this.logToFile(`ℹ️ Nenhuma encomenda pendente elegível para confirmação para ${cleanPhone}.`);
       }
     } catch (err: any) {
       this.logToFile(`❌ Erro ao tratar mensagem recebida: ${err.message}`);

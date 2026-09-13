@@ -343,7 +343,7 @@ export class DatabaseService {
     }));
   }
 
-  public async acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): Promise<{ pkg?: any; pkgs?: any[]; alreadyAcknowledged?: boolean } | null> {
+  public async getPendingPackagesForPhone(phone: string, mentionedCode?: string | null): Promise<any[]> {
     const clean = phone.replace(/\D/g, '');
     const last8 = clean.slice(-8);
 
@@ -363,7 +363,7 @@ export class DatabaseService {
       if (single) rows = [single];
     }
 
-    // 2. Busca local no SQLite por telefone do morador (pode trazer 1 ou várias encomendas)
+    // 2. Busca local no SQLite por telefone do morador se não encontrou por código
     if (rows.length === 0 && last8) {
       const candidates = this.db.prepare(`
         SELECT p.*, r.name as resident_name, r.phone as resident_phone
@@ -418,7 +418,7 @@ export class DatabaseService {
       }
     }
 
-    if (rows.length === 0) return null;
+    if (rows.length === 0) return [];
 
     // Deduplica por ID
     const uniqueMap = new Map<string, any>();
@@ -427,12 +427,23 @@ export class DatabaseService {
     }
     const allMatching = Array.from(uniqueMap.values());
 
-    // Funções auxiliares para verificar se já foi retirado/entregue ou já confirmado
     const isDelivered = (p: any): boolean => {
       return p.status === 'DELIVERED' ||
              Boolean(p.delivered_at) ||
              Boolean(p.notes?.includes('DELIVERY_NOTIFIED'));
     };
+
+    return allMatching.filter(p => !isDelivered(p));
+  }
+
+  public async acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): Promise<{ pkg?: any; pkgs?: any[]; alreadyAcknowledged?: boolean } | null> {
+    const clean = phone.replace(/\D/g, '');
+    const pendingDelivery = await this.getPendingPackagesForPhone(phone, mentionedCode);
+
+    if (pendingDelivery.length === 0) {
+      console.log(`ℹ️ [DatabaseService] Nenhuma encomenda pendente encontrada para ${clean}.`);
+      return null;
+    }
 
     const isAcknowledged = (p: any): boolean => {
       if (!p.notes) return false;
@@ -442,37 +453,31 @@ export class DatabaseService {
              n.includes('CIENCIA CONFIRMADA');
     };
 
-    // 1. Remove qualquer encomenda que já tenha sido entregue / retirada pelo morador
-    const pendingDelivery = allMatching.filter(p => !isDelivered(p));
-    if (pendingDelivery.length === 0) {
-      console.log(`ℹ️ [DatabaseService] Todas as encomendas encontradas para ${clean} já foram retiradas/entregues.`);
-      return null;
-    }
-
-    // 2. Separa apenas os pacotes que ainda NÃO tiveram ciência confirmada pelo morador
     const unacknowledged = pendingDelivery.filter(p => !isAcknowledged(p));
-
     let targetPkgs: any[] = [];
 
-    // Se o morador NÃO digitou um código específico:
-    if (!mentionedCode) {
-      // Se todas as encomendas pendentes já foram confirmadas anteriormente:
+    // Se o morador digitou um código específico:
+    if (mentionedCode) {
+      const matched = pendingDelivery.find(p => p.pickup_code === mentionedCode || p.pickup_code?.toUpperCase() === mentionedCode.toUpperCase());
+      if (!matched) {
+        console.log(`ℹ️ [DatabaseService] Código informado (${mentionedCode}) não corresponde a nenhuma encomenda de ${clean}. Não confirmando.`);
+        return null;
+      }
+
+      if (isAcknowledged(matched)) {
+        console.log(`ℹ️ [DatabaseService] Encomenda (${matched.pickup_code}) já havia sido confirmada anteriormente por ${clean}.`);
+        return { pkg: matched, pkgs: [matched], alreadyAcknowledged: true };
+      }
+
+      targetPkgs = [matched];
+    } else {
+      // Se não digitou código, verifica se há novas encomendas pendentes de ciência
       if (unacknowledged.length === 0) {
         console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência de todas as ${pendingDelivery.length} encomenda(s). Suprimindo envio duplicado.`);
         return { pkg: null, pkgs: [], alreadyAcknowledged: true };
       }
 
-      // Envia SOMENTE as novas encomendas que ainda não tiveram ciência!
-      // Encomendas antigas cujo morador já recebeu o link/código anteriormente não são re-enviadas.
       targetPkgs = unacknowledged;
-    } else {
-      // Se o morador digitou um código específico, busca especificamente aquela encomenda
-      const matched = pendingDelivery.find(p => p.pickup_code === mentionedCode || p.pickup_code?.toUpperCase() === mentionedCode.toUpperCase());
-      if (matched) {
-        targetPkgs = [matched];
-      } else {
-        targetPkgs = unacknowledged.length > 0 ? unacknowledged : [pendingDelivery[0]];
-      }
     }
 
     const nowIso = new Date().toISOString();
