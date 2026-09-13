@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env.js';
+import { databaseService } from './database.service.js';
 
 export type AIIntentCategory = 'CONFIRM_SCIENCE' | 'CONTEST_PACKAGE' | 'REQUEST_CODE' | 'UNRELATED';
 
@@ -9,13 +10,22 @@ export interface AIIntentResult {
   reasoning: string;
   extractedCode: string | null;
   conciergeAlert?: string | null;
-  source: 'groq' | 'gemini' | 'nvidia' | 'heuristic';
+  source: 'groq' | 'gemini' | 'nvidia' | 'heuristic' | 'learned_cache';
 }
 
 interface ClassifyOptions {
   quotedText?: string;
   residentName?: string;
   packagesInfo?: string;
+}
+
+type AIProvider = 'groq' | 'gemini' | 'nvidia';
+
+interface LearnedPatternItem {
+  intent: AIIntentCategory;
+  confidence: number;
+  reasoning: string;
+  hits: number;
 }
 
 const SYSTEM_PROMPT = `Você é o classificador de inteligência artificial da portaria inteligente CondoBox.
@@ -51,8 +61,165 @@ IMPORTANTE:
 }`;
 
 export class AIIntentService {
+  private memoryCache = new Map<string, LearnedPatternItem>();
+  private providerRoundRobinIndex = 0;
+  private providerCooldowns = new Map<AIProvider, number>();
+  private initialized = false;
+
+  constructor() {
+    this.initLearnedCache();
+  }
+
   /**
-   * Classifica a intenção da mensagem utilizando IAs (Groq -> Gemini -> NVIDIA) com fallback heurístico instantâneo.
+   * Normaliza o texto removendo acentuações, pontuações e espaços extras.
+   */
+  public static normalize(text: string): string {
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w\s]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Inicializa o cache com os padrões já salvos no SQLite e semeia padrões base se vazio.
+   */
+  private initLearnedCache(): void {
+    if (this.initialized) return;
+
+    try {
+      const saved = databaseService.getAllLearnedPatterns();
+      for (const item of saved) {
+        this.memoryCache.set(item.pattern_key, {
+          intent: item.intent as AIIntentCategory,
+          confidence: item.confidence,
+          reasoning: item.reasoning,
+          hits: item.hits
+        });
+      }
+
+      // Se o banco de aprendizado estiver vazio ou quase vazio, pré-popula com frases comuns brasileiras
+      if (this.memoryCache.size < 10) {
+        this.seedInitialPatterns();
+      }
+
+      this.initialized = true;
+      console.log(`🧠 [AIIntent] Cache de aprendizado carregado com ${this.memoryCache.size} padrões conhecidos.`);
+    } catch (err: any) {
+      console.warn(`[AIIntent] Falha ao carregar padrões aprendidos: ${err.message}`);
+    }
+  }
+
+  /**
+   * Popula padrões fundamentais da língua portuguesa para evitar consumo desnecessário de APIs de IA.
+   */
+  private seedInitialPatterns(): void {
+    const seeds: Array<{ key: string; intent: AIIntentCategory; reasoning: string }> = [
+      // 1. Confirmação de Ciência
+      { key: 'ok', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa monossilábica' },
+      { key: 'ok obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa com agradecimento' },
+      { key: 'ok obrigada', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa com agradecimento' },
+      { key: 'obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Agradecimento de notificação' },
+      { key: 'obrigada', intent: 'CONFIRM_SCIENCE', reasoning: 'Agradecimento de notificação' },
+      { key: 'obrigado ja vi', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação com ciência expressa' },
+      { key: 'obrigada ja vi', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação com ciência expressa' },
+      { key: 'valeu', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação coloquial' },
+      { key: 'vlw', intent: 'CONFIRM_SCIENCE', reasoning: 'Abreviação de valeu' },
+      { key: 'obg', intent: 'CONFIRM_SCIENCE', reasoning: 'Abreviação de obrigado' },
+      { key: 'show', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva' },
+      { key: 'show de bola', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva' },
+      { key: 'beleza', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'blz', intent: 'CONFIRM_SCIENCE', reasoning: 'Abreviação de beleza' },
+      { key: 'top', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva' },
+      { key: 'perfeito', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação de recebimento da mensagem' },
+      { key: 'maravilha', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
+      { key: 'estou ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
+      { key: 'to ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
+      { key: 'tô ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
+      { key: 'ta ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
+      { key: 'confirmado', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação expressa' },
+      { key: 'recebido', intent: 'CONFIRM_SCIENCE', reasoning: 'Notificação recebida' },
+      { key: 'vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada declarada' },
+      { key: 'ja vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada imediata' },
+      { key: 'vou retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada declarada' },
+      { key: 'estou descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
+      { key: 'to descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
+      { key: 'ja pego', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada' },
+      { key: 'pego mais tarde', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
+      { key: 'passo ai mais tarde', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
+      { key: 'minha esposa vai retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'meu marido vai retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'meu filho vai buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'sim', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação simples' },
+      { key: 'sim obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com agradecimento' },
+
+      // 2. Contestação de Encomenda / Não Ciência
+      { key: 'nao e meu', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
+      { key: 'nao e minha', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
+      { key: 'nao eh meu', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
+      { key: 'nao eh minha', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
+      { key: 'nao tenho ciencia', intent: 'CONTEST_PACKAGE', reasoning: 'Morador declara não ter ciência da encomenda' },
+      { key: 'nao tenho ciencia disso', intent: 'CONTEST_PACKAGE', reasoning: 'Morador declara não ter ciência da encomenda' },
+      { key: 'nao pedi nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não realizou nenhum pedido' },
+      { key: 'nao comprei nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não comprou nada' },
+      { key: 'nao fiz pedido', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não fez compra' },
+      { key: 'encomenda errada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador aponta erro de encomenda' },
+      { key: 'deve ser engano', intent: 'CONTEST_PACKAGE', reasoning: 'Morador aponta provável engano' },
+      { key: 'veio errado', intent: 'CONTEST_PACKAGE', reasoning: 'Morador aponta entrega errada' },
+      { key: 'pacote errado', intent: 'CONTEST_PACKAGE', reasoning: 'Morador aponta entrega errada' },
+      { key: 'destinatario errado', intent: 'CONTEST_PACKAGE', reasoning: 'Destinatário incorreto' },
+      { key: 'nao sou eu', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma não ser o destinatário' },
+      { key: 'nao reconheco', intent: 'CONTEST_PACKAGE', reasoning: 'Morador não reconhece a entrega' },
+      { key: 'nao reconheco essa encomenda', intent: 'CONTEST_PACKAGE', reasoning: 'Morador não reconhece a entrega' },
+      { key: 'nao estou esperando nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador não aguarda encomendas' },
+      { key: 'numero errado', intent: 'CONTEST_PACKAGE', reasoning: 'Contato telefônico incorreto para a unidade' },
+      { key: 'apto errado', intent: 'CONTEST_PACKAGE', reasoning: 'Apartamento incorreto' },
+
+      // 3. Solicitação de Código / QR Code
+      { key: 'qual o codigo', intent: 'REQUEST_CODE', reasoning: 'Solicitação do código de retirada' },
+      { key: 'qual meu codigo', intent: 'REQUEST_CODE', reasoning: 'Solicitação do código pessoal' },
+      { key: 'qual o meu codigo', intent: 'REQUEST_CODE', reasoning: 'Solicitação do código pessoal' },
+      { key: 'manda o codigo', intent: 'REQUEST_CODE', reasoning: 'Pedido de envio do código' },
+      { key: 'manda o qr code', intent: 'REQUEST_CODE', reasoning: 'Pedido de envio do QR Code' },
+      { key: 'perdi o codigo', intent: 'REQUEST_CODE', reasoning: 'Morador informa perda do código' },
+      { key: 'onde vejo o codigo', intent: 'REQUEST_CODE', reasoning: 'Dúvida sobre localização do código' },
+      { key: 'como retiro', intent: 'REQUEST_CODE', reasoning: 'Instruções de retirada' },
+      { key: 'link de retirada', intent: 'REQUEST_CODE', reasoning: 'Pedido do link de acesso' },
+
+      // 4. Assuntos Diversos / Saudações
+      { key: 'bom dia', intent: 'UNRELATED', reasoning: 'Saudação comum sem relação com pacote' },
+      { key: 'boa tarde', intent: 'UNRELATED', reasoning: 'Saudação comum sem relação com pacote' },
+      { key: 'boa noite', intent: 'UNRELATED', reasoning: 'Saudação comum sem relação com pacote' },
+      { key: 'ola', intent: 'UNRELATED', reasoning: 'Saudação' },
+      { key: 'oi', intent: 'UNRELATED', reasoning: 'Saudação' },
+      { key: 'tudo bem', intent: 'UNRELATED', reasoning: 'Saudação' },
+      { key: 'tem vaga de visitante', intent: 'UNRELATED', reasoning: 'Dúvida sobre garagem/vaga' },
+      { key: 'o portao esta quebrado', intent: 'UNRELATED', reasoning: 'Aviso sobre portão' },
+      { key: 'boleto do condominio', intent: 'UNRELATED', reasoning: 'Assunto financeiro da administração' },
+      { key: 'falar com o sindico', intent: 'UNRELATED', reasoning: 'Contato administrativo' }
+    ];
+
+    for (const seed of seeds) {
+      const normKey = AIIntentService.normalize(seed.key);
+      this.memoryCache.set(normKey, {
+        intent: seed.intent,
+        confidence: 0.98,
+        reasoning: seed.reasoning,
+        hits: 1
+      });
+      databaseService.saveLearnedPattern(normKey, seed.intent, 0.98, seed.reasoning, 'system_seed');
+    }
+  }
+
+  /**
+   * Classifica a intenção de forma inteligente com otimizações:
+   * 1. Cache de Aprendizado Contínuo (0ms, 0 chamadas de API).
+   * 2. Rotação Round-Robin entre Groq, Gemini e NVIDIA para equilibrar cotas.
+   * 3. Circuit Breaker contra limites de taxa (HTTP 429 / RESOURCE_EXHAUSTED).
+   * 4. Fallback Heurístico Resiliente caso todas as APIs excedam ou fiquem offline.
    */
   public async classify(text: string, options?: ClassifyOptions): Promise<AIIntentResult> {
     const trimmed = text.trim();
@@ -66,20 +233,142 @@ export class AIIntentService {
       };
     }
 
-    // 1. Tenta Groq (ultra-rápido, ~200-400ms)
-    const groqResult = await this.tryGroq(trimmed, options);
-    if (groqResult) return groqResult;
+    const normalized = AIIntentService.normalize(trimmed);
+    const extractedCode = this.extractCode(trimmed);
 
-    // 2. Tenta Gemini (Google Flash)
-    const geminiResult = await this.tryGemini(trimmed, options);
-    if (geminiResult) return geminiResult;
+    // ── ETAPA 1: VERIFICAÇÃO NO CACHE DE APRENDIZADO ────────────────────────
+    const cached = this.checkLearnedCache(normalized, trimmed);
+    if (cached) {
+      console.log(`⚡ [AIIntent: CACHE] Padrão "${normalized}" já aprendido! [${cached.intent}] (Hits: ${cached.hits})`);
+      return {
+        intent: cached.intent,
+        confidence: cached.confidence,
+        reasoning: `Padrão aprendido previamente (${cached.reasoning})`,
+        extractedCode: extractedCode || null,
+        conciergeAlert:
+          cached.intent === 'CONTEST_PACKAGE'
+            ? `Morador informou no WhatsApp: "${trimmed}"`
+            : null,
+        source: 'learned_cache'
+      };
+    }
 
-    // 3. Tenta NVIDIA NIM (se configurado)
-    const nvidiaResult = await this.tryNvidia(trimmed, options);
-    if (nvidiaResult) return nvidiaResult;
+    // ── ETAPA 2: ROTAÇÃO INTELIGENTE (GROQ / GEMINI / NVIDIA) ──────────────
+    const rotatedProviders = this.getRotatedProviders();
+    console.log(`🔄 [AIIntent] Ordem dos provedores para esta mensagem:`, rotatedProviders);
 
-    // 4. Fallback Heurístico local (0ms, offline)
-    return this.classifyHeuristic(trimmed, options?.quotedText);
+    for (const provider of rotatedProviders) {
+      // Verifica se o provedor está em período de cooldown (limite excedido)
+      const cooldownUntil = this.providerCooldowns.get(provider) || 0;
+      if (cooldownUntil > Date.now()) {
+        const remainingSecs = Math.ceil((cooldownUntil - Date.now()) / 1000);
+        console.warn(`⏳ [AIIntent] Provedor ${provider.toUpperCase()} em cooldown por limite de cota (${remainingSecs}s restantes). Alternando...`);
+        continue;
+      }
+
+      console.log(`🤖 [AIIntent] Consultando provedor: ${provider.toUpperCase()}...`);
+      let result: AIIntentResult | null = null;
+      if (provider === 'groq') {
+        result = await this.tryGroq(trimmed, options);
+      } else if (provider === 'gemini') {
+        result = await this.tryGemini(trimmed, options);
+      } else if (provider === 'nvidia') {
+        result = await this.tryNvidia(trimmed, options);
+      }
+
+      if (result) {
+        // Se a IA classificou com alta confiança e a mensagem é concisa, aprende o padrão
+        if (result.confidence >= 0.8 && normalized.length <= 90) {
+          this.learnPattern(normalized, result.intent, result.confidence, result.reasoning);
+        }
+        return result;
+      }
+    }
+
+    // ── ETAPA 3: FALLBACK HEURÍSTICO RESILIENTE (SEMPRE FUNCIONA) ───────────
+    console.warn(`🛡️ [AIIntent] Todas as IAs indisponíveis ou cotas esgotadas. Executando fallback heurístico local resiliente...`);
+    const fallbackResult = this.classifyHeuristic(trimmed, options?.quotedText);
+    return {
+      ...fallbackResult,
+      reasoning: `[Fallback Local Resiliente] ${fallbackResult.reasoning}`
+    };
+  }
+
+  /**
+   * Consulta o cache em memória procurando correspondência exata ou por trecho chave de contestação.
+   */
+  private checkLearnedCache(normalized: string, rawText: string): LearnedPatternItem | null {
+    // 1. Busca exata pela frase normalizada
+    const exact = this.memoryCache.get(normalized);
+    if (exact) {
+      exact.hits += 1;
+      databaseService.incrementPatternHits(normalized);
+      return exact;
+    }
+
+    // 2. Busca por sub-expressões de alta prioridade (especialmente contestação)
+    for (const [key, item] of this.memoryCache.entries()) {
+      if (key.length >= 8 && normalized.includes(key)) {
+        // Se contiver a expressão de contestação gravada (ex: "nao tenho ciencia")
+        if (item.intent === 'CONTEST_PACKAGE') {
+          item.hits += 1;
+          databaseService.incrementPatternHits(key);
+          return item;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Grava um novo padrão aprendido em memória e no banco SQLite.
+   */
+  private learnPattern(key: string, intent: AIIntentCategory, confidence: number, reasoning: string): void {
+    if (!key || key.length < 2) return;
+
+    this.memoryCache.set(key, {
+      intent,
+      confidence,
+      reasoning,
+      hits: 1
+    });
+
+    databaseService.saveLearnedPattern(key, intent, confidence, reasoning, 'ai_learned');
+    console.log(`🧠 [AIIntent] Novo padrão aprendido e salvo no banco: "${key}" -> ${intent}`);
+  }
+
+  /**
+   * Retorna os provedores configurados ordenados de forma intercalada (Round-Robin).
+   */
+  private getRotatedProviders(): AIProvider[] {
+    const available: AIProvider[] = [];
+
+    const groqKey = env.GROQ_API_KEY || process.env.GROQ_API_KEY;
+    const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const nvidiaKey = env.NVIDIA_API_KEY || process.env.NVIDIA_API_KEY;
+
+    if (groqKey) available.push('groq');
+    if (geminiKey) available.push('gemini');
+    if (nvidiaKey) available.push('nvidia');
+
+    if (available.length <= 1) return available;
+
+    // Rotação: desloca o índice para que a cada requisição um provedor diferente seja o primário
+    const startIndex = this.providerRoundRobinIndex % available.length;
+    this.providerRoundRobinIndex = (this.providerRoundRobinIndex + 1) % available.length;
+
+    const rotated = [...available.slice(startIndex), ...available.slice(0, startIndex)];
+    return rotated;
+  }
+
+  /**
+   * Marca um provedor em cooldown temporário quando excede o limite de taxa / quota (HTTP 429).
+   */
+  private triggerProviderCooldown(provider: AIProvider, reason: string): void {
+    const cooldownMs = 60_000; // 60 segundos de pausa para restabelecer token bucket
+    this.providerCooldowns.set(provider, Date.now() + cooldownMs);
+    console.warn(`🚨 [AIIntent] Limite de requisições atingido no provedor ${provider.toUpperCase()} (${reason}). Ativando cooldown de 60s.`);
   }
 
   // ── 1. Groq (qwen/qwen3.8-27b ou groq/compound-mini) ─────────────────────
@@ -108,8 +397,13 @@ export class AIIntentService {
         signal: AbortSignal.timeout(3500)
       });
 
+      if (res.status === 429) {
+        this.triggerProviderCooldown('groq', 'HTTP 429 Too Many Requests');
+        return null;
+      }
+
       if (!res.ok) {
-        console.warn(`[AIIntent] Groq HTTP ${res.status}`);
+        console.warn(`[AIIntent] Groq retornou HTTP ${res.status}`);
         return null;
       }
 
@@ -121,7 +415,11 @@ export class AIIntentService {
         return { ...parsed, source: 'groq' };
       }
     } catch (err: any) {
-      console.warn(`[AIIntent] Groq falhou: ${err.message?.slice(0, 60)}`);
+      if (err.message?.includes('429') || err.message?.includes('rate')) {
+        this.triggerProviderCooldown('groq', err.message);
+      } else {
+        console.warn(`[AIIntent] Groq falhou: ${err.message?.slice(0, 60)}`);
+      }
     }
     return null;
   }
@@ -137,8 +435,7 @@ export class AIIntentService {
         model: 'gemini-3.6-flash',
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 250,
-          responseMimeType: 'application/json'
+          maxOutputTokens: 400
         }
       });
 
@@ -151,7 +448,12 @@ export class AIIntentService {
         return { ...parsed, source: 'gemini' };
       }
     } catch (err: any) {
-      console.warn(`[AIIntent] Gemini falhou: ${err.message?.slice(0, 60)}`);
+      const msg = String(err.message || '');
+      if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+        this.triggerProviderCooldown('gemini', 'Quota/Rate Limit Exceeded');
+      } else {
+        console.warn(`[AIIntent] Gemini falhou detalhe: ${msg}`);
+      }
     }
     return null;
   }
@@ -181,6 +483,11 @@ export class AIIntentService {
         signal: AbortSignal.timeout(4000)
       });
 
+      if (res.status === 429) {
+        this.triggerProviderCooldown('nvidia', 'HTTP 429 Too Many Requests');
+        return null;
+      }
+
       if (!res.ok) return null;
       const data = (await res.json()) as any;
       const rawContent = data.choices?.[0]?.message?.content || '';
@@ -190,7 +497,12 @@ export class AIIntentService {
         return { ...parsed, source: 'nvidia' };
       }
     } catch (err: any) {
-      console.warn(`[AIIntent] NVIDIA falhou: ${err.message?.slice(0, 60)}`);
+      const msg = String(err.message || '');
+      if (msg.includes('429') || msg.includes('rate') || msg.includes('limit')) {
+        this.triggerProviderCooldown('nvidia', 'Rate Limit Exceeded');
+      } else {
+        console.warn(`[AIIntent] NVIDIA falhou: ${msg.slice(0, 60)}`);
+      }
     }
     return null;
   }
@@ -198,13 +510,10 @@ export class AIIntentService {
   // ── 4. Fallback Heurístico Local (0ms, 100% offline) ─────────────────────
   public classifyHeuristic(text: string, quotedText?: string): AIIntentResult {
     const trimmed = text.trim();
-    const normalized = trimmed
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
+    const normalized = AIIntentService.normalize(trimmed);
 
     // 1. Contestação
-    const contestationRegex = /\b(nao (e|eh) minh[ao]|nao pedi|encomenda errada|nao recebi|veio errad[ao]|nao sou eu|destinatario errado|pacote errado|nao reconheco|nao tenho ciencia|nao comprei)\b/i;
+    const contestationRegex = /\b(nao (e|eh) minh[ao]|nao pedi|encomenda errada|nao recebi|veio errad[ao]|nao sou eu|destinatario errado|pacote errado|nao reconheco|nao tenho ciencia|nao comprei|nao fiz pedido|nao estou esperando)\b/i;
     if (contestationRegex.test(normalized)) {
       return {
         intent: 'CONTEST_PACKAGE',
@@ -217,27 +526,7 @@ export class AIIntentService {
     }
 
     // 2. Extração de Código
-    let extractedCode: string | null = null;
-    const hashMatch = text.match(/#([a-zA-Z0-9]{4,8})\b/);
-    const codePrefixMatch = text.match(/\b(?:cod(?:igo)?|retirada)[:\s]+([a-zA-Z0-9]{4,8})\b/i);
-
-    if (hashMatch) {
-      extractedCode = hashMatch[1].toUpperCase();
-    } else if (codePrefixMatch) {
-      extractedCode = codePrefixMatch[1].toUpperCase();
-    } else if (/^[a-zA-Z0-9]{5,7}$/.test(trimmed)) {
-      const commonWords = new Set([
-        'BOM', 'BOA', 'DIA', 'TARDE', 'NOITE', 'OLA', 'OLAA', 'OI', 'OII', 'OIII',
-        'TUDO', 'BEM', 'COMO', 'VAI', 'VALEU', 'VLW', 'OBRIGADO', 'OBRIGADA', 'OBG',
-        'SHOW', 'TOP', 'JOIA', 'BELEZA', 'BLZ', 'SIM', 'NAO', 'OK', 'OKK', 'OKEY',
-        'CIENTE', 'CONFIRMO', 'RECEBI', 'VOU', 'TESTE', 'FAVOR', 'AJUDA', 'AQUI',
-        'ONDE', 'QUEM', 'QUAL', 'PORTA', 'VAGA', 'CARRO', 'CASA', 'APTO', 'BLOCO'
-      ]);
-      const upperCandidate = trimmed.toUpperCase();
-      if (!commonWords.has(upperCandidate)) {
-        extractedCode = upperCandidate;
-      }
-    }
+    const extractedCode = this.extractCode(text);
 
     // 3. Pedido de Código / QR Code
     const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o qr\s?code)\b/i;
@@ -253,7 +542,9 @@ export class AIIntentService {
 
     // 4. Assuntos diversos do condomínio
     const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
-    if (!hashMatch && !codePrefixMatch && unrelatedCondoRegex.test(normalized)) {
+    const hasCodeFormat = Boolean(this.extractCode(text));
+
+    if (!hasCodeFormat && unrelatedCondoRegex.test(normalized)) {
       return {
         intent: 'UNRELATED',
         confidence: 0.95,
@@ -264,7 +555,7 @@ export class AIIntentService {
     }
 
     // 5. Perguntas gerais com ponto de interrogação
-    if (text.includes('?') && !hashMatch && !codePrefixMatch && !codeRequestRegex.test(normalized)) {
+    if (text.includes('?') && !hasCodeFormat && !codeRequestRegex.test(normalized)) {
       return {
         intent: 'UNRELATED',
         confidence: 0.9,
@@ -325,6 +616,30 @@ export class AIIntentService {
     };
   }
 
+  private extractCode(text: string): string | null {
+    const trimmed = text.trim();
+    const hashMatch = text.match(/#([a-zA-Z0-9]{4,8})\b/);
+    if (hashMatch) return hashMatch[1].toUpperCase();
+
+    const codePrefixMatch = text.match(/\b(?:cod(?:igo)?|retirada)[:\s]+([a-zA-Z0-9]{4,8})\b/i);
+    if (codePrefixMatch) return codePrefixMatch[1].toUpperCase();
+
+    if (/^[a-zA-Z0-9]{5,7}$/.test(trimmed)) {
+      const commonWords = new Set([
+        'BOM', 'BOA', 'DIA', 'TARDE', 'NOITE', 'OLA', 'OLAA', 'OI', 'OII', 'OIII',
+        'TUDO', 'BEM', 'COMO', 'VAI', 'VALEU', 'VLW', 'OBRIGADO', 'OBRIGADA', 'OBG',
+        'SHOW', 'TOP', 'JOIA', 'BELEZA', 'BLZ', 'SIM', 'NAO', 'OK', 'OKK', 'OKEY',
+        'CIENTE', 'CONFIRMO', 'RECEBI', 'VOU', 'TESTE', 'FAVOR', 'AJUDA', 'AQUI',
+        'ONDE', 'QUEM', 'QUAL', 'PORTA', 'VAGA', 'CARRO', 'CASA', 'APTO', 'BLOCO'
+      ]);
+      const upperCandidate = trimmed.toUpperCase();
+      if (!commonWords.has(upperCandidate)) {
+        return upperCandidate;
+      }
+    }
+    return null;
+  }
+
   private buildPrompt(text: string, options?: ClassifyOptions): string {
     let prompt = `Mensagem do morador: "${text}"`;
     if (options?.quotedText) {
@@ -342,31 +657,56 @@ export class AIIntentService {
   private parseAIJson(content: string): Omit<AIIntentResult, 'source'> | null {
     try {
       const match = content.match(/\{[\s\S]*\}/);
-      if (!match) return null;
-      const parsed = JSON.parse(match[0]);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
 
-      let intent: AIIntentCategory = 'UNRELATED';
-      const rawIntent = String(parsed.intent || '').toUpperCase();
-      if (rawIntent.includes('CONFIRM') || rawIntent.includes('CIENCIA') || rawIntent.includes('SCIENCE')) {
+        let intent: AIIntentCategory = 'UNRELATED';
+        const rawIntent = String(parsed.intent || '').toUpperCase();
+        if (rawIntent.includes('CONFIRM') || rawIntent.includes('CIENCIA') || rawIntent.includes('SCIENCE')) {
+          intent = 'CONFIRM_SCIENCE';
+        } else if (rawIntent.includes('CONTEST') || rawIntent.includes('NAO') || rawIntent.includes('REJEIT')) {
+          intent = 'CONTEST_PACKAGE';
+        } else if (rawIntent.includes('CODE') || rawIntent.includes('CODIGO') || rawIntent.includes('QR')) {
+          intent = 'REQUEST_CODE';
+        } else {
+          intent = 'UNRELATED';
+        }
+
+        return {
+          intent,
+          confidence: Number(parsed.confidence) || 0.95,
+          reasoning: String(parsed.reasoning || parsed.explanation || ''),
+          extractedCode: parsed.extractedCode || parsed.extracted_code || null,
+          conciergeAlert: parsed.conciergeAlert || parsed.concierge_alert || null
+        };
+      }
+
+      // Se a IA responder em texto puro (ex: "CONFIRM_SCIENCE: o morador disse...")
+      const upper = content.toUpperCase();
+      let intent: AIIntentCategory | null = null;
+      if (upper.includes('CONFIRM_SCIENCE') || upper.includes('CONFIRM')) {
         intent = 'CONFIRM_SCIENCE';
-      } else if (rawIntent.includes('CONTEST') || rawIntent.includes('NAO') || rawIntent.includes('REJEIT')) {
+      } else if (upper.includes('CONTEST_PACKAGE') || upper.includes('CONTEST')) {
         intent = 'CONTEST_PACKAGE';
-      } else if (rawIntent.includes('CODE') || rawIntent.includes('CODIGO') || rawIntent.includes('QR')) {
+      } else if (upper.includes('REQUEST_CODE')) {
         intent = 'REQUEST_CODE';
-      } else {
+      } else if (upper.includes('UNRELATED')) {
         intent = 'UNRELATED';
       }
 
-      return {
-        intent,
-        confidence: Number(parsed.confidence) || 0.9,
-        reasoning: String(parsed.reasoning || parsed.explanation || ''),
-        extractedCode: parsed.extractedCode || parsed.extracted_code || null,
-        conciergeAlert: parsed.conciergeAlert || parsed.concierge_alert || null
-      };
+      if (intent) {
+        return {
+          intent,
+          confidence: 0.9,
+          reasoning: content.trim().slice(0, 120),
+          extractedCode: null,
+          conciergeAlert: intent === 'CONTEST_PACKAGE' ? content.trim().slice(0, 120) : null
+        };
+      }
     } catch {
       return null;
     }
+    return null;
   }
 }
 

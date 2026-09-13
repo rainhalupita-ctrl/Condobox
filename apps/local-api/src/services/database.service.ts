@@ -137,11 +137,23 @@ export class DatabaseService {
         FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS ai_learned_patterns (
+        pattern_key TEXT PRIMARY KEY,
+        intent TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        reasoning TEXT,
+        hits INTEGER DEFAULT 1,
+        source TEXT DEFAULT 'ai_learned',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
       CREATE INDEX IF NOT EXISTS idx_packages_status ON packages(status);
       CREATE INDEX IF NOT EXISTS idx_packages_pickup_code ON packages(pickup_code);
       CREATE INDEX IF NOT EXISTS idx_packages_qr_token ON packages(qr_token);
       CREATE INDEX IF NOT EXISTS idx_packages_sync ON packages(sync_status);
       CREATE INDEX IF NOT EXISTS idx_residents_phone ON residents(phone);
+      CREATE INDEX IF NOT EXISTS idx_ai_patterns_intent ON ai_learned_patterns(intent);
     `);
 
     console.log(`📦 [Database Service] Banco SQLite inicializado com sucesso em: ${this.dbPath}`);
@@ -752,6 +764,69 @@ export class DatabaseService {
 
   public updatePackageStatus(packageId: string, status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED'): void {
     this.db.prepare('UPDATE packages SET status = ? WHERE id = ?').run(status, packageId);
+  }
+
+  public getLearnedPattern(patternKey: string) {
+    try {
+      return this.db.prepare('SELECT * FROM ai_learned_patterns WHERE pattern_key = ?').get(patternKey) as {
+        pattern_key: string;
+        intent: string;
+        confidence: number;
+        reasoning: string;
+        hits: number;
+        source: string;
+      } | undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  public saveLearnedPattern(
+    patternKey: string,
+    intent: string,
+    confidence: number,
+    reasoning: string,
+    source: string = 'ai_learned'
+  ): void {
+    try {
+      this.db.prepare(`
+        INSERT INTO ai_learned_patterns (pattern_key, intent, confidence, reasoning, hits, source, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, datetime('now'))
+        ON CONFLICT(pattern_key) DO UPDATE SET
+          hits = hits + 1,
+          intent = excluded.intent,
+          confidence = MAX(confidence, excluded.confidence),
+          reasoning = excluded.reasoning,
+          updated_at = datetime('now')
+      `).run(patternKey, intent, confidence, reasoning, source);
+    } catch (err: any) {
+      console.warn(`[DatabaseService] Erro ao salvar padrão aprendido: ${err.message}`);
+    }
+  }
+
+  public incrementPatternHits(patternKey: string): void {
+    try {
+      this.db.prepare(`
+        UPDATE ai_learned_patterns
+        SET hits = hits + 1, updated_at = datetime('now')
+        WHERE pattern_key = ?
+      `).run(patternKey);
+    } catch {}
+  }
+
+  public getAllLearnedPatterns() {
+    try {
+      return this.db.prepare('SELECT * FROM ai_learned_patterns').all() as Array<{
+        pattern_key: string;
+        intent: string;
+        confidence: number;
+        reasoning: string;
+        hits: number;
+        source: string;
+      }>;
+    } catch {
+      return [];
+    }
   }
 }
 
