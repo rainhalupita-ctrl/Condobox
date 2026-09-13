@@ -64,6 +64,20 @@ export class WhatsAppService {
     return whatsAppEngineService.notifyPackageDelivered(params);
   }
 
+  public async notifyMultiplePackagesDelivered(params: {
+    phone: string;
+    residentName: string;
+    deliveredTo: string;
+    unitInfo: string;
+    packages: Array<{
+      carrier: string;
+      pickupCode?: string;
+      deliveredAt: string;
+    }>;
+  }): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    return whatsAppEngineService.notifyMultiplePackagesDelivered(params);
+  }
+
   public async sendMessage(options: SendMessageOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
     if (options.mediaUrl) {
       return whatsAppEngineService.sendImageMessage(options.phone, options.mediaUrl, options.caption || options.message);

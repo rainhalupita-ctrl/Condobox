@@ -45,6 +45,16 @@ export default function PortariaDashboardPage() {
   const [isNotifyingPending, setIsNotifyingPending] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
+  // Pop-up interativo para avisar o porteiro de outras encomendas pendentes para o mesmo morador
+  const [additionalPendingPrompt, setAdditionalPendingPrompt] = useState<{
+    residentName: string;
+    phone: string;
+    condoId?: string;
+    unitInfo: string;
+    pendingPackages: PackageType[];
+    deliveredCarrier: string;
+  } | null>(null);
+
   // Configuração do alerta de encomendas paradas (padrão: 5 dias)
   const [staleDaysThreshold, setStaleDaysThreshold] = useState<number>(5);
   const [showDirectContactModal, setShowDirectContactModal] = useState(false);
@@ -206,13 +216,62 @@ export default function PortariaDashboardPage() {
       VoiceService.playSuccessBeep();
       VoiceService.speak(`Entrega concluída para ${deliveredToName || 'o morador'}`);
 
-      setSuccessToast(`Encomenda entregue com sucesso para ${deliveredToName || 'o morador'}!`);
+      // Guarda os dados antes de limpar o modal atual
+      const deliveredPkg = selectedForDelivery;
+      const recipientName = deliveredToName || deliveredPkg.resident?.name || deliveredPkg.recipient_name_ocr || 'Morador';
+      const phone = deliveredPkg.resident?.phone || (deliveredPkg as any).phone || '';
+      const unitInfo = deliveredPkg.unit
+        ? `${deliveredPkg.unit.block} - Apto ${deliveredPkg.unit.unit_number}`
+        : 'Unidade';
+
+      // Verifica se o morador ainda possui OUTRAS encomendas pendentes no condomínio
+      const otherPending = packages.filter(
+        p => p.id !== deliveredPkg.id &&
+             p.status !== 'DELIVERED' &&
+             ((deliveredPkg.unit_id && p.unit_id === deliveredPkg.unit_id) ||
+              (deliveredPkg.resident_id && p.resident_id === deliveredPkg.resident_id))
+      );
+
       setSelectedForDelivery(null);
       loadPackages();
+
+      if (otherPending.length > 0) {
+        // Abre o Pop-up Interativo perguntando se deseja entregar o próximo pacote agora
+        setAdditionalPendingPrompt({
+          residentName: recipientName,
+          phone,
+          condoId: deliveredPkg.condo_id,
+          unitInfo,
+          pendingPackages: otherPending,
+          deliveredCarrier: deliveredPkg.carrier || 'Encomenda'
+        });
+      } else {
+        setSuccessToast(`Encomenda entregue com sucesso para ${recipientName}!`);
+      }
     } catch (err: any) {
       alert(`Erro ao registrar entrega: ${err.message}`);
     } finally {
       setIsSubmittingDelivery(false);
+    }
+  };
+
+  const handleDeliverNextPackage = (nextPkg: PackageType) => {
+    if (!additionalPendingPrompt) return;
+    const recipient = additionalPendingPrompt.residentName;
+    setAdditionalPendingPrompt(null);
+    setSelectedForDelivery(nextPkg);
+    setDeliveredToName(recipient);
+  };
+
+  const handleFinishWithoutAdditional = async () => {
+    if (!additionalPendingPrompt) return;
+    const { phone, condoId, residentName } = additionalPendingPrompt;
+    setAdditionalPendingPrompt(null);
+    setSuccessToast(`Atendimento finalizado! Disparando confirmação única para ${residentName}...`);
+
+    // Força o envio imediato da notificação única via WhatsApp sem aguardar o timer de debounce
+    if (phone) {
+      await LocalApiClient.flushDeliveryBatch(phone, condoId);
     }
   };
 
@@ -739,6 +798,31 @@ export default function PortariaDashboardPage() {
                 </button>
               </div>
 
+              {/* Alerta de Outras Encomendas Pendentes para o mesmo Morador/Unidade */}
+              {(() => {
+                const otherPending = packages.filter(
+                  p => p.id !== selectedForDelivery.id &&
+                       p.status !== 'DELIVERED' &&
+                       ((selectedForDelivery.unit_id && p.unit_id === selectedForDelivery.unit_id) ||
+                        (selectedForDelivery.resident_id && p.resident_id === selectedForDelivery.resident_id))
+                );
+                if (otherPending.length === 0) return null;
+                return (
+                  <div className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs px-3.5 py-2.5 rounded-2xl flex items-center gap-2.5">
+                    <span className="text-lg shrink-0">📦</span>
+                    <div className="leading-snug">
+                      <p className="font-bold text-emerald-200">
+                        O morador possui mais {otherPending.length} encomenda(s) pendente(s):
+                      </p>
+                      <p className="text-[11px] text-emerald-400/90 mt-0.5">
+                        {otherPending.map(p => `${p.carrier || 'Encomenda'} (${p.pickup_code})`).join(', ')}.
+                        {' '}As notificações de retirada serão <strong>agrupadas em uma única mensagem</strong> no WhatsApp.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Nome de quem está retirando:
@@ -757,6 +841,91 @@ export default function PortariaDashboardPage() {
                 onSave={handleConfirmSignature}
                 onCancel={() => setSelectedForDelivery(null)}
               />
+            </div>
+          </div>
+        )}
+
+        {/* Pop-up Proativo de Encomendas Adicionais Pendentes */}
+        {additionalPendingPrompt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+            <div className="w-full max-w-lg bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-6 sm:p-7 shadow-2xl shadow-black/80 space-y-5">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-2xl shrink-0">
+                  <PackageCheck className="w-7 h-7" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">
+                      Atenção Porteiro
+                    </span>
+                    <span className="text-xs text-amber-400/90 font-bold">
+                      {additionalPendingPrompt.pendingPackages.length} encomenda(s) restante(s)
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-white mt-1">
+                    Outra Encomenda Pendente Detectada!
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    O morador <strong className="text-white">{additionalPendingPrompt.residentName}</strong> ({additionalPendingPrompt.unitInfo}) acabou de retirar <strong className="text-white">{additionalPendingPrompt.deliveredCarrier}</strong>, mas ainda possui outro(s) pacote(s) aguardando retirada:
+                  </p>
+                </div>
+              </div>
+
+              {/* Lista dos Pacotes Pendentes Restantes */}
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {additionalPendingPrompt.pendingPackages.map((pkg, idx) => (
+                  <div
+                    key={pkg.id}
+                    className="flex items-center justify-between p-3 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs hover:border-amber-500/40 transition"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-[11px]">
+                        {idx + 1}
+                      </span>
+                      <div>
+                        <span className="font-bold text-slate-100 block">{pkg.carrier}</span>
+                        {pkg.notes && (
+                          <span className="text-[10px] text-slate-400 block">{pkg.notes}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-lg text-xs">
+                        {pkg.pickup_code}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-2xl text-center">
+                <p className="text-xs font-bold text-amber-200">
+                  Deseja seguir com a entrega do próximo pacote para este morador agora?
+                </p>
+              </div>
+
+              {/* Botões de Ação do Porteiro */}
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleDeliverNextPackage(additionalPendingPrompt.pendingPackages[0])}
+                  className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-950/50 transition flex items-center justify-center gap-2 active:scale-[0.98]"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Sim, Entregar Próximo Pacote
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFinishWithoutAdditional}
+                  className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs sm:text-sm rounded-xl border border-slate-700 transition active:scale-[0.98]"
+                >
+                  Não, Finalizar Atendimento
+                </button>
+              </div>
+
+              <p className="text-[10px] text-center text-slate-500">
+                💡 Se optar por não entregar ou fechar, o sistema enviará a notificação da retirada feita sem aguardar o segundo pacote.
+              </p>
             </div>
           </div>
         )}

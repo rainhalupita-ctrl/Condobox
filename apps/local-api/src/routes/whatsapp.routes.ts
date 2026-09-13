@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { whatsAppEngineService } from '../services/whatsapp-engine.service.js';
+import { deliveryBatcherService } from '../services/delivery-batcher.service.js';
 
 export async function whatsappRoutes(fastify: FastifyInstance) {
   /**
@@ -98,5 +99,31 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
     });
 
     return reply.send(res);
+  });
+
+  /**
+   * POST /api/delivery-batch/flush
+   * Força o envio imediato do lote pendente de retiradas (para um morador ou todos)
+   */
+  fastify.post('/api/delivery-batch/flush', async (request, reply) => {
+    const { phone, condoId } = (request.body as any) || {};
+
+    if (phone) {
+      const flushed = await deliveryBatcherService.flushBatchForPhone(phone, condoId);
+      return reply.send({
+        success: true,
+        flushed,
+        message: flushed
+          ? `Lote de retirada para o telefone ${phone} disparado com sucesso.`
+          : `Nenhum lote pendente encontrado para o telefone ${phone}.`
+      });
+    }
+
+    await deliveryBatcherService.flushAll();
+    return reply.send({
+      success: true,
+      flushed: true,
+      message: 'Todos os lotes de retiradas pendentes foram disparados.'
+    });
   });
 }

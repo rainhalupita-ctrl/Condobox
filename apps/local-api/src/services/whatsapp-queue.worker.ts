@@ -1,5 +1,6 @@
 import { supabaseService } from './supabase.service.js';
 import { whatsappService } from './whatsapp.service.js';
+import { deliveryBatcherService } from './delivery-batcher.service.js';
 import { env } from '../config/env.js';
 
 interface QueuedArrivalItem {
@@ -508,9 +509,10 @@ export class WhatsAppQueueWorker {
         return;
       }
 
-      console.log(`📤 [WhatsApp Worker] Disparando Confirmação de Retirada para ${residentName} (${phone})...`);
+      console.log(`📦 [WhatsApp Worker] Encaminhando retirada para agrupamento inteligente (Debounce): ${residentName} (${phone}) - ${pkg.carrier}`);
 
-      const res = await whatsappService.notifyPackageDelivered({
+      deliveryBatcherService.addDelivery({
+        packageId,
         phone,
         residentName,
         unitInfo,
@@ -518,16 +520,11 @@ export class WhatsAppQueueWorker {
         carrier: pkg.carrier || 'Encomenda',
         deliveredAt: deliveredAtFormatted,
         pickupCode: pkg.pickup_code,
-        qrToken: pkg.qr_token
+        qrToken: pkg.qr_token,
+        condoId: pkg.condo_id
       });
-
-      if (res.success) {
-        console.log(`✅ [WhatsApp Worker] Confirmação de Retirada enviada com sucesso para ${phone}!`);
-      } else {
-        console.warn(`⚠️ [WhatsApp Worker] Falha ao enviar confirmação de retirada: ${res.error}`);
-      }
     } catch (err: any) {
-      console.error(`❌ [WhatsApp Worker] Erro ao enviar confirmação de retirada ${packageId}:`, err.message);
+      console.error(`❌ [WhatsApp Worker] Erro ao enfileirar confirmação de retirada ${packageId}:`, err.message);
     }
   }
 }

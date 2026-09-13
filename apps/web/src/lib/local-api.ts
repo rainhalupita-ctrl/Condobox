@@ -237,6 +237,25 @@ export class LocalApiClient {
   }
 
   /**
+   * Força o disparo imediato do lote de retiradas pendentes (ex: quando o porteiro encerra a entrega)
+   */
+  static async flushDeliveryBatch(phone?: string, condoId?: string): Promise<{ success: boolean; flushed?: boolean }> {
+    const baseUrl = this.getBaseUrl();
+    try {
+      const targetUrl = baseUrl ? `${baseUrl}/api/delivery-batch/flush` : '/api/delivery-batch/flush';
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, condoId }),
+      });
+      if (res.ok) return await res.json();
+    } catch (err) {
+      console.warn('[LocalApiClient] flushDeliveryBatch falhou:', err);
+    }
+    return { success: false };
+  }
+
+  /**
    * Checagem de saúde da API local
    */
   static async checkHealth() {

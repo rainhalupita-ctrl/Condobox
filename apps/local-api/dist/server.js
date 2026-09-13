@@ -19,11 +19,24 @@ import { whatsAppEngineService } from './services/whatsapp-engine.service.js';
 import { syncService } from './services/sync.service.js';
 import { BackupService } from './services/backup.service.js';
 import { queueConsumerService } from './services/queue-consumer.service.js';
+import { deliveryBatcherService } from './services/delivery-batcher.service.js';
 process.on('uncaughtException', (err) => {
     console.error('💥 [Server Uncaught Exception]:', err?.message || err);
 });
 process.on('unhandledRejection', (reason) => {
     console.error('💥 [Server Unhandled Rejection]:', reason?.message || reason);
+});
+const gracefulShutdown = async () => {
+    console.log('🛑 [Server] Encerrando servidor... Enviando notificações de retirada pendentes.');
+    await deliveryBatcherService.flushAll().catch(() => { });
+};
+process.on('SIGINT', async () => {
+    await gracefulShutdown();
+    process.exit(0);
+});
+process.on('SIGTERM', async () => {
+    await gracefulShutdown();
+    process.exit(0);
 });
 const fastify = Fastify({
     logger: {

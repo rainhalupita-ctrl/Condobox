@@ -31,6 +31,9 @@ export class WhatsAppService {
     async notifyPackageDelivered(params) {
         return whatsAppEngineService.notifyPackageDelivered(params);
     }
+    async notifyMultiplePackagesDelivered(params) {
+        return whatsAppEngineService.notifyMultiplePackagesDelivered(params);
+    }
     async sendMessage(options) {
         if (options.mediaUrl) {
             return whatsAppEngineService.sendImageMessage(options.phone, options.mediaUrl, options.caption || options.message);

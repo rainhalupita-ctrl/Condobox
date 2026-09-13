@@ -674,6 +674,51 @@ export class WhatsAppEngineService {
     return this.sendTextMessage(params.phone, text);
   }
 
+  public async notifyMultiplePackagesDelivered(params: {
+    phone: string;
+    residentName: string;
+    deliveredTo: string;
+    unitInfo: string;
+    packages: Array<{
+      carrier: string;
+      pickupCode?: string;
+      deliveredAt: string;
+    }>;
+  }): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const totalCount = params.packages.length;
+    let packagesListText = '';
+
+    params.packages.forEach((pkg, idx) => {
+      const codeStr = pkg.pickupCode ? ` _(Cód: ${pkg.pickupCode})_` : '';
+      packagesListText += `📦 *${idx + 1}. ${pkg.carrier || 'Encomenda'}*${codeStr}\n`;
+    });
+
+    const text =
+      `✅ *RETIRADA DE ENCOMENDAS CONFIRMADA*\n\n` +
+      `Olá, *${params.residentName}*!\n\n` +
+      `Confirmamos a retirada de suas *${totalCount} encomendas* da unidade *${params.unitInfo}* na portaria:\n\n` +
+      `${packagesListText}\n` +
+      `👤 *Retirado por:* ${params.deliveredTo}\n` +
+      `🕒 *Data/Hora:* ${params.packages[params.packages.length - 1]?.deliveredAt || new Date().toLocaleString('pt-BR')}\n` +
+      `✍️ *Assinaturas digitais arquivadas com segurança no sistema da portaria.*\n\n` +
+      `⚠️ *Não foi você quem retirou?*\n` +
+      `Se você não retirou estas encomendas, entre em contato imediatamente com a portaria do condomínio.\n\n` +
+      `🏢 Portaria do Condomínio`;
+
+    // Simulação humanizada de digitação
+    try {
+      if (this.socket && this.currentStatus === 'CONNECTED') {
+        const jid = await this.resolveJid(params.phone);
+        await this.socket.sendPresenceUpdate('composing', jid);
+        const typingDelay = Math.floor(Math.random() * 1000) + 1800; // 1.8s a 2.8s
+        await new Promise(r => setTimeout(r, typingDelay));
+        await this.socket.sendPresenceUpdate('paused', jid);
+      }
+    } catch {}
+
+    return this.sendTextMessage(params.phone, text);
+  }
+
   public async notifyPackageReminder(params: {
     phone: string;
     residentName: string;
