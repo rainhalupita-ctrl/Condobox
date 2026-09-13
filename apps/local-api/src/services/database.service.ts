@@ -66,7 +66,15 @@ export class DatabaseService {
   private dbPath: string;
 
   constructor() {
-    const dataDir = process.env.CONDOBOX_DATA_DIR || path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../../data');
+    const roamingDesktopData = path.join(process.env.APPDATA || '', 'condobox-desktop', 'data');
+    let dataDir = process.env.CONDOBOX_DATA_DIR;
+    if (!dataDir) {
+      if (fs.existsSync(path.join(roamingDesktopData, 'condobox.db'))) {
+        dataDir = roamingDesktopData;
+      } else {
+        dataDir = path.resolve(ABSOLUTE_STORAGE_DIR || process.cwd(), '../../data');
+      }
+    }
 
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });

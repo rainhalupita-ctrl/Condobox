@@ -46,7 +46,15 @@ export class WhatsAppEngineService {
   }> = new Map();
 
   constructor() {
-    const baseDataDir = process.env.CONDOBOX_DATA_DIR || path.resolve(process.cwd(), 'data');
+    const roamingDesktopData = path.join(process.env.APPDATA || '', 'condobox-desktop', 'data');
+    let baseDataDir = process.env.CONDOBOX_DATA_DIR;
+    if (!baseDataDir) {
+      if (fs.existsSync(path.join(roamingDesktopData, 'whatsapp_session', 'creds.json'))) {
+        baseDataDir = roamingDesktopData;
+      } else {
+        baseDataDir = path.resolve(process.cwd(), 'data');
+      }
+    }
     this.sessionDir = path.resolve(baseDataDir, 'whatsapp_session');
     if (!fs.existsSync(this.sessionDir)) {
       fs.mkdirSync(this.sessionDir, { recursive: true });
