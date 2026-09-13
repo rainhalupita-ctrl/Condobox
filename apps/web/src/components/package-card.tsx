@@ -93,6 +93,25 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
     }
   };
 
+  const [isResolvingContest, setIsResolvingContest] = useState(false);
+  const handleResolveContest = async () => {
+    if (!window.confirm('Deseja marcar esta contestação como verificada e resolvida pela portaria?')) return;
+    setIsResolvingContest(true);
+    try {
+      const res = await LocalApiClient.resolveContestation(pkg.id);
+      if (res.success) {
+        if (onPackageUpdated) onPackageUpdated();
+      } else {
+        alert('Erro ao resolver contestação: ' + (res.error || 'Erro desconhecido'));
+      }
+    } catch (e: any) {
+      alert('Erro: ' + e.message);
+    } finally {
+      setIsResolvingContest(false);
+    }
+  };
+
+
   // Verifica se existe log de notificação enviada (SENT) para este pacote
   useEffect(() => {
     if (pkg.status === 'DELIVERED') { setWasNotified(null); return; }
@@ -147,15 +166,36 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
   };
 
   const isCiente = (pkg as any).notes?.includes('CIENTE');
-  const isContested = Boolean((pkg as any).notes?.includes('CONTESTADO') && pkg.status !== 'DELIVERED');
+  const isContested = Boolean((pkg as any).notes?.includes('CONTESTADO'));
 
   let contestReason: string | null = null;
+  let isWithdrawalContested = false;
   if (isContested && (pkg as any).notes) {
-    const match = (pkg as any).notes.match(/CONTESTADO:[^:]*:\s*([^;]+)/);
-    contestReason = match ? match[1].trim() : 'Morador informou no WhatsApp que não reconhece ou não tem ciência da encomenda.';
+    const rawNotes = (pkg as any).notes;
+    isWithdrawalContested = rawNotes.includes('CONTESTADO_RETIRADA') ||
+                            pkg.status === 'DELIVERED' ||
+                            Boolean((pkg as any).delivered_at);
+
+    const match = rawNotes.match(/CONTESTADO:[^:]*:\s*(\[[^\]]+\]\s*)?([^;]+)/);
+    contestReason = match ? match[2]?.trim() || match[0] : (isWithdrawalContested ? 'Morador informou no WhatsApp que NÃO realizou a retirada da encomenda.' : 'Morador informou no WhatsApp que não reconhece a encomenda.');
   }
 
   const getStatusBadge = () => {
+    if (isContested) {
+      if (isWithdrawalContested) {
+        return (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600/40 text-rose-200 border-2 border-rose-500 shadow-lg shadow-rose-950/50 animate-pulse">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-300" /> Retirada Contestada
+          </span>
+        );
+      }
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600/30 text-rose-300 border border-rose-500/60 shadow-md animate-pulse">
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Encomenda Contestada
+        </span>
+      );
+    }
+
     if (pkg.status === 'RETURNED') {
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
@@ -168,14 +208,6 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
           <CheckCircle2 className="w-3.5 h-3.5" /> Entregue
-        </span>
-      );
-    }
-
-    if (isContested) {
-      return (
-        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600/30 text-rose-300 border border-rose-500/60 shadow-md animate-pulse">
-          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Contestada pelo Morador
         </span>
       );
     }
@@ -343,18 +375,51 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
 
       {/* Alerta de Contestação pelo Morador */}
       {isContested && (
-        <div className="p-3 bg-red-950/60 border border-red-500/60 rounded-xl text-xs text-red-200 flex items-start gap-2.5 shadow-inner animate-fade-in">
-          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5 animate-bounce" />
-          <div className="min-w-0 flex-1">
-            <span className="font-black text-red-300 uppercase tracking-wide text-[10px] block">
-              🚨 Atenção Portaria: Morador Contestou Encomenda
-            </span>
-            <p className="mt-1 text-slate-200 text-xs font-medium italic break-words bg-slate-950/70 p-2 rounded-lg border border-red-500/30">
-              "{contestReason}"
-            </p>
-            <span className="text-[10px] text-red-300/80 block mt-1">
-              Verifique a encomenda física na bancada antes de entregar.
-            </span>
+        <div className="p-3.5 bg-red-950/70 border-2 border-red-500/80 rounded-xl text-xs text-red-200 flex flex-col gap-2.5 shadow-lg shadow-red-950/50 animate-fade-in ring-1 ring-red-500/40">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5 animate-bounce" />
+            <div className="min-w-0 flex-1">
+              <span className="font-black text-red-300 uppercase tracking-wide text-[11px] block">
+                {isWithdrawalContested
+                  ? '🚨 ALERTA MÁXIMO: MORADOR CONTESTOU A RETIRADA!'
+                  : '⚠️ ATENÇÃO PORTARIA: ENCOMENDA CONTESTADA PELO MORADOR'}
+              </span>
+              <p className="mt-1 text-slate-100 text-xs font-medium italic break-words bg-slate-950/80 p-2.5 rounded-lg border border-red-500/40">
+                "{contestReason}"
+              </p>
+              <span className="text-[10px] text-red-300 font-medium block mt-1">
+                {isWithdrawalContested
+                  ? 'O morador declarou no WhatsApp que NÃO retirou esta encomenda! Verifique a assinatura arquivada acima e as câmeras.'
+                  : 'Verifique a encomenda física na bancada antes de entregar.'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 border-t border-red-900/60 justify-end flex-wrap">
+            {cleanPhone && (
+              <a
+                href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+                  `Olá ${residentName}, aqui é da Portaria. Vimos sua contestação referente à encomenda ${pkg.carrier} (Código: ${pkg.pickup_code}). Estamos verificando imediatamente.`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#25D366] hover:bg-[#20bd5a] text-slate-950 shadow transition cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Falar no WhatsApp</span>
+              </a>
+            )}
+
+            <button
+              type="button"
+              disabled={isResolvingContest}
+              onClick={handleResolveContest}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 transition cursor-pointer disabled:opacity-50"
+              title="Marca esta contestação como verificada e resolvida pela portaria"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{isResolvingContest ? 'Resolvendo...' : 'Resolver Contestação'}</span>
+            </button>
           </div>
         </div>
       )}

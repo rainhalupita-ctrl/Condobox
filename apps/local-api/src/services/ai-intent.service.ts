@@ -38,8 +38,8 @@ Classifique a mensagem do morador ESTRITAMENTE em uma destas 4 categorias:
    Exemplos: "ok", "obrigado", "obrigada", "ciente", "estou ciente", "valeu", "vlw", "já vou buscar", "tô descendo", "vou pegar mais tarde", "show", "beleza", "blz", "👍", "confirmado", "sim", "entendido".
 
 2. "CONTEST_PACKAGE":
-   O morador afirma que NÃO tem ciência, NÃO pediu nada, NÃO reconhece o pacote, que não é dele, que veio errado, que houve engano, ou que não comprou nada.
-   Exemplos: "não tenho ciência disso", "não é meu", "não é minha", "não pedi nada", "encomenda errada", "deve ser engano", "estou fora e não comprei nada", "veio errado", "não sou eu", "não reconheço esse pacote", "número errado".
+   O morador afirma que NÃO tem ciência, NÃO pediu nada, NÃO reconhece o pacote, que não é dele, que veio errado, que houve engano, que não comprou nada, OU afirma que NÃO realizou a retirada ("não fiz a retirada", "não retirei", "não fui eu quem retirou", etc.).
+   Exemplos: "não tenho ciência disso", "não é meu", "não é minha", "não pedi nada", "encomenda errada", "deve ser engano", "estou fora e não comprei nada", "veio errado", "não sou eu", "não reconheço esse pacote", "número errado", "não fiz a retirada", "não retirei", "consta como retirada mas não fui eu", "contestação de retirada".
 
 3. "REQUEST_CODE":
    O morador pede o código de retirada, link do QR Code ou como retirar.
@@ -242,6 +242,15 @@ export class AIIntentService {
       { key: 'numero errado', intent: 'CONTEST_PACKAGE', reasoning: 'Contato telefônico incorreto para a unidade' },
       { key: 'apto errado', intent: 'CONTEST_PACKAGE', reasoning: 'Apartamento incorreto' },
       { key: 'apartamento errado', intent: 'CONTEST_PACKAGE', reasoning: 'Apartamento incorreto' },
+      { key: 'nao fiz a retirada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que não fez a retirada da encomenda' },
+      { key: 'nao fiz retirada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador contesta retirada da encomenda' },
+      { key: 'nao retirei', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que não retirou o pacote' },
+      { key: 'nao peguei', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que não pegou o pacote' },
+      { key: 'nao fui eu que retirei', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que outra pessoa retirou indevidamente' },
+      { key: 'nao fui eu quem retirou', intent: 'CONTEST_PACKAGE', reasoning: 'Morador contesta a retirada' },
+      { key: 'contestacao de retirada', intent: 'CONTEST_PACKAGE', reasoning: 'Contestação formal de retirada pelo morador' },
+      { key: 'nao retirei nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador contesta retirada' },
+      { key: 'alguem pegou por engano', intent: 'CONTEST_PACKAGE', reasoning: 'Morador suspeita de entrega indevida a terceiro' },
       { key: 'emoji_negativo', intent: 'CONTEST_PACKAGE', reasoning: 'Emoji negativo contestando encomenda' },
 
       // 3. Pedidos de Código / QR Code ("me manda aí", "qual o código", "manda o link")

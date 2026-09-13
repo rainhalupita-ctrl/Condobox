@@ -55,6 +55,19 @@ export default function PortariaDashboardPage() {
     deliveredCarrier: string;
   } | null>(null);
 
+  // Modal de Alerta de Emergência para Encomendas Contestadas no WhatsApp
+  const [contestedAlertModal, setContestedAlertModal] = useState<{
+    packageId?: string;
+    carrier: string;
+    pickupCode: string;
+    residentName: string;
+    unitInfo: string;
+    phone: string;
+    reason: string;
+    isWithdrawalContest: boolean;
+    timestamp: string;
+  } | null>(null);
+
   // Configuração do alerta de encomendas paradas (padrão: 5 dias)
   const [staleDaysThreshold, setStaleDaysThreshold] = useState<number>(5);
   const [showDirectContactModal, setShowDirectContactModal] = useState(false);
@@ -142,9 +155,24 @@ export default function PortariaDashboardPage() {
     alertChannel
       .on('broadcast', { event: 'package-contested' }, (payload: any) => {
         const data = payload?.payload || {};
+        const isWithdrawal = Boolean(data.isWithdrawalContest);
         VoiceService.playErrorBeep();
-        VoiceService.speak('Atenção: Encomenda contestada pelo morador no WhatsApp!');
-        setSuccessToast(`🚨 Contestação: ${data.recipientName || 'Morador'} (${data.carrier || ''}) informou que não reconhece o pacote.`);
+        VoiceService.speak(
+          isWithdrawal
+            ? 'Alerta urgente: Retirada de encomenda contestada pelo morador no WhatsApp!'
+            : 'Atenção: Encomenda contestada pelo morador no WhatsApp!'
+        );
+        setContestedAlertModal({
+          packageId: data.packageId,
+          carrier: data.carrier || 'Encomenda',
+          pickupCode: data.pickupCode || '---',
+          residentName: data.residentName || data.recipientName || 'Morador(a)',
+          unitInfo: data.unitInfo || '',
+          phone: data.phone || '',
+          reason: data.reason || 'O morador informou que não reconhece ou contesta esta encomenda.',
+          isWithdrawalContest: isWithdrawal,
+          timestamp: data.timestamp || new Date().toISOString()
+        });
         loadPackages();
       })
       .subscribe();
@@ -335,7 +363,6 @@ export default function PortariaDashboardPage() {
   });
 
   const contestedPackages = packages.filter((pkg) => {
-    if (pkg.status === 'DELIVERED') return false;
     return Boolean(pkg.notes?.includes('CONTESTADO'));
   });
 
@@ -449,7 +476,6 @@ export default function PortariaDashboardPage() {
     if (statusFilter === 'PENDING' && pkg.status === 'DELIVERED') return false;
     if (statusFilter === 'DELIVERED' && pkg.status !== 'DELIVERED') return false;
     if (statusFilter === 'CONTESTED') {
-      if (pkg.status === 'DELIVERED') return false;
       if (!pkg.notes?.includes('CONTESTADO')) return false;
     }
     if (statusFilter === 'STALE') {
@@ -580,10 +606,10 @@ export default function PortariaDashboardPage() {
                     </span>
                   </div>
                   <h3 className="text-base sm:text-lg font-black text-white mt-1">
-                    Morador informou que não tem ciência ou não reconhece a encomenda!
+                    Morador contestou a retirada ou não reconhece a encomenda!
                   </h3>
                   <p className="text-xs text-rose-200/90 mt-0.5">
-                    A IA identificou a recusa. Verifique o pacote físico na bancada da portaria para evitar entrega para pessoa ou unidade incorreta.
+                    Atenção urgente da portaria: Contestação registrada via WhatsApp (de retirada indevida ou pacote não reconhecido). Verifique os detalhes e câmeras.
                   </p>
                 </div>
               </div>
@@ -1220,6 +1246,120 @@ export default function PortariaDashboardPage() {
                 >
                   Fechar
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POP-UP MODAL DE EMERGÊNCIA: ENCOMENDA OU RETIRADA CONTESTADA */}
+        {contestedAlertModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+            <div className="relative w-full max-w-lg bg-slate-900 border-2 border-red-500 rounded-3xl shadow-2xl shadow-red-950/80 overflow-hidden ring-4 ring-red-500/30 animate-scale-in">
+              {/* Top Banner Vermelho Vibrante com Sirene */}
+              <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 p-4 sm:p-5 text-white flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3.5">
+                  <div className="p-2.5 bg-white/20 rounded-2xl backdrop-blur-md border border-white/30 animate-bounce">
+                    <AlertTriangle className="w-7 h-7 text-white" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-black/40 text-red-200 border border-white/20">
+                        Alerta Máximo da Portaria
+                      </span>
+                    </div>
+                    <h3 className="text-lg sm:text-xl font-black tracking-tight mt-1">
+                      {contestedAlertModal.isWithdrawalContest
+                        ? '🚨 RETIRADA CONTESTADA PELO MORADOR!'
+                        : '⚠️ ENCOMENDA CONTESTADA PELO MORADOR!'}
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setContestedAlertModal(null)}
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                  title="Fechar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Corpo do Modal */}
+              <div className="p-5 sm:p-6 space-y-4">
+                <div className="p-3 bg-red-950/50 border border-red-500/40 rounded-2xl text-xs text-red-200">
+                  <p className="font-semibold leading-relaxed">
+                    {contestedAlertModal.isWithdrawalContest
+                      ? 'O morador declarou no WhatsApp que NÃO realizou a retirada desta encomenda. A equipe da portaria deve averiguar imediatamente a assinatura digital e câmeras de segurança.'
+                      : 'O morador informou no WhatsApp que não reconhece este pacote ou que a encomenda não pertence à sua unidade.'}
+                  </p>
+                </div>
+
+                {/* Tabela de Dados da Encomenda */}
+                <div className="space-y-2.5 bg-slate-950/70 p-4 rounded-2xl border border-slate-800 text-xs">
+                  <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400 font-medium">Morador / Destinatário:</span>
+                    <span className="font-bold text-white text-sm">{contestedAlertModal.residentName}</span>
+                  </div>
+                  {contestedAlertModal.unitInfo && (
+                    <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                      <span className="text-slate-400 font-medium">Unidade:</span>
+                      <span className="font-bold text-emerald-400 text-sm">{contestedAlertModal.unitInfo}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400 font-medium">Transportadora:</span>
+                    <span className="font-bold text-slate-200 text-sm">{contestedAlertModal.carrier}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400 font-medium">Código de Retirada:</span>
+                    <span className="font-black font-mono text-emerald-400 text-sm bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">
+                      {contestedAlertModal.pickupCode}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-red-400 font-bold block mb-1">Mensagem enviada pelo morador:</span>
+                    <div className="p-3 bg-slate-900 border border-red-500/30 rounded-xl text-slate-200 italic font-medium leading-relaxed break-words">
+                      "{contestedAlertModal.reason}"
+                    </div>
+                  </div>
+                </div>
+
+                {/* Botões de Ação */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                  {contestedAlertModal.phone && (
+                    <a
+                      href={`https://wa.me/${contestedAlertModal.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                        `Olá ${contestedAlertModal.residentName}, aqui é da Portaria do Condomínio. Recebemos sua contestação sobre a encomenda da ${contestedAlertModal.carrier} (Código: ${contestedAlertModal.pickupCode}). Estamos verificando os registros e câmeras com urgência.`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full sm:flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-emerald-950/50 transition cursor-pointer"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      <span>Falar no WhatsApp</span>
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusFilter('CONTESTED');
+                      setContestedAlertModal(null);
+                    }}
+                    className="w-full sm:flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-red-950/50 transition cursor-pointer"
+                  >
+                    <Filter className="w-4 h-4" />
+                    <span>Ver em Contestadas</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setContestedAlertModal(null)}
+                    className="w-full sm:w-auto py-3 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+                  >
+                    Estou Ciente
+                  </button>
+                </div>
               </div>
             </div>
           </div>

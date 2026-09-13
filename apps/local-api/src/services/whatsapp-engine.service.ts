@@ -985,27 +985,50 @@ export class WhatsAppEngineService {
     // 2. Extrai código de retirada mencionado no texto ou no texto citado
     const codeFromText = aiIntentService.extractCode(text) || (quotedText ? aiIntentService.extractCode(quotedText) : null);
 
-    // 3. Busca contexto das encomendas pendentes do morador
-    let pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone, codeFromText);
-
-    // Fallback: se não encontrou por telefone mas temos código, busca diretamente pelo código
-    if ((!pendingPkgs || pendingPkgs.length === 0) && codeFromText) {
-      const pkgByCode = databaseService.getPackageByCode(codeFromText);
-      if (pkgByCode && pkgByCode.status !== 'DELIVERED') {
-        pendingPkgs = [pkgByCode];
-        if (pkgByCode.resident?.phone) {
-          cleanPhone = pkgByCode.resident.phone;
-          if (remoteJid.includes('@lid')) {
-            this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
-          }
+    // 3. Busca encomenda pelo código (inclusive DELIVERED) se houver código
+    let matchedPkgByCode: any = null;
+    if (codeFromText) {
+      matchedPkgByCode = await databaseService.findPackageByCode(codeFromText);
+      if (matchedPkgByCode?.resident?.phone) {
+        cleanPhone = matchedPkgByCode.resident.phone;
+        if (remoteJid.includes('@lid')) {
+          this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
         }
       }
     }
 
+    // 4. Busca contexto das encomendas pendentes do morador
+    let pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone, codeFromText);
+    if ((!pendingPkgs || pendingPkgs.length === 0) && matchedPkgByCode && matchedPkgByCode.status !== 'DELIVERED') {
+      pendingPkgs = [matchedPkgByCode];
+    }
+
+    // Verifica se a mensagem possui sinal claro de contestação ou retirada indevida
+    const normText = (text || '').toLowerCase();
+    const isContestSignal =
+      normText.includes('não fiz a retirada') ||
+      normText.includes('nao fiz a retirada') ||
+      normText.includes('não fiz retirada') ||
+      normText.includes('nao fiz retirada') ||
+      normText.includes('não retirei') ||
+      normText.includes('nao retirei') ||
+      normText.includes('não recebi') ||
+      normText.includes('nao recebi') ||
+      normText.includes('não peguei') ||
+      normText.includes('nao peguei') ||
+      normText.includes('não é meu') ||
+      normText.includes('nao e meu') ||
+      normText.includes('não é minha') ||
+      normText.includes('nao e minha') ||
+      normText.includes('contestação') ||
+      normText.includes('contestacao') ||
+      normText.includes('não foi você quem retirou') ||
+      Boolean(matchedPkgByCode);
+
     // 🛑 REGRA CRÍTICA: Se o morador NÃO possui nenhuma encomenda pendente para retirada,
     // o robô NUNCA deve responder ou enviar mensagens sobre encomendas.
-    // Isso evita spam, mensagens sem contexto para quem está falando com a portaria sobre outros assuntos e risco de banimento.
-    if (!pendingPkgs || pendingPkgs.length === 0) {
+    // EXCETO se for um sinal de contestação (inclusive de retirada) ou código informado!
+    if ((!pendingPkgs || pendingPkgs.length === 0) && !isContestSignal) {
       this.logToFile(
         `ℹ️ [Silenciado] Mensagem recebida de ${cleanPhone} ("${text}"), mas não há nenhuma encomenda pendente para este contato. Nenhuma resposta automática disparada.`
       );
@@ -1015,9 +1038,20 @@ export class WhatsAppEngineService {
     let residentName = 'Morador(a)';
     let packagesInfo = '';
 
-    const first = pendingPkgs[0];
-    residentName = first.resident?.name || first.recipient_name_ocr || 'Morador(a)';
-    packagesInfo = pendingPkgs.map((p: any) => `${p.carrier} (Código: ${p.pickup_code})`).join(', ');
+    if (pendingPkgs && pendingPkgs.length > 0) {
+      const first = pendingPkgs[0];
+      residentName = first.resident?.name || first.recipient_name_ocr || 'Morador(a)';
+      packagesInfo = pendingPkgs.map((p: any) => `${p.carrier} (Código: ${p.pickup_code})`).join(', ');
+    } else if (matchedPkgByCode) {
+      residentName = matchedPkgByCode.resident?.name || matchedPkgByCode.recipient_name_ocr || 'Morador(a)';
+      packagesInfo = `${matchedPkgByCode.carrier} (Código: ${matchedPkgByCode.pickup_code})`;
+    } else {
+      const recentDelivered = await databaseService.getRecentDeliveredPackageForPhone(cleanPhone);
+      if (recentDelivered) {
+        residentName = recentDelivered.resident?.name || recentDelivered.recipient_name_ocr || 'Morador(a)';
+        packagesInfo = `${recentDelivered.carrier} (Código: ${recentDelivered.pickup_code})`;
+      }
+    }
 
     // 🧠 CLASSIFICAÇÃO INTELIGENTE COM IA (Groq -> Gemini -> NVIDIA -> Heurística)
     const aiResult = isReaction
@@ -1036,7 +1070,7 @@ export class WhatsAppEngineService {
 
     const webBaseUrl = this.getPublicWebUrl();
 
-    // 🚨 CASO 1: CONTESTAÇÃO / NÃO RECONHECIMENTO (Morador diz que não é dele / não tem ciência)
+    // 🚨 CASO 1: CONTESTAÇÃO / NÃO RECONHECIMENTO (Morador diz que não é dele / não tem ciência / não retirou)
     if (aiResult.intent === 'CONTEST_PACKAGE') {
       this.logToFile(`🚨 Morador ${cleanPhone} contestou a encomenda! Registrando alerta no sistema...`);
       const contestResult = await databaseService.contestPackageByPhone(
@@ -1045,22 +1079,43 @@ export class WhatsAppEngineService {
         aiResult.extractedCode || codeFromText
       );
 
-      const contestedList: any[] =
-        contestResult?.pkgs && contestResult.pkgs.length > 0
-          ? contestResult.pkgs
-          : (pendingPkgs || []);
+      const targetPkg =
+        contestResult?.pkg ||
+        contestResult?.pkgs?.[0] ||
+        matchedPkgByCode ||
+        pendingPkgs?.[0];
 
-      const carrierName = contestedList[0]?.carrier || 'Encomenda';
+      const isWithdrawal =
+        Boolean(contestResult?.isWithdrawalContest) ||
+        targetPkg?.status === 'DELIVERED' ||
+        Boolean(targetPkg?.delivered_at) ||
+        normText.includes('retirada') ||
+        normText.includes('retirei') ||
+        normText.includes('não fiz');
 
-      const replyText =
-        `⚠️ *REGISTRO DE NÃO RECONHECIMENTO DE ENCOMENDA*\n\n` +
-        `Olá, *${residentName}*!\n\n` +
-        `Registramos no sistema que você *não reconhece* ou *não tem ciência* da encomenda da *${carrierName}*.\n\n` +
-        `🚨 *A equipe da portaria já foi alertada imediatamente na tela do sistema!* O pacote foi retido para conferência física de etiqueta, destinatário e apartamento.\n\n` +
-        `Agradecemos o aviso! Caso necessário, a portaria entrará em contato com você.`;
+      const carrierName = targetPkg?.carrier || 'Encomenda';
+      const pickupCode = targetPkg?.pickup_code || codeFromText || '';
+
+      let replyText = '';
+      if (isWithdrawal) {
+        replyText =
+          `🚨 *ALERTA DE CONTESTAÇÃO DE RETIRADA REGISTRADO!*\n\n` +
+          `Olá, *${residentName}*!\n\n` +
+          `Recebemos com máxima prioridade seu aviso de que você *NÃO realizou a retirada* da encomenda da *${carrierName}*${pickupCode ? ` (Código: *${pickupCode}*)` : ''}.\n\n` +
+          `🚨 *A equipe da portaria já foi alertada com alarme de emergência na tela do sistema!*\n` +
+          `O porteiro foi orientado a conferir imediatamente o livro de registros, assinatura digital e imagens de câmeras.\n\n` +
+          `A portaria entrará em contato com você o mais breve possível para esclarecer.`;
+      } else {
+        replyText =
+          `⚠️ *REGISTRO DE NÃO RECONHECIMENTO DE ENCOMENDA*\n\n` +
+          `Olá, *${residentName}*!\n\n` +
+          `Registramos no sistema que você *não reconhece* ou *não tem ciência* da encomenda da *${carrierName}*${pickupCode ? ` (Código: *${pickupCode}*)` : ''}.\n\n` +
+          `🚨 *A equipe da portaria já foi alertada imediatamente na tela do sistema!* O pacote foi retido para conferência física de etiqueta, destinatário e apartamento.\n\n` +
+          `Agradecemos o aviso! Caso necessário, a portaria entrará em contato com você.`;
+      }
 
       await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
-      this.logToFile(`✅ Resposta de contestação enviada para ${cleanPhone} e portaria alertada com sucesso.`);
+      this.logToFile(`✅ Resposta de contestação (${isWithdrawal ? 'RETIRADA' : 'RECEBIMENTO'}) enviada para ${cleanPhone} e portaria alertada com sucesso.`);
       return;
     }
 

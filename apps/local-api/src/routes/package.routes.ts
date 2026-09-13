@@ -399,4 +399,25 @@ export async function packageRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * POST /api/packages/:id/resolve-contestation
+   * Registra resolução da contestação pela equipe de portaria
+   */
+  fastify.post('/api/packages/:id/resolve-contestation', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { reason } = (request.body as { reason?: string }) || {};
+
+      const res = await databaseService.resolveContestation(id, reason);
+      if (res.success) {
+        return reply.send({ success: true, message: 'Contestação resolvida com sucesso.' });
+      } else {
+        return reply.status(500).send({ success: false, error: res.error || 'Erro ao resolver contestação.' });
+      }
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
 }
+

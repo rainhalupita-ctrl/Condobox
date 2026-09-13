@@ -342,6 +342,124 @@ export class DatabaseService {
     };
   }
 
+  public getPackageByCode(code: string): any {
+    return this.getPackageByQrTokenOrCode(code);
+  }
+
+  public async findPackageByCode(code: string): Promise<any | null> {
+    if (!code) return null;
+    const cleanCode = code.trim().toUpperCase();
+
+    // 1. Busca no SQLite local independente do status (inclui DELIVERED)
+    const row = this.db
+      .prepare(`
+        SELECT p.*,
+               u.block as unit_block, u.unit_number as unit_number,
+               r.name as resident_name, r.phone as resident_phone
+        FROM packages p
+        LEFT JOIN units u ON p.unit_id = u.id
+        LEFT JOIN residents r ON p.resident_id = r.id
+        WHERE upper(p.pickup_code) = ? OR upper(p.qr_token) = ?
+        ORDER BY p.received_at DESC
+        LIMIT 1
+      `)
+      .get(cleanCode, cleanCode) as any;
+
+    if (row) {
+      return {
+        ...row,
+        unit: row.unit_id ? { id: row.unit_id, block: row.unit_block, unit_number: row.unit_number } : null,
+        resident: row.resident_id ? { id: row.resident_id, name: row.resident_name, phone: row.resident_phone } : null
+      };
+    }
+
+    // 2. Fallback no Supabase Nuvem independente do status
+    try {
+      const { supabaseService } = await import('./supabase.service.js');
+      if (supabaseService.isConfigured()) {
+        const client = supabaseService.getClient();
+        const { data: cloudPkg } = await client
+          .from('packages')
+          .select('*, resident:residents(*), unit:units(*)')
+          .or(`pickup_code.ilike.${cleanCode},qr_token.eq.${cleanCode}`)
+          .order('received_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (cloudPkg) return cloudPkg;
+      }
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao buscar pacote por código no Supabase:', err.message);
+    }
+
+    return null;
+  }
+
+  public async getRecentDeliveredPackageForPhone(phone: string): Promise<any | null> {
+    const clean = phone.replace(/\D/g, '');
+    const last8 = clean.slice(-8);
+    if (!last8) return null;
+
+    // 1. SQLite Local
+    const localCandidates = this.db
+      .prepare(`
+        SELECT p.*,
+               u.block as unit_block, u.unit_number as unit_number,
+               r.name as resident_name, r.phone as resident_phone
+        FROM packages p
+        LEFT JOIN units u ON p.unit_id = u.id
+        LEFT JOIN residents r ON p.resident_id = r.id
+        WHERE p.status = 'DELIVERED' OR p.delivered_at IS NOT NULL
+        ORDER BY p.delivered_at DESC, p.received_at DESC
+        LIMIT 20
+      `)
+      .all() as any[];
+
+    for (const cand of localCandidates) {
+      if (!cand.resident_phone) continue;
+      const cleanCand = cand.resident_phone.replace(/\D/g, '');
+      const candLast8 = cleanCand.slice(-8);
+      if (candLast8 && (candLast8 === last8 || cleanCand.endsWith(last8) || clean.endsWith(candLast8))) {
+        return {
+          ...cand,
+          unit: cand.unit_id ? { id: cand.unit_id, block: cand.unit_block, unit_number: cand.unit_number } : null,
+          resident: cand.resident_id ? { id: cand.resident_id, name: cand.resident_name, phone: cand.resident_phone } : null
+        };
+      }
+    }
+
+    // 2. Supabase Nuvem Fallback
+    try {
+      const { supabaseService } = await import('./supabase.service.js');
+      if (supabaseService.isConfigured()) {
+        const client = supabaseService.getClient();
+        const { data: cloudPkgs } = await client
+          .from('packages')
+          .select('*, resident:residents(*), unit:units(*)')
+          .eq('status', 'DELIVERED')
+          .order('delivered_at', { ascending: false })
+          .limit(20);
+
+        if (cloudPkgs && cloudPkgs.length > 0) {
+          for (const cPkg of cloudPkgs) {
+            const rPhone = cPkg.resident?.phone;
+            if (rPhone) {
+              const cleanCloud = rPhone.replace(/\D/g, '');
+              const cloudLast8 = cleanCloud.slice(-8);
+              if (cloudLast8 && (cloudLast8 === last8 || cleanCloud.endsWith(last8) || clean.endsWith(cloudLast8))) {
+                return cPkg;
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao buscar pacotes entregues no Supabase:', err.message);
+    }
+
+    return null;
+  }
+
   public listRecentPackages(limit = 50): any[] {
     const rows = this.db
       .prepare(`
@@ -560,36 +678,72 @@ export class DatabaseService {
     phone: string,
     reason: string,
     mentionedCode?: string | null
-  ): Promise<{ pkg?: any; pkgs?: any[] } | null> {
+  ): Promise<{ pkg?: any; pkgs?: any[]; isWithdrawalContest?: boolean } | null> {
     const clean = phone.replace(/\D/g, '');
-    const pendingDelivery = await this.getPendingPackagesForPhone(phone, mentionedCode);
+    let targetPkgs: any[] = [];
+    let isWithdrawalContest = false;
 
-    if (pendingDelivery.length === 0) {
-      console.log(`ℹ️ [DatabaseService] Nenhuma encomenda pendente encontrada para contestar para ${clean}.`);
+    // 1. Se informou um código específico (ex: PKYDMA), busca em TODAS as encomendas (inclusive DELIVERED)
+    if (mentionedCode) {
+      const matched = await this.findPackageByCode(mentionedCode);
+      if (matched) {
+        targetPkgs = [matched];
+        if (matched.status === 'DELIVERED' || Boolean(matched.delivered_at)) {
+          isWithdrawalContest = true;
+        }
+      }
+    }
+
+    // 2. Se não encontrou por código ou não informou código:
+    if (targetPkgs.length === 0) {
+      const normReason = (reason || '').toLowerCase();
+      const isRetiradaKeywords =
+        normReason.includes('retirada') ||
+        normReason.includes('retirei') ||
+        normReason.includes('retirado') ||
+        normReason.includes('não peguei') ||
+        normReason.includes('nao peguei') ||
+        normReason.includes('não fiz a retirada') ||
+        normReason.includes('nao fiz a retirada');
+
+      if (isRetiradaKeywords) {
+        const recentDelivered = await this.getRecentDeliveredPackageForPhone(phone);
+        if (recentDelivered) {
+          targetPkgs = [recentDelivered];
+          isWithdrawalContest = true;
+        }
+      }
+
+      // Se não era de retirada ou não achou entregue, busca pendentes normais
+      if (targetPkgs.length === 0) {
+        const pendingDelivery = await this.getPendingPackagesForPhone(phone);
+        if (pendingDelivery.length > 0) {
+          targetPkgs = pendingDelivery;
+        } else {
+          // Último recurso: busca qualquer encomenda recente (mesmo entregue)
+          const anyRecent = await this.getRecentDeliveredPackageForPhone(phone);
+          if (anyRecent) {
+            targetPkgs = [anyRecent];
+            isWithdrawalContest = anyRecent.status === 'DELIVERED' || Boolean(anyRecent.delivered_at);
+          }
+        }
+      }
+    }
+
+    if (targetPkgs.length === 0) {
+      console.log(`ℹ️ [DatabaseService] Nenhuma encomenda encontrada para contestar para ${clean}.`);
       return null;
     }
 
-    let targetPkgs: any[] = [];
-    if (mentionedCode) {
-      const matched = pendingDelivery.find(
-        p => p.pickup_code === mentionedCode || p.pickup_code?.toUpperCase() === mentionedCode.toUpperCase()
-      );
-      if (matched) {
-        targetPkgs = [matched];
-      } else {
-        targetPkgs = [pendingDelivery[0]];
-      }
-    } else {
-      targetPkgs = pendingDelivery;
-    }
-
     const nowIso = new Date().toISOString();
-    const cleanReason = (reason || 'Morador informou que não tem ciência ou não reconhece a encomenda').trim().slice(0, 160);
+    const cleanReason = (reason || 'Morador informou que contesta ou não reconhece a encomenda').trim().slice(0, 200);
+    const contestTypeTag = isWithdrawalContest ? '[CONTESTADO_RETIRADA]' : '[CONTESTADO_RECEBIMENTO]';
 
     for (const row of targetPkgs) {
+      const contestNoteEntry = `CONTESTADO:${nowIso}: ${contestTypeTag} ${cleanReason}`;
       const updatedNotes = row.notes
-        ? `${row.notes};CONTESTADO:${nowIso}: ${cleanReason}`
-        : `CONTESTADO:${nowIso}: ${cleanReason}`;
+        ? `${row.notes};${contestNoteEntry}`
+        : contestNoteEntry;
       row.notes = updatedNotes;
 
       // 1. Atualiza SQLite local
@@ -620,6 +774,12 @@ export class DatabaseService {
           const channel = client.channel(`condo-alerts-${condoId}`);
           channel.subscribe(async (status: string) => {
             if (status === 'SUBSCRIBED') {
+              const residentName = row.resident?.name || row.resident_name || row.recipient_name_ocr || 'Morador(a)';
+              const unitInfo = row.unit
+                ? `${row.unit.block} - Apto ${row.unit.unit_number}`
+                : (row.unit_block ? `${row.unit_block} - Apto ${row.unit_number}` : '');
+              const residentPhone = row.resident?.phone || row.resident_phone || clean;
+
               await channel.send({
                 type: 'broadcast',
                 event: 'package-contested',
@@ -627,9 +787,15 @@ export class DatabaseService {
                   packageId: row.id,
                   carrier: row.carrier,
                   pickupCode: row.pickup_code,
-                  residentName: row.resident?.name || row.recipient_name_ocr,
+                  residentName,
+                  recipientName: residentName,
+                  unitInfo,
+                  phone: residentPhone,
                   reason: cleanReason,
-                  timestamp: nowIso
+                  isWithdrawalContest,
+                  timestamp: nowIso,
+                  status: row.status,
+                  notes: updatedNotes
                 }
               }).catch(() => {});
               setTimeout(() => client.removeChannel(channel), 3000);
@@ -649,8 +815,48 @@ export class DatabaseService {
 
     return {
       pkg: finalPkgs[0],
-      pkgs: finalPkgs
+      pkgs: finalPkgs,
+      isWithdrawalContest
     };
+  }
+
+  public async resolveContestation(packageId: string, resolutionNote?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const nowIso = new Date().toISOString();
+      const cleanNote = resolutionNote || 'Contestação verificada e resolvida pela equipe de portaria.';
+
+      let currentNotes = '';
+      const localRow = this.db.prepare('SELECT notes, condo_id FROM packages WHERE id = ?').get(packageId) as any;
+      if (localRow) {
+        currentNotes = localRow.notes || '';
+      }
+
+      const updatedNotes = currentNotes
+        ? currentNotes.replace(/CONTESTADO:/g, 'CONTESTACAO_RESOLVIDA:') + `;RESOLVIDO:${nowIso}: ${cleanNote}`
+        : `RESOLVIDO:${nowIso}: ${cleanNote}`;
+
+      try {
+        this.db.prepare(`
+          UPDATE packages
+          SET notes = ?,
+              sync_status = 'PENDING'
+          WHERE id = ?
+        `).run(updatedNotes, packageId);
+      } catch (e: any) {
+        console.warn('[DatabaseService] Erro ao atualizar resolução no SQLite:', e.message);
+      }
+
+      const { supabaseService } = await import('./supabase.service.js');
+      if (supabaseService.isConfigured()) {
+        const client = supabaseService.getClient();
+        await client.from('packages').update({ notes: updatedNotes }).eq('id', packageId);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[DatabaseService] Erro ao resolver contestação:', err.message);
+      return { success: false, error: err.message };
+    }
   }
 
   public getPendingSyncPackages(): LocalPackage[] {

@@ -535,4 +535,41 @@ export class LocalApiClient {
       error: 'API local da portaria não conectada. Abra o aplicativo CondoBox no computador da portaria.',
     };
   }
+
+  /**
+   * Registra resolução da contestação de uma encomenda
+   */
+  static async resolveContestation(packageId: string, reason?: string): Promise<{ success: boolean; error?: string }> {
+    const baseUrl = this.getBaseUrl() || 'http://localhost:3001';
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/packages/${packageId}/resolve-contestation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason })
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) return data;
+      } catch {}
+    }
+
+    try {
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      const { data: pkg } = await supabase.from('packages').select('notes').eq('id', packageId).single();
+      const nowIso = new Date().toISOString();
+      const cleanReason = reason || 'Contestação verificada e resolvida pela equipe de portaria.';
+      const currentNotes = pkg?.notes || '';
+      const updatedNotes = currentNotes
+        ? currentNotes.replace(/CONTESTADO:/g, 'CONTESTACAO_RESOLVIDA:') + `;RESOLVIDO:${nowIso}: ${cleanReason}`
+        : `RESOLVIDO:${nowIso}: ${cleanReason}`;
+
+      const { error } = await supabase.from('packages').update({ notes: updatedNotes }).eq('id', packageId);
+      if (!error) return { success: true };
+      return { success: false, error: error.message };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
 }
+

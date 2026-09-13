@@ -383,4 +383,24 @@ export async function packageRoutes(fastify) {
             });
         }
     });
+    /**
+     * POST /api/packages/:id/resolve-contestation
+     * Registra resolução da contestação pela equipe de portaria
+     */
+    fastify.post('/api/packages/:id/resolve-contestation', async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const { reason } = request.body || {};
+            const res = await databaseService.resolveContestation(id, reason);
+            if (res.success) {
+                return reply.send({ success: true, message: 'Contestação resolvida com sucesso.' });
+            }
+            else {
+                return reply.status(500).send({ success: false, error: res.error || 'Erro ao resolver contestação.' });
+            }
+        }
+        catch (err) {
+            return reply.status(500).send({ success: false, error: err.message });
+        }
+    });
 }
