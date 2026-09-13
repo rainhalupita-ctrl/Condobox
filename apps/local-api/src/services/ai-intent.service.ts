@@ -86,16 +86,25 @@ export class AIIntentService {
       .replace(/👏/g, ' emoji_positivo ')
       .replace(/🙌/g, ' emoji_positivo ')
       .replace(/📦/g, ' emoji_positivo ')
+      .replace(/🙏/g, ' emoji_positivo ')
+      .replace(/🫡/g, ' emoji_positivo ')
+      .replace(/😊/g, ' emoji_positivo ')
+      .replace(/😃/g, ' emoji_positivo ')
       .replace(/👎/g, ' emoji_negativo ')
       .replace(/❌/g, ' emoji_negativo ')
       .replace(/🚫/g, ' emoji_negativo ')
+      .replace(/🛑/g, ' emoji_negativo ')
+      .replace(/⛔/g, ' emoji_negativo ')
+      .replace(/😡/g, ' emoji_negativo ')
+      .replace(/😠/g, ' emoji_negativo ')
+      .replace(/🤷/g, ' emoji_negativo ')
       .replace(/[^\w\s]/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   /**
-   * Inicializa o cache com os padrões já salvos no SQLite e semeia padrões base se vazio.
+   * Inicializa o cache com os padrões já salvos no SQLite e semeia padrões base se vazio ou incompleto.
    */
   private initLearnedCache(): void {
     if (this.initialized) return;
@@ -111,10 +120,8 @@ export class AIIntentService {
         });
       }
 
-      // Se o banco de aprendizado estiver vazio ou quase vazio, pré-popula com frases comuns brasileiras
-      if (this.memoryCache.size < 10) {
-        this.seedInitialPatterns();
-      }
+      // Garante que todos os padrões fundamentais estejam sempre presentes no cache e banco
+      this.seedInitialPatterns();
 
       this.initialized = true;
       console.log(`🧠 [AIIntent] Cache de aprendizado carregado com ${this.memoryCache.size} padrões conhecidos.`);
@@ -128,10 +135,37 @@ export class AIIntentService {
    */
   private seedInitialPatterns(): void {
     const seeds: Array<{ key: string; intent: AIIntentCategory; reasoning: string }> = [
-      // 1. Confirmação de Ciência
+      // 1. Confirmação de Ciência / Prontidão de Retirada ("sim", "ok", "show", "beleza", "já vou buscar")
+      { key: 'sim', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação simples de ciência' },
+      { key: 'sim obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com agradecimento' },
+      { key: 'sim obrigada', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com agradecimento' },
+      { key: 'sim valeu', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com agradecimento' },
+      { key: 'sim ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com ciência expressa' },
+      { key: 'sim ja vi', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com visualização confirmada' },
+      { key: 'sim to sabendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação de ciência' },
+      { key: 'sim to ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação de ciência' },
+      { key: 'sim pode mandar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação autorizando envio' },
+      { key: 'sim vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com retirada declarada' },
+      { key: 'sim ja vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com retirada declarada' },
+      { key: 'sim to descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
+      { key: 'com certeza', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação enfática' },
+      { key: 'positivo', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação expressa' },
+      { key: 'isso', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação simples' },
+      { key: 'isso mesmo', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'exato', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'claro', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'pode ser', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'certo', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'certinho', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
       { key: 'ok', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa monossilábica' },
       { key: 'ok obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa com agradecimento' },
       { key: 'ok obrigada', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa com agradecimento' },
+      { key: 'ok valeu', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação com agradecimento' },
+      { key: 'ok ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação com ciência expressa' },
+      { key: 'ok pode deixar', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'ok combinado', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'ok show', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'ok beleza', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
       { key: 'obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Agradecimento de notificação' },
       { key: 'obrigada', intent: 'CONFIRM_SCIENCE', reasoning: 'Agradecimento de notificação' },
       { key: 'obrigado ja vi', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação com ciência expressa' },
@@ -141,11 +175,20 @@ export class AIIntentService {
       { key: 'obg', intent: 'CONFIRM_SCIENCE', reasoning: 'Abreviação de obrigado' },
       { key: 'show', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva' },
       { key: 'show de bola', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva' },
+      { key: 'show beleza', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva combinada' },
+      { key: 'show ja vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com prontidão de retirada' },
+      { key: 'show beleza ja vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação completa de ciência e prontidão para retirada' },
+      { key: 'beleza ja vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação de ciência e prontidão para retirada' },
+      { key: 'beleza vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação de ciência e prontidão para retirada' },
+      { key: 'beleza to descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
+      { key: 'show to descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
       { key: 'beleza', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
       { key: 'blz', intent: 'CONFIRM_SCIENCE', reasoning: 'Abreviação de beleza' },
       { key: 'top', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação positiva' },
       { key: 'perfeito', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação de recebimento da mensagem' },
       { key: 'maravilha', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'joia', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
+      { key: 'tranquilo', intent: 'CONFIRM_SCIENCE', reasoning: 'Confirmação afirmativa' },
       { key: 'ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
       { key: 'estou ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
       { key: 'to ciente', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência expressa' },
@@ -156,26 +199,36 @@ export class AIIntentService {
       { key: 'vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada declarada' },
       { key: 'ja vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada imediata' },
       { key: 'vou retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada declarada' },
+      { key: 'ja vou retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada imediata' },
       { key: 'estou descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
       { key: 'to descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
+      { key: 'tô descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
+      { key: 'ja to descendo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador a caminho da portaria' },
       { key: 'ja pego', intent: 'CONFIRM_SCIENCE', reasoning: 'Intenção de retirada' },
       { key: 'pego mais tarde', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
       { key: 'passo ai mais tarde', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
+      { key: 'passo ai', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
+      { key: 'pode deixar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação de responsabilidade de retirada' },
       { key: 'minha esposa vai retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
       { key: 'meu marido vai retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
       { key: 'meu filho vai buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
-      { key: 'sim', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação simples' },
-      { key: 'sim obrigado', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação com agradecimento' },
+      { key: 'emoji_positivo', intent: 'CONFIRM_SCIENCE', reasoning: 'Emoji positivo de confirmação de ciência' },
 
-      // 2. Contestação de Encomenda / Não Ciência
+      // 2. Contestação de Encomenda / Não Ciência ("não", "não é meu", "não reconheço")
+      { key: 'nao', intent: 'CONTEST_PACKAGE', reasoning: 'Negação direta simples' },
+      { key: 'não', intent: 'CONTEST_PACKAGE', reasoning: 'Negação direta simples' },
+      { key: 'negativo', intent: 'CONTEST_PACKAGE', reasoning: 'Negação expressa' },
       { key: 'nao e meu', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
       { key: 'nao e minha', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
       { key: 'nao eh meu', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
       { key: 'nao eh minha', intent: 'CONTEST_PACKAGE', reasoning: 'Morador afirma que pacote não pertence a ele' },
+      { key: 'nao e meu nao', intent: 'CONTEST_PACKAGE', reasoning: 'Negação enfática' },
       { key: 'nao tenho ciencia', intent: 'CONTEST_PACKAGE', reasoning: 'Morador declara não ter ciência da encomenda' },
       { key: 'nao tenho ciencia disso', intent: 'CONTEST_PACKAGE', reasoning: 'Morador declara não ter ciência da encomenda' },
+      { key: 'nao to ciente', intent: 'CONTEST_PACKAGE', reasoning: 'Morador declara não ter ciência da encomenda' },
       { key: 'nao pedi nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não realizou nenhum pedido' },
       { key: 'nao comprei nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não comprou nada' },
+      { key: 'nao comprei', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não comprou' },
       { key: 'nao fiz pedido', intent: 'CONTEST_PACKAGE', reasoning: 'Morador alega que não fez compra' },
       { key: 'encomenda errada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador aponta erro de encomenda' },
       { key: 'deve ser engano', intent: 'CONTEST_PACKAGE', reasoning: 'Morador aponta provável engano' },
@@ -188,9 +241,10 @@ export class AIIntentService {
       { key: 'nao estou esperando nada', intent: 'CONTEST_PACKAGE', reasoning: 'Morador não aguarda encomendas' },
       { key: 'numero errado', intent: 'CONTEST_PACKAGE', reasoning: 'Contato telefônico incorreto para a unidade' },
       { key: 'apto errado', intent: 'CONTEST_PACKAGE', reasoning: 'Apartamento incorreto' },
-
-      { key: 'emoji_positivo', intent: 'CONFIRM_SCIENCE', reasoning: 'Emoji positivo de confirmação de ciência' },
+      { key: 'apartamento errado', intent: 'CONTEST_PACKAGE', reasoning: 'Apartamento incorreto' },
       { key: 'emoji_negativo', intent: 'CONTEST_PACKAGE', reasoning: 'Emoji negativo contestando encomenda' },
+
+      // 3. Pedidos de Código / QR Code ("me manda aí", "qual o código", "manda o link")
       { key: 'beleza me manda ai', intent: 'REQUEST_CODE', reasoning: 'Morador confirma e solicita envio do código' },
       { key: 'me manda ai', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
       { key: 'manda ai', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
@@ -227,13 +281,15 @@ export class AIIntentService {
 
     for (const seed of seeds) {
       const normKey = AIIntentService.normalize(seed.key);
-      this.memoryCache.set(normKey, {
-        intent: seed.intent,
-        confidence: 0.98,
-        reasoning: seed.reasoning,
-        hits: 1
-      });
-      databaseService.saveLearnedPattern(normKey, seed.intent, 0.98, seed.reasoning, 'system_seed');
+      if (!this.memoryCache.has(normKey)) {
+        this.memoryCache.set(normKey, {
+          intent: seed.intent,
+          confidence: 0.98,
+          reasoning: seed.reasoning,
+          hits: 1
+        });
+        databaseService.saveLearnedPattern(normKey, seed.intent, 0.98, seed.reasoning, 'system_seed');
+      }
     }
   }
 
@@ -242,7 +298,9 @@ export class AIIntentService {
    * 1. Cache de Aprendizado Contínuo (0ms, 0 chamadas de API).
    * 2. Rotação Round-Robin entre Groq, Gemini e NVIDIA para equilibrar cotas.
    * 3. Circuit Breaker contra limites de taxa (HTTP 429 / RESOURCE_EXHAUSTED).
-   * 4. Fallback Heurístico Resiliente caso todas as APIs excedam ou fiquem offline.
+   * 4. Multi-tier Fallback Resiliente caso todas as APIs excedam ou fiquem offline:
+   *    - Tier 1: Segue com o que já foi aprendido com as IAs (matching flexível por trecho/tokens).
+   *    - Tier 2: Modo Consciente Heurístico (compreende "sim", "não", "ok", "show", "beleza", "já vou buscar", etc.).
    */
   public async classify(text: string, options?: ClassifyOptions): Promise<AIIntentResult> {
     const trimmed = text.trim();
@@ -259,7 +317,7 @@ export class AIIntentService {
     const normalized = AIIntentService.normalize(trimmed);
     const extractedCode = this.extractCode(trimmed);
 
-    // ── ETAPA 1: VERIFICAÇÃO NO CACHE DE APRENDIZADO ────────────────────────
+    // ── ETAPA 1: VERIFICAÇÃO NO CACHE DE APRENDIZADO (0ms, 0 chamadas de API) ──
     const cached = this.checkLearnedCache(normalized, trimmed);
     if (cached) {
       console.log(`⚡ [AIIntent: CACHE] Padrão "${normalized}" já aprendido! [${cached.intent}] (Hits: ${cached.hits})`);
@@ -278,47 +336,78 @@ export class AIIntentService {
 
     // ── ETAPA 2: ROTAÇÃO INTELIGENTE (GROQ / GEMINI / NVIDIA) ──────────────
     const rotatedProviders = this.getRotatedProviders();
-    console.log(`🔄 [AIIntent] Ordem dos provedores para esta mensagem:`, rotatedProviders);
+    if (rotatedProviders.length > 0) {
+      console.log(`🔄 [AIIntent] Ordem dos provedores para esta mensagem:`, rotatedProviders);
 
-    for (const provider of rotatedProviders) {
-      // Verifica se o provedor está em período de cooldown (limite excedido)
-      const cooldownUntil = this.providerCooldowns.get(provider) || 0;
-      if (cooldownUntil > Date.now()) {
-        const remainingSecs = Math.ceil((cooldownUntil - Date.now()) / 1000);
-        console.warn(`⏳ [AIIntent] Provedor ${provider.toUpperCase()} em cooldown por limite de cota (${remainingSecs}s restantes). Alternando...`);
-        continue;
-      }
-
-      console.log(`🤖 [AIIntent] Consultando provedor: ${provider.toUpperCase()}...`);
-      let result: AIIntentResult | null = null;
-      if (provider === 'groq') {
-        result = await this.tryGroq(trimmed, options);
-      } else if (provider === 'gemini') {
-        result = await this.tryGemini(trimmed, options);
-      } else if (provider === 'nvidia') {
-        result = await this.tryNvidia(trimmed, options);
-      }
-
-      if (result) {
-        // Se a IA classificou com alta confiança e a mensagem é concisa, aprende o padrão
-        if (result.confidence >= 0.8 && normalized.length <= 90) {
-          this.learnPattern(normalized, result.intent, result.confidence, result.reasoning);
+      for (const provider of rotatedProviders) {
+        // Verifica se o provedor está em período de cooldown (limite excedido)
+        const cooldownUntil = this.providerCooldowns.get(provider) || 0;
+        if (cooldownUntil > Date.now()) {
+          const remainingSecs = Math.ceil((cooldownUntil - Date.now()) / 1000);
+          console.warn(`⏳ [AIIntent] Provedor ${provider.toUpperCase()} em cooldown por limite de cota (${remainingSecs}s restantes). Alternando...`);
+          continue;
         }
-        return result;
+
+        console.log(`🤖 [AIIntent] Consultando provedor: ${provider.toUpperCase()}...`);
+        let result: AIIntentResult | null = null;
+        if (provider === 'groq') {
+          result = await this.tryGroq(trimmed, options);
+        } else if (provider === 'gemini') {
+          result = await this.tryGemini(trimmed, options);
+        } else if (provider === 'nvidia') {
+          result = await this.tryNvidia(trimmed, options);
+        }
+
+        if (result) {
+          // Se a IA classificou com alta confiança e a mensagem é concisa, aprende o padrão
+          if (result.confidence >= 0.8 && normalized.length <= 120) {
+            this.learnPattern(normalized, result.intent, result.confidence, result.reasoning);
+          }
+          return result;
+        }
       }
     }
 
-    // ── ETAPA 3: FALLBACK HEURÍSTICO RESILIENTE (SEMPRE FUNCIONA) ───────────
-    console.warn(`🛡️ [AIIntent] Todas as IAs indisponíveis ou cotas esgotadas. Executando fallback heurístico local resiliente...`);
-    const fallbackResult = this.classifyHeuristic(trimmed, options?.quotedText);
+    // ── ETAPA 3: NENHUMA IA DISPONÍVEL OU TODAS FALHARAM ───────────────────────
+    // Requisito do usuário:
+    // "se nada das ias funcionar nas mensagens deve seguir o processo com oque ja aprendeu com as ias
+    // e se nn tiver aprendido nada ainda siga do modo mais consiente entendendo o sim o não o ok ou o show beleza ja vou buscar"
+    console.warn(`🛡️ [AIIntent] Nenhuma IA disponível ou todas falharam. Verificando o que já foi aprendido com as IAs...`);
+
+    // 3.1: Verifica se casa com qualquer padrão previamente aprendido pelas IAs
+    const learnedFallback = this.findLearnedPatternFlexible(normalized);
+    if (learnedFallback) {
+      console.log(`🧠 [AIIntent: APRENDIZADO IA OFFLINE] Intenção identificada via aprendizado prévio das IAs: "${learnedFallback.matchedKey}" -> ${learnedFallback.item.intent} (Hits: ${learnedFallback.item.hits})`);
+      return {
+        intent: learnedFallback.item.intent,
+        confidence: Math.max(learnedFallback.item.confidence, 0.94),
+        reasoning: `[Aprendizado Prévio das IAs] Reconhecido padrão "${learnedFallback.matchedKey}" (${learnedFallback.item.reasoning})`,
+        extractedCode: extractedCode || null,
+        conciergeAlert:
+          learnedFallback.item.intent === 'CONTEST_PACKAGE'
+            ? `Morador informou no WhatsApp: "${trimmed}"`
+            : null,
+        source: 'learned_cache'
+      };
+    }
+
+    // 3.2: Se não aprendeu nada ainda para essa expressão, segue no MODO CONSCIENTE Heurístico
+    console.log(`🧭 [AIIntent: MODO CONSCIENTE] Expressão inédita não aprendida ainda. Analisando pelo motor consciente local ("sim", "não", "ok", "show", "beleza", "já vou buscar")...`);
+    const consciousResult = this.classifyConsciousHeuristic(trimmed, options?.quotedText);
+
+    // Grava o padrão reconhecido conscientemente para expandir a base aprendida
+    if (normalized.length <= 120 && consciousResult.confidence >= 0.88) {
+      this.learnPattern(normalized, consciousResult.intent, consciousResult.confidence, consciousResult.reasoning);
+    }
+
     return {
-      ...fallbackResult,
-      reasoning: `[Fallback Local Resiliente] ${fallbackResult.reasoning}`
+      ...consciousResult,
+      reasoning: `[Modo Consciente Local] ${consciousResult.reasoning}`
     };
   }
 
   /**
-   * Consulta o cache em memória procurando correspondência exata ou por trecho chave de contestação.
+   * Consulta o cache em memória procurando correspondência exata ou por trecho chave flexível.
    */
   private checkLearnedCache(normalized: string, rawText: string): LearnedPatternItem | null {
     // 1. Busca exata pela frase normalizada
@@ -329,15 +418,98 @@ export class AIIntentService {
       return exact;
     }
 
-    // 2. Busca por sub-expressões de alta prioridade (especialmente contestação)
+    // 2. Busca flexível nos padrões já aprendidos (se o morador mandar frase contendo expressão aprendida)
+    const flexible = this.findLearnedPatternFlexible(normalized);
+    if (flexible) {
+      return flexible.item;
+    }
+
+    return null;
+  }
+
+  /**
+   * Busca inteligente e flexível nos padrões já aprendidos pelas IAs.
+   * Se a mensagem contiver expressões aprendidas anteriormente, aplica a intenção correspondente.
+   * Ordem de prioridade estrita de segurança:
+   * 1. Contestação de Encomenda (CONTEST_PACKAGE) - Sempre tem prioridade máxima
+   * 2. Pedido de Código / QR Code (REQUEST_CODE)
+   * 3. Confirmação / Ciência / Prontidão (CONFIRM_SCIENCE) - Somente se não houver negações
+   * 4. Assuntos diversos do condomínio (UNRELATED)
+   */
+  public findLearnedPatternFlexible(normalized: string): { matchedKey: string; item: LearnedPatternItem } | null {
+    // 1. Correspondência exata direta
+    const exact = this.memoryCache.get(normalized);
+    if (exact) {
+      exact.hits += 1;
+      databaseService.incrementPatternHits(normalized);
+      return { matchedKey: normalized, item: exact };
+    }
+
+    // 2. Agrupa os padrões aprendidos por intenção
+    const contestationPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
+    const requestCodePatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
+    const confirmPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
+    const unrelatedPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
+
     for (const [key, item] of this.memoryCache.entries()) {
-      if (key.length >= 8 && normalized.includes(key)) {
-        // Se contiver a expressão de contestação gravada (ex: "nao tenho ciencia")
-        if (item.intent === 'CONTEST_PACKAGE') {
-          item.hits += 1;
-          databaseService.incrementPatternHits(key);
-          return item;
+      if (item.intent === 'CONTEST_PACKAGE') contestationPatterns.push({ key, item });
+      else if (item.intent === 'REQUEST_CODE') requestCodePatterns.push({ key, item });
+      else if (item.intent === 'CONFIRM_SCIENCE') confirmPatterns.push({ key, item });
+      else if (item.intent === 'UNRELATED') unrelatedPatterns.push({ key, item });
+    }
+
+    const matchesPattern = (patternKey: string) => {
+      if (!patternKey || patternKey.length < 2) return false;
+      if (patternKey.length >= 4) {
+        return normalized.includes(patternKey);
+      }
+      // Para chaves curtas (ex: "ok", "sim", "nao", "blz"), exige limite de palavras para evitar falsos positivos
+      const escaped = patternKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, 'i');
+      return regex.test(normalized);
+    };
+
+    // 2.1 PRIORIDADE 1: CONTESTAÇÃO (Ex: "nao e meu", "nao pedi nada", "veio errado")
+    contestationPatterns.sort((a, b) => b.key.length - a.key.length);
+    for (const p of contestationPatterns) {
+      if (matchesPattern(p.key)) {
+        p.item.hits += 1;
+        databaseService.incrementPatternHits(p.key);
+        return { matchedKey: p.key, item: p.item };
+      }
+    }
+
+    // 2.2 PRIORIDADE 2: PEDIDOS DE CÓDIGO / QR CODE (Ex: "manda ai", "passa o codigo")
+    requestCodePatterns.sort((a, b) => b.key.length - a.key.length);
+    for (const p of requestCodePatterns) {
+      if (matchesPattern(p.key)) {
+        p.item.hits += 1;
+        databaseService.incrementPatternHits(p.key);
+        return { matchedKey: p.key, item: p.item };
+      }
+    }
+
+    // 2.3 PRIORIDADE 3: CONFIRMAÇÃO DE CIÊNCIA / PRONTIDÃO
+    // Se a mensagem contiver negações suspeitas (ex: "nao e meu ok"), NÃO casa como confirmação
+    const hasSuspectNegation = /\b(nao|não|nem|nunca|errado|engano|rejeit|recus)\b/i.test(normalized);
+    if (!hasSuspectNegation) {
+      confirmPatterns.sort((a, b) => b.key.length - a.key.length);
+      for (const p of confirmPatterns) {
+        if (matchesPattern(p.key)) {
+          p.item.hits += 1;
+          databaseService.incrementPatternHits(p.key);
+          return { matchedKey: p.key, item: p.item };
         }
+      }
+    }
+
+    // 2.4 PRIORIDADE 4: NÃO RELACIONADO
+    unrelatedPatterns.sort((a, b) => b.key.length - a.key.length);
+    for (const p of unrelatedPatterns) {
+      if (p.key.length >= 4 && matchesPattern(p.key)) {
+        p.item.hits += 1;
+        databaseService.incrementPatternHits(p.key);
+        return { matchedKey: p.key, item: p.item };
       }
     }
 
@@ -530,55 +702,128 @@ export class AIIntentService {
     return null;
   }
 
-  // ── 4. Fallback Heurístico Local (0ms, 100% offline) ─────────────────────
-  public classifyHeuristic(text: string, quotedText?: string): AIIntentResult {
+  /**
+   * Motor Heurístico Consciente Local (0ms, 100% offline, resiliente a qualquer falha de IA).
+   * Processa a linguagem natural brasileira entendendo profundamente nuances de:
+   * - O "SIM": confirmações, ciências e acordos ("sim", "sim por favor", "com certeza", "positivo", etc.)
+   * - O "NÃO": contestações, recusas e não-reconhecimento ("não", "não é meu", "não pedi nada", "veio errado", etc.)
+   * - O "OK": confirmações simples e educadas ("ok", "ok obrigado", "ok combinado", etc.)
+   * - O "SHOW", "BELEZA", "JÁ VOU BUSCAR": confirmações coloquiais e prontidão para retirada ("show", "beleza", "blz", "já vou buscar", "show beleza já vou buscar", "tô descendo", etc.)
+   * - Pedidos de Código / QR Code: "me manda aí", "manda aí", "qual o código", "manda o link", etc.
+   */
+  public classifyConsciousHeuristic(text: string, quotedText?: string): AIIntentResult {
     const trimmed = text.trim();
     const normalized = AIIntentService.normalize(trimmed);
+    const extractedCode = this.extractCode(text);
 
-    // 1. Contestação
-    const contestationRegex = /\b(nao (e|eh) minh[ao]|nao pedi|encomenda errada|nao recebi|veio errad[ao]|nao sou eu|destinatario errado|pacote errado|nao reconheco|nao tenho ciencia|nao comprei|nao fiz pedido|nao estou esperando)\b/i;
-    if (contestationRegex.test(normalized)) {
+    // ── 1. CONTESTAÇÃO / NÃO RECONHECIMENTO (PRIORIDADE MÁXIMA) ───────────────
+    // Se o morador contestar, negações SEMPRE sobrepõem qualquer termo afirmativo (ex: "não é meu ok", "não comprei show").
+    const contestationPhrasesRegex = /\b(nao (e|eh) (meu|minha|daqui|nosso|nossa)|nao pedi( nada)?|nao comprei( nada)?|nao fiz pedido|nao encomendei|nao tenho ciencia|nao to ciente|nao estou ciente|nao reconheco|nao conheco|nao sou eu|destinatario errado|encomenda errada|pacote errado|veio errad[ao]|deve ser engano|engano|numero errado|apto errado|apartamento errado|bloco errado|nao estou esperando( nada)?|nao to esperando|devolver|rejeitar|recusar|nao autorizo|nao quero|nao e pra mim|nao eh pra mim)\b/i;
+
+    const isolatedNoRegex = /^(nao|não|n|negativo|nem|nunca|nem a pau|acho que nao|acho que não)$/i;
+
+    const negativeEmojiRegex = /(👎|❌|🛑|⛔|🚫|😡|😠|🤷|emoji_negativo)/;
+
+    if (
+      contestationPhrasesRegex.test(normalized) ||
+      isolatedNoRegex.test(normalized) ||
+      negativeEmojiRegex.test(text) ||
+      normalized.includes('emoji_negativo')
+    ) {
       return {
         intent: 'CONTEST_PACKAGE',
-        confidence: 0.95,
-        reasoning: 'Regra heurística detectou negação/contestação de encomenda',
+        confidence: 0.98,
+        reasoning: 'Motor consciente detectou contestação/não reconhecimento da encomenda ("não", "não é meu", etc.)',
         extractedCode: null,
-        conciergeAlert: `Morador informou que não reconhece a encomenda: "${trimmed}"`,
+        conciergeAlert: `Morador contestou a encomenda no WhatsApp: "${trimmed}"`,
         source: 'heuristic'
       };
     }
 
-    // 2. Extração de Código
-    const extractedCode = this.extractCode(text);
+    // ── 2. PEDIDO DE CÓDIGO / QR CODE ───────────────────────────────────────
+    const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|(me )?manda (ai|ae|o link|o codigo|o qr|os dados|pra mim)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o (qr\s?code|codigo)|como (retiro|pego|faco pra pegar)|passa o (codigo|link|qr)|pode mandar|me passa)\b/i;
 
-    // 3. Pedido de Código / QR Code
-    const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|(me )?manda (ai|ae|o link|o codigo|o qr|os dados|pra mim)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o (qr\s?code|codigo)|como (retiro|pego|faco pra pegar)|passa o (codigo|link|qr)|pode mandar)\b/i;
     if (codeRequestRegex.test(normalized)) {
       return {
         intent: 'REQUEST_CODE',
-        confidence: 0.95,
-        reasoning: 'Regra heurística detectou solicitação do código/QR Code de retirada',
+        confidence: 0.96,
+        reasoning: 'Motor consciente detectou solicitação do código/QR Code de retirada ("me manda aí", "qual o código")',
         extractedCode,
         source: 'heuristic'
       };
     }
 
-    // 4. Assuntos diversos do condomínio
-    const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
-    const hasCodeFormat = Boolean(this.extractCode(text));
+    // ── 3. RESPOSTA DIRETA CITANDO NOTIFICAÇÃO (QUOTED TEXT) ────────────────
+    if (quotedText) {
+      const normQuoted = quotedText.toLowerCase();
+      const isQuotingPackage =
+        normQuoted.includes('encomenda') ||
+        normQuoted.includes('retirada') ||
+        normQuoted.includes('codigo') ||
+        normQuoted.includes('condobox') ||
+        normQuoted.includes('portaria');
+      if (isQuotingPackage && trimmed.length <= 50) {
+        return {
+          intent: 'CONFIRM_SCIENCE',
+          confidence: 0.95,
+          reasoning: 'Resposta afirmativa citando a notificação da encomenda',
+          extractedCode,
+          source: 'heuristic'
+        };
+      }
+    }
 
-    if (!hasCodeFormat && unrelatedCondoRegex.test(normalized)) {
+    // ── 4. AFIRMAÇÕES CONSCIENTES ("SIM", "OK", "SHOW", "BELEZA", "JÁ VOU BUSCAR") ──
+    // 4.1 O "SIM" isolado ou com complementos afirmativos
+    const isolatedYesRegex = /^(sim|s|simm+|sim sim|positivo|isso|isso mesmo|exato|exatamente|claro|claro que sim|com certeza|com toda certeza|perfeito|certinho|certo)$/i;
+    const affirmativeYesRegex = /\b(sim por favor|sim obrigado|sim obrigada|sim valeu|sim ciente|sim ja vi|sim to sabendo|sim tô sabendo|sim pode mandar|sim vou buscar|sim estou descendo|sim to descendo|sim senhor|sim senhora|sim claro|sim com certeza|pode ser|pode mandar|pode sim)\b/i;
+
+    // 4.2 O "OK" isolado ou com complementos
+    const isolatedOkRegex = /^(ok|okk+|okey|okay|ok ok|ok!+|ok\s*👍)$/i;
+    const affirmativeOkRegex = /\b(ok obrigado|ok obrigada|ok valeu|ok vlw|ok obg|ok ciente|ok to ciente|ok pode deixar|ok ja vi|ok combinado|ok show|ok beleza|tudo bem|combinado|fechado|otimo|ótimo)\b/i;
+
+    // 4.3 O "SHOW", "BELEZA", "JÁ VOU BUSCAR" e prontidão para retirada
+    const readinessAndAffirmationRegex = /\b(show|showw+|show de bola|showzaco|top|maravilha|joia|jóia|massa|beleza|blz|blzz+|belezura|tranquilo|tranks|ja vou buscar|já vou buscar|vou buscar|ja busco|já busco|busco ja|busco já|vou la buscar|vou lá buscar|vou retirar|ja vou retirar|já vou retirar|ja retiro|já retiro|vou la retirar|vou lá retirar|ja vou pegar|já vou pegar|vou pegar|ja pego|já pego|pego ja|pego já|pego mais tarde|logo busco|passo ai|passo aí|logo mais passo ai|logo mais passo aí|daqui a pouco busco|daqui a pouco eu pego|to descendo|tô descendo|estou descendo|ja estou descendo|já estou descendo|ja to descendo|já tô descendo|vou descer|ja vou descer|já vou descer|ja desco|já desço|descendo ja|descendo já|descendo|estou indo|to indo|tô indo|ja to indo|já tô indo|indo buscar|a caminho|indo ai|indo aí|pode deixar|pode deixar que pego|pode deixar que busco|deixa comigo|ciente|estou ciente|to ciente|tô ciente|ta ciente|tá ciente|confirmado|confirmo|confirmar|confirmada|recebido|recebi|entendido|entendi|obrigad[ao]|valeu|vlw|obg|agradecid[ao]|gratidao)\b/i;
+
+    // 4.4 Emojis afirmativos
+    const ackEmojiRegex = /(👍|👌|📦|✅|🆗|🤝|🙏|😊|😃|🙌|👏|🫡|emoji_positivo)/;
+
+    const isAffirmative =
+      isolatedYesRegex.test(normalized) ||
+      affirmativeYesRegex.test(normalized) ||
+      isolatedOkRegex.test(normalized) ||
+      affirmativeOkRegex.test(normalized) ||
+      readinessAndAffirmationRegex.test(normalized) ||
+      ackEmojiRegex.test(text) ||
+      normalized.includes('emoji_positivo');
+
+    if (isAffirmative || extractedCode) {
+      return {
+        intent: 'CONFIRM_SCIENCE',
+        confidence: 0.95,
+        reasoning: extractedCode
+          ? 'Código de retirada informado'
+          : 'Motor consciente reconheceu confirmação de ciência / prontidão para retirada ("sim", "ok", "show", "beleza", "já vou buscar")',
+        extractedCode,
+        source: 'heuristic'
+      };
+    }
+
+    // ── 5. ASSUNTOS CONDOMINIAIS DIVERSOS ────────────────────────────────────
+    const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
+
+    if (unrelatedCondoRegex.test(normalized)) {
       return {
         intent: 'UNRELATED',
         confidence: 0.95,
-        reasoning: 'Regra heurística detectou assunto condominial sem relação com encomenda',
+        reasoning: 'Regra consciente detectou assunto condominial sem relação com encomenda',
         extractedCode: null,
         source: 'heuristic'
       };
     }
 
-    // 5. Perguntas gerais com ponto de interrogação
-    if (text.includes('?') && !hasCodeFormat && !codeRequestRegex.test(normalized)) {
+    // ── 6. PERGUNTAS GERAIS OU SAUDAÇÕES ─────────────────────────────────────
+    if (text.includes('?')) {
       return {
         intent: 'UNRELATED',
         confidence: 0.9,
@@ -588,48 +833,7 @@ export class AIIntentService {
       };
     }
 
-    // 6. Resposta direta a notificação citada (quotedMessage)
-    if (quotedText) {
-      const normQuoted = quotedText.toLowerCase();
-      const isQuotingPackage =
-        normQuoted.includes('encomenda') ||
-        normQuoted.includes('retirada') ||
-        normQuoted.includes('codigo') ||
-        normQuoted.includes('condobox') ||
-        normQuoted.includes('portaria');
-      if (isQuotingPackage && trimmed.length <= 40) {
-        return {
-          intent: 'CONFIRM_SCIENCE',
-          confidence: 0.95,
-          reasoning: 'Resposta direta afirmativa citando a notificação da encomenda',
-          extractedCode,
-          source: 'heuristic'
-        };
-      }
-    }
-
-    // 7. Emojis afirmativos
-    const ackEmojis = ['👍', '👌', '📦', '✅', '🆗', '🤝', '🙏'];
-    const hasAckEmoji = ackEmojis.some(emoji => text.includes(emoji));
-
-    // 8. Expressões afirmativas
-    const ackKeywordsRegex = /\b(ciente|estou ciente|to ciente|tô ciente|ta ciente|tá ciente|ok|okk|okey|okay|confirmado|confirmo|confirmar|confirmada|recebido|recebi|entendido|entendi|obrigad[ao]|valeu|vlw|obg|agradecid[ao]|gratidao|show|show de bola|perfeito|maravilha|joia|beleza|blz|tranquilo|vou retirar|vou buscar|ja vou buscar|ja vou descer|estou descendo|to descendo|tô descendo|indo buscar|passo ai|passo aí|vou pegar|ja pego|pego mais tarde|logo busco)\b/i;
-
-    const isShortMessage = trimmed.length <= 60;
-    const isAckKeyword = isShortMessage && ackKeywordsRegex.test(normalized);
-    const isSimpleYes = isShortMessage && /^(sim|sim obrigado|sim valeu|sim ciente)$/i.test(normalized);
-
-    if (hasAckEmoji || isAckKeyword || isSimpleYes || extractedCode) {
-      return {
-        intent: 'CONFIRM_SCIENCE',
-        confidence: 0.9,
-        reasoning: extractedCode ? 'Código de retirada informado' : 'Palavra-chave/emoji afirmativo de ciência',
-        extractedCode,
-        source: 'heuristic'
-      };
-    }
-
-    // 9. Padrão: Não relacionado / Saudação isolada
+    // ── 7. CASUAL / DESCONHECIDO ─────────────────────────────────────────────
     return {
       intent: 'UNRELATED',
       confidence: 0.9,
@@ -637,6 +841,13 @@ export class AIIntentService {
       extractedCode: null,
       source: 'heuristic'
     };
+  }
+
+  /**
+   * Alias para retrocompatibilidade com chamadas anteriores.
+   */
+  public classifyHeuristic(text: string, quotedText?: string): AIIntentResult {
+    return this.classifyConsciousHeuristic(text, quotedText);
   }
 
   public extractCode(text: string): string | null {
