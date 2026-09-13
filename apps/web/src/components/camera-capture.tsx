@@ -734,29 +734,7 @@ export function CameraCapture({
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
-            {/* Retículo de Enquadramento Anti-Tremor */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-6">
-              <div
-                className={`relative w-full max-w-[340px] sm:max-w-[380px] h-[220px] sm:h-[260px] rounded-2xl border-2 transition-all duration-300 ${
-                  isDetected
-                    ? 'border-emerald-400 bg-emerald-500/10 shadow-[0_0_35px_rgba(52,211,153,0.5)] scale-105'
-                    : isSteady
-                    ? 'border-emerald-500/80 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
-                    : 'border-amber-500/50'
-                }`}
-              >
-                {/* Cantoneiras estilizadas com indicação de foco */}
-                <div className={`absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 rounded-tl-lg transition-colors duration-300 ${isSteady ? 'border-emerald-400' : 'border-amber-400'}`} />
-                <div className={`absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 rounded-tr-lg transition-colors duration-300 ${isSteady ? 'border-emerald-400' : 'border-amber-400'}`} />
-                <div className={`absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 rounded-bl-lg transition-colors duration-300 ${isSteady ? 'border-emerald-400' : 'border-amber-400'}`} />
-                <div className={`absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 rounded-br-lg transition-colors duration-300 ${isSteady ? 'border-emerald-400' : 'border-amber-400'}`} />
 
-                {/* Linha de varredura ativa */}
-                {isLiveAnalyzing && !isDetected && (
-                  <div className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse top-1/2 -translate-y-1/2 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                )}
-              </div>
-            </div>
 
             {/* Overlay com Badges Informativos */}
             <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
