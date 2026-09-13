@@ -456,15 +456,14 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
     }
   };
 
-  // Verificação de Duplicidade de Cadastro
+  // Verificação Robusta de Duplicidade de Cadastro (Evita leituras e registros repetidos)
   const checkDuplicatePackage = async (unitId: string, code?: string, nf?: string) => {
-    if (!code && !nf) return null;
     const supabase = createClient();
     try {
       let query = supabase
         .from('packages')
         .select('id, tracking_code, notes, created_at, status, unit:units(block, unit_number), carrier')
-        .eq('status', 'RECEIVED');
+        .in('status', ['RECEIVED', 'NOTIFIED']);
 
       if (effectiveCondoId) {
         query = query.eq('condo_id', effectiveCondoId);
@@ -474,11 +473,15 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         query = query.eq('tracking_code', code.trim());
       } else if (nf && nf.trim().length >= 3) {
         query = query.ilike('notes', `%${nf.trim()}%`);
+      } else if (unitId) {
+        // Proteção contra duplo envio consecutivo na mesma unidade (últimos 90 segundos)
+        const recentTime = new Date(Date.now() - 90 * 1000).toISOString();
+        query = query.eq('unit_id', unitId).gte('created_at', recentTime);
       } else {
         return null;
       }
 
-      const { data } = await query.limit(1);
+      const { data } = await query.order('created_at', { ascending: false }).limit(1);
       if (data && data.length > 0) {
         return data[0];
       }
@@ -490,6 +493,8 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return; // Trava imediata contra cliques duplos rápidos
+
     if (!selectedUnitId) {
       alert('Por favor, selecione a unidade da encomenda.');
       return;
@@ -506,6 +511,7 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
   };
 
   const executeSavePackage = async () => {
+    if (isSaving) return;
     setIsSaving(true);
     setDuplicateWarning(null);
 

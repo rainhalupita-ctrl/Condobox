@@ -173,8 +173,16 @@ function parseRawText(text: string) {
   };
 }
 
-// ─── Provider: Google Gemini Flash-Lite (Ultra-Rápido ~1.2s) ─────────────────
-async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {
+// ─── Provider: Google Gemini Flash (Principal) com Rotação de Chaves e Detecção de Cota ──
+let geminiQuotaCooldownUntil = 0;
+
+async function tryGemini(base64Image: string, mimeType: string, apiKeys: string[]) {
+  // Se estiver em cooldown por estouro de cota (HTTP 429), pula para o OCR local sem atraso
+  if (Date.now() < geminiQuotaCooldownUntil) {
+    console.log('[OCR-LIVE] ℹ️ Gemini em cooldown de cota, usando OCR local Tesseract...');
+    return null;
+  }
+
   const PROMPT = `Você é especialista em OCR de etiquetas com PRECISÃO DE 100%.
 Extraia em JSON: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":1.0}
 DIRETRIZES:
@@ -185,32 +193,44 @@ DIRETRIZES:
 5. carrier = nome do remetente/loja (ex: "Mercado Livre").
 6. NUNCA use CEP (ex: 29168-322) como trackingCode.`;
 
-  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
-  for (const model of models) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 90 },
-          }),
-          signal: AbortSignal.timeout(3000),
+  const models = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
+
+  for (const apiKey of apiKeys) {
+    for (const model of models) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
+              generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 800 },
+            }),
+            signal: AbortSignal.timeout(7500),
+          }
+        );
+
+        if (res.status === 429) {
+          console.warn(`[OCR-LIVE] ⚠️ Cota do Gemini esgotada (429) na chave ...${apiKey.slice(-4)}. Ativando cooldown.`);
+          geminiQuotaCooldownUntil = Date.now() + 60000; // 60 segundos de cooldown
+          break; // Tenta próxima chave ou passa para Tesseract
         }
-      );
-      if (!res.ok) continue;
-      const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) continue;
-      const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
-      const result = formatOcrResult(parsed);
-      if (result.confidence > 0) {
-        console.log(`[OCR-LIVE] ✅ Gemini [${model}]`, result);
-        return result;
-      }
-    } catch {}
+
+        if (!res.ok) continue;
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) continue;
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) continue;
+        const parsed = JSON.parse(jsonMatch[0]);
+        const result = formatOcrResult(parsed);
+        if (result.confidence > 0) {
+          console.log(`[OCR-LIVE] ✅ Gemini [${model}]`, result);
+          return { ...result, provider: 'gemini' };
+        }
+      } catch {}
+    }
   }
   return null;
 }
@@ -248,7 +268,7 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
     const result = formatOcrResult(parsed);
     if (result.confidence > 0) {
       console.log('[OCR-LIVE] ✅ NVIDIA NIM', result);
-      return result;
+      return { ...result, provider: 'nvidia' };
     }
   } catch (e: any) {
     console.warn('[OCR-LIVE] NVIDIA falhou:', e.message?.slice(0, 80));
@@ -256,11 +276,32 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
   return null;
 }
 
-// ─── Handler principal (Ultra Rápido, Fail-Fast) ──────────────────────────────
+// ─── Provider: Tesseract.js (Local, Offline, Ilimitado, Zero Tokens) ──────────
+async function tryTesseract(buffer: Buffer) {
+  try {
+    const { data: { text } } = await Tesseract.recognize(buffer, 'por+eng', { logger: () => {} });
+    if (!text || text.trim().length < 5) return null;
+    const result = parseRawText(text);
+    if (result.confidence > 0) {
+      console.log('[OCR-LIVE] ✅ Tesseract Local (Zero Tokens)', result);
+      return { ...result, provider: 'tesseract_local' };
+    }
+  } catch (e: any) {
+    console.warn('[OCR-LIVE] Tesseract local falhou:', e.message?.slice(0, 80));
+  }
+  return null;
+}
+
+// ─── Handler principal (Multi-Camada Resiliente a Quedas e Limites de Tokens) ─
 export async function POST(request: NextRequest) {
   const EMPTY = { recipientName: null, block: null, unitNumber: null, trackingCode: null, confidence: 0 };
   try {
-    const geminiKey = process.env.GEMINI_API_KEY || '';
+    const rawGeminiKeys = [
+      ...(process.env.GEMINI_API_KEY || '').split(','),
+      process.env.GEMINI_API_KEY_BACKUP || '',
+      process.env.GEMINI_BACKUP_KEY || '',
+    ].map(k => k.trim()).filter(Boolean);
+
     const nvidiaKey = process.env.NVIDIA_API_KEY || '';
 
     const formData = await request.formData();
@@ -272,20 +313,28 @@ export async function POST(request: NextRequest) {
     const base64Image = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    // ── 1. Gemini 3.5 Flash-Lite (Principal, ~1.2s) ──
-    if (geminiKey) {
-      const geminiResult = await tryGemini(base64Image, mimeType, geminiKey);
+    // ── Camada 1: Google Gemini (3.8 / 3.7 / 3.5 com Rotação de Chaves) ──
+    if (rawGeminiKeys.length > 0) {
+      const geminiResult = await tryGemini(base64Image, mimeType, rawGeminiKeys);
       if (geminiResult && geminiResult.confidence > 0) {
         return NextResponse.json(geminiResult);
       }
     }
 
-    // ── 2. NVIDIA NIM Vision (Fallback Imediato) ──
+    // ── Camada 2: NVIDIA NIM Vision (Fallback Nuvem) ──
     if (nvidiaKey) {
       const nvidiaResult = await tryNvidia(base64Image, mimeType, nvidiaKey);
       if (nvidiaResult && nvidiaResult.confidence > 0) {
         return NextResponse.json(nvidiaResult);
       }
+    }
+
+    // ── Camada 3: Tesseract Local (Zero Tokens, Nunca Fica Sem Ler!) ──
+    // Se a cota de tokens estourar, a internet oscilar ou a API do Google cair,
+    // o Tesseract processa diretamente na CPU do servidor sem gastar tokens.
+    const tesseractResult = await tryTesseract(buffer);
+    if (tesseractResult && tesseractResult.confidence > 0) {
+      return NextResponse.json(tesseractResult);
     }
 
     return NextResponse.json(EMPTY);

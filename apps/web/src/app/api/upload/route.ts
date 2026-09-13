@@ -183,7 +183,7 @@ REGRAS CRÍTICAS:
 6. invoiceNumber = número da NF/DANFE se visível.`;
 
 async function tryGemini(base64Image: string, mimeType: string, apiKey: string) {
-  const models = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
+  const models = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
   for (const model of models) {
     try {
       const res = await fetch(
@@ -193,16 +193,18 @@ async function tryGemini(base64Image: string, mimeType: string, apiKey: string) 
           headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: RICH_PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 200 },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 800 },
           }),
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(9000),
         }
       );
       if (!res.ok) continue;
       const data = await res.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) continue;
-      const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) continue;
+      const parsed = JSON.parse(jsonMatch[0]);
       const result = cleanOcrData(parsed);
       if (result.confidence > 0) { console.log(`[OCR-UPLOAD] ✅ Gemini [${model}]`, result); return result; }
     } catch {}

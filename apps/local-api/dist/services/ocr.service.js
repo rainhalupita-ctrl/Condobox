@@ -169,7 +169,7 @@ export class OCRService {
     async tryGemini(base64Image, mimeType) {
         if (!env.GEMINI_API_KEY)
             return null;
-        const models = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'];
+        const models = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
         for (const model of models) {
             try {
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -177,7 +177,7 @@ export class OCRService {
                     headers: { 'Content-Type': 'application/json', 'X-goog-api-key': env.GEMINI_API_KEY },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text: RICH_PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-                        generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 250 },
+                        generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 800 },
                     }),
                     signal: AbortSignal.timeout(8000),
                 });
@@ -187,7 +187,10 @@ export class OCRService {
                 const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
                 if (!text)
                     continue;
-                const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (!jsonMatch)
+                    continue;
+                const parsed = JSON.parse(jsonMatch[0]);
                 const result = this.sanitize(parsed);
                 if (result.confidence > 0) {
                     console.log(`[OCRService] ✅ Gemini [${model}]`, result);
