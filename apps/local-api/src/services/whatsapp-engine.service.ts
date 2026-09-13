@@ -994,14 +994,22 @@ export class WhatsAppEngineService {
       }
     }
 
+    // 🛑 REGRA CRÍTICA: Se o morador NÃO possui nenhuma encomenda pendente para retirada,
+    // o robô NUNCA deve responder ou enviar mensagens sobre encomendas.
+    // Isso evita spam, mensagens sem contexto para quem está falando com a portaria sobre outros assuntos e risco de banimento.
+    if (!pendingPkgs || pendingPkgs.length === 0) {
+      this.logToFile(
+        `ℹ️ [Silenciado] Mensagem recebida de ${cleanPhone} ("${text}"), mas não há nenhuma encomenda pendente para este contato. Nenhuma resposta automática disparada.`
+      );
+      return;
+    }
+
     let residentName = 'Morador(a)';
     let packagesInfo = '';
 
-    if (pendingPkgs && pendingPkgs.length > 0) {
-      const first = pendingPkgs[0];
-      residentName = first.resident?.name || first.recipient_name_ocr || 'Morador(a)';
-      packagesInfo = pendingPkgs.map((p: any) => `${p.carrier} (Código: ${p.pickup_code})`).join(', ');
-    }
+    const first = pendingPkgs[0];
+    residentName = first.resident?.name || first.recipient_name_ocr || 'Morador(a)';
+    packagesInfo = pendingPkgs.map((p: any) => `${p.carrier} (Código: ${p.pickup_code})`).join(', ');
 
     // 🧠 CLASSIFICAÇÃO INTELIGENTE COM IA (Groq -> Gemini -> NVIDIA -> Heurística)
     const aiResult = isReaction
@@ -1052,14 +1060,7 @@ export class WhatsAppEngineService {
     if (aiResult.intent === 'REQUEST_CODE') {
       this.logToFile(`🔍 Morador ${cleanPhone} solicitou código/QR Code...`);
       if (!pendingPkgs || pendingPkgs.length === 0) {
-        // NÃO silencia: orienta o morador com mensagem prestativa
-        const replyText =
-          `👋 Olá!\n\n` +
-          `Não localizamos nenhuma encomenda pendente de retirada para o seu número no momento.\n\n` +
-          `💡 *Dica:* Se você recebeu uma notificação anterior da portaria, por favor envie o código da encomenda aqui (ex: *#ABCDEF*) para localizarmos no sistema.\n\n` +
-          `🏢 Portaria do Condomínio`;
-        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
-        this.logToFile(`ℹ️ Orientação enviada para ${cleanPhone} (nenhuma encomenda pendente encontrada).`);
+        this.logToFile(`ℹ️ [Silenciado] Nenhuma encomenda pendente para ${cleanPhone}. Nenhuma mensagem disparada.`);
         return;
       }
 
@@ -1160,14 +1161,8 @@ export class WhatsAppEngineService {
         const codes = pkgs.map(p => p.pickup_code).join(', ');
         this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomendas: ${codes})`);
       } else {
-        // Se nenhuma encomenda pendente foi encontrada, orienta o morador em vez de silenciar
-        const replyText =
-          `👋 Olá, *${residentName}*!\n\n` +
-          `Registramos sua mensagem, mas não localizamos nenhuma encomenda pendente para retirada no momento.\n\n` +
-          `💡 Se você tem o código de retirada de uma encomenda anterior, pode enviá-lo aqui (ex: *#ABCDEF*) para conferirmos na portaria.\n\n` +
-          `🏢 Portaria do Condomínio`;
-        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
-        this.logToFile(`ℹ️ Aviso de nenhuma encomenda pendente enviado para ${cleanPhone}.`);
+        // Se nenhuma encomenda pendente foi encontrada: SILÊNCIO TOTAL!
+        this.logToFile(`ℹ️ [Silenciado] Nenhuma encomenda pendente para confirmação de ciência de ${cleanPhone}. Nenhuma mensagem disparada.`);
       }
       return;
     }

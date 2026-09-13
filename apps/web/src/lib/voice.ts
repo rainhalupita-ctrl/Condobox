@@ -4,7 +4,7 @@
  */
 
 export class VoiceService {
-  private static isVoiceEnabled(): boolean {
+  public static isVoiceEnabled(): boolean {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('condobox_voice_alerts') !== 'false';
   }
@@ -12,15 +12,16 @@ export class VoiceService {
   public static setVoiceEnabled(enabled: boolean) {
     if (typeof window !== 'undefined') {
       localStorage.setItem('condobox_voice_alerts', enabled ? 'true' : 'false');
+      window.dispatchEvent(new CustomEvent('condobox_voice_changed', { detail: enabled }));
     }
   }
 
   /**
    * Fala uma frase em voz alta em Português do Brasil
    */
-  public static speak(text: string) {
+  public static speak(text: string, force: boolean = false) {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    if (!this.isVoiceEnabled()) return;
+    if (!force && !this.isVoiceEnabled()) return;
 
     try {
       window.speechSynthesis.cancel(); // Cancela fala anterior se houver
@@ -45,8 +46,9 @@ export class VoiceService {
   /**
    * Toca um bip sonoro de sucesso usando a Web Audio API (sem precisar de arquivos mp3 externos)
    */
-  public static playSuccessBeep() {
+  public static playSuccessBeep(force: boolean = false) {
     if (typeof window === 'undefined') return;
+    if (!force && !this.isVoiceEnabled()) return;
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const osc = audioCtx.createOscillator();
@@ -70,8 +72,9 @@ export class VoiceService {
   /**
    * Toca um bip sonoro de erro ou atenção
    */
-  public static playErrorBeep() {
+  public static playErrorBeep(force: boolean = false) {
     if (typeof window === 'undefined') return;
+    if (!force && !this.isVoiceEnabled()) return;
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const osc = audioCtx.createOscillator();

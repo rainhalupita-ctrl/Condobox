@@ -147,6 +147,22 @@ export default function AdminPage() {
     }
   }, [authLoading, effectiveCondoId]);
 
+  // Sincroniza estado do sintetizador de voz com o localStorage persistido
+  useEffect(() => {
+    setVoiceActive(VoiceService.isVoiceEnabled());
+
+    const handleVoiceChange = () => {
+      setVoiceActive(VoiceService.isVoiceEnabled());
+    };
+
+    window.addEventListener('storage', handleVoiceChange);
+    window.addEventListener('condobox_voice_changed', handleVoiceChange);
+    return () => {
+      window.removeEventListener('storage', handleVoiceChange);
+      window.removeEventListener('condobox_voice_changed', handleVoiceChange);
+    };
+  }, []);
+
   // Fecha modal de perfil de morador com ESC
   useEffect(() => {
     if (!selectedResidentProfile) return;
@@ -2266,12 +2282,14 @@ export default function AdminPage() {
                     setVoiceActive(nextState);
                     VoiceService.setVoiceEnabled(nextState);
                     if (nextState) {
-                      VoiceService.playSuccessBeep();
-                      VoiceService.speak('Alertas de voz ativados no CondoBox');
+                      VoiceService.playSuccessBeep(true);
+                      VoiceService.speak('Alertas de voz ativados no CondoBox', true);
                     }
                   }}
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                    voiceActive ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-400'
+                    voiceActive
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm'
+                      : 'bg-slate-850 text-slate-400 border border-slate-750 hover:text-slate-300'
                   }`}
                 >
                   {voiceActive ? <Volume2 size={14} /> : <VolumeX size={14} />}
@@ -2283,8 +2301,8 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    VoiceService.playSuccessBeep();
-                    VoiceService.speak('Teste do sistema de voz: Encomenda registrada para o Bloco A, Apartamento 805.');
+                    VoiceService.playSuccessBeep(true);
+                    VoiceService.speak('Teste do sistema de voz: Encomenda registrada para o Bloco A, Apartamento 805.', true);
                   }}
                   className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
                 >
@@ -2293,8 +2311,8 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    VoiceService.playSuccessBeep();
-                    VoiceService.speak('Entrega concluída com sucesso para o morador.');
+                    VoiceService.playSuccessBeep(true);
+                    VoiceService.speak('Entrega concluída com sucesso para o morador.', true);
                   }}
                   className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
                 >
