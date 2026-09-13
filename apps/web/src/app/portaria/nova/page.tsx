@@ -766,66 +766,67 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         </span>
       </div>
 
-      {step === 'CAPTURE' ? (
-        /* Passo 1: Captura da Foto Imediata */
-        <div className="space-y-5 animate-fade-in">
-          <CameraCapture
-            key={`cam-${step}-${recentSaved.length}`}
-            onCapture={handleCapturePhoto}
-            onCancel={() => router.push('/portaria')}
-          />
+      {/* Passo 1: Captura da Foto Imediata (Mantido montado com keepStreamAlive para preservar a permissão e stream da câmera) */}
+      <div className={step === 'CAPTURE' ? 'space-y-5 animate-fade-in' : 'hidden'}>
+        <CameraCapture
+          keepStreamAlive={true}
+          isCaptureActive={step === 'CAPTURE'}
+          onCapture={handleCapturePhoto}
+          onCancel={() => router.push('/portaria')}
+        />
 
-          {/* Fila de Encomendas Recebidas Recentemente nesta sessão */}
-          {recentSaved.length > 0 && (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
-                  <History className="w-4 h-4 text-indigo-400" />
-                  <span>Últimas Encomendas Recebidas ({recentSaved.length})</span>
-                </div>
-                <span className="text-[10px] text-slate-500 font-medium">Disparos em segundo plano</span>
+        {/* Fila de Encomendas Recebidas Recentemente nesta sessão */}
+        {recentSaved.length > 0 && (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
+                <History className="w-4 h-4 text-indigo-400" />
+                <span>Últimas Encomendas Recebidas ({recentSaved.length})</span>
               </div>
+              <span className="text-[10px] text-slate-500 font-medium">Disparos em segundo plano</span>
+            </div>
 
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                {recentSaved.map((pkg) => (
-                  <div
-                    key={pkg.id}
-                    className="flex items-center justify-between bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3 text-xs hover:border-slate-700 transition"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="px-2.5 py-1 bg-slate-800 border border-slate-700 text-emerald-400 rounded-xl font-black font-mono tracking-wider">
-                        {pkg.pickupCode}
-                      </div>
-                      <div>
-                        <span className="font-bold text-white block">{pkg.unitText}</span>
-                        <span className="text-slate-400 text-[11px]">
-                          {pkg.residentName} • {pkg.carrier}
-                        </span>
-                      </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {recentSaved.map((pkg) => (
+                <div
+                  key={pkg.id}
+                  className="flex items-center justify-between bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3 text-xs hover:border-slate-700 transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="px-2.5 py-1 bg-slate-800 border border-slate-700 text-emerald-400 rounded-xl font-black font-mono tracking-wider">
+                      {pkg.pickupCode}
                     </div>
-
                     <div>
-                      {pkg.whatsappStatus === 'SENT' ? (
-                        <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-xl">
-                          <Check className="w-3.5 h-3.5" /> WhatsApp Enviado
-                        </span>
-                      ) : pkg.whatsappStatus === 'FAILED' ? (
-                        <span className="flex items-center gap-1 text-[11px] font-semibold text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2.5 py-1 rounded-xl">
-                          <AlertTriangle className="w-3.5 h-3.5" /> Erro ao Enviar
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-xl animate-pulse">
-                          <RefreshCw className="w-3 h-3 animate-spin text-amber-400" /> Enviando...
-                        </span>
-                      )}
+                      <span className="font-bold text-white block">{pkg.unitText}</span>
+                      <span className="text-slate-400 text-[11px]">
+                        {pkg.residentName} • {pkg.carrier}
+                      </span>
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  <div>
+                    {pkg.whatsappStatus === 'SENT' ? (
+                      <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-xl">
+                        <Check className="w-3.5 h-3.5" /> WhatsApp Enviado
+                      </span>
+                    ) : pkg.whatsappStatus === 'FAILED' ? (
+                      <span className="flex items-center gap-1 text-[11px] font-semibold text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2.5 py-1 rounded-xl">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Erro ao Enviar
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-xl animate-pulse">
+                        <RefreshCw className="w-3 h-3 animate-spin text-amber-400" /> Enviando...
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
-      ) : (
+          </div>
+        )}
+      </div>
+
+      {step === 'CONFIRM' && (
         /* Passo 2: Confirmação e Ajuste dos Dados */
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
           <div className="flex items-start justify-between pb-4 border-b border-slate-800">

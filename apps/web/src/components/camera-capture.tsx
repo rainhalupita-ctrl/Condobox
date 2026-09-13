@@ -7,6 +7,8 @@ import { OCRResponse } from '../lib/local-api';
 interface CameraCaptureProps {
   onCapture: (blob: Blob, previewUrl: string, precalculatedOcr?: OCRResponse) => void;
   onCancel?: () => void;
+  keepStreamAlive?: boolean;
+  isCaptureActive?: boolean;
 }
 
 // ─── Cálculo de Nitidez / Anti-Tremor por Variância de Laplaciano (< 1ms) ───
@@ -69,7 +71,12 @@ function calculateFrameSharpness(video: HTMLVideoElement): { sharpness: number; 
   return { sharpness: Math.max(0, variance), brightness: avgBrightness };
 }
 
-export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
+export function CameraCapture({
+  onCapture,
+  onCancel,
+  keepStreamAlive = false,
+  isCaptureActive = true,
+}: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isMountedRef = useRef(true);
@@ -262,6 +269,33 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [facingMode, startCamera, stopCamera]);
+ 
+  // Gerenciamento de fluxo contínuo quando keepStreamAlive está ativado
+  useEffect(() => {
+    if (!keepStreamAlive) return;
+
+    if (isCaptureActive) {
+      // Reativando a captura (ex: após salvar encomenda anterior)
+      autoCaptureFiredRef.current = false;
+      isProcessingRef.current = false;
+      setCapturedBlob(null);
+      setCapturedPreview(null);
+      setIsDetected(false);
+      setIsSteady(false);
+
+      const hasLiveTracks = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'live');
+      if (!hasLiveTracks) {
+        startCamera();
+      } else if (videoRef.current && videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {});
+      }
+    } else {
+      // Pausado durante a confirmação de dados para economizar CPU
+      autoCaptureFiredRef.current = true;
+      isProcessingRef.current = true;
+    }
+  }, [isCaptureActive, keepStreamAlive, startCamera]);
 
   const switchCamera = () => {
     stopCamera();
@@ -382,9 +416,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
     setCapturedBlob(shot.blob);
     setCapturedPreview(shot.previewUrl);
-    stopCamera();
+    if (!keepStreamAlive) {
+      stopCamera();
+    }
     onCapture(shot.blob, shot.previewUrl);
-  }, [captureHighResShot, captureBestShot, onCapture, stopCamera]);
+  }, [captureHighResShot, captureBestShot, onCapture, stopCamera, keepStreamAlive]);
 
   // ─── Análise em Tempo Real Ultra-Rápida e Sem Tremor ───────────────────────
   useEffect(() => {
@@ -549,7 +585,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
         setCapturedBlob(finalBlob);
         setCapturedPreview(finalPreviewUrl);
-        stopCamera();
+        if (!keepStreamAlive) {
+          stopCamera();
+        }
 
         const partialOcr = {
           ocr: {
@@ -653,6 +691,14 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             <X className="w-5 h-5" />
           </button>
         )}
+      </div>
+
+      {/* Dica para liberar câmera permanentemente no iPhone */}
+      <div className="w-full flex items-center justify-between text-[11px] text-slate-400 bg-slate-950/80 px-3 py-1.5 rounded-xl mb-2.5 border border-slate-800/60">
+        <span className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-amber-400 font-bold">💡 No iPhone:</span>
+          <span>Toque em <b>aA</b> (na barra do Safari) &gt; <b>Ajustes do Site</b> &gt; <b>Câmera: Permitir</b> para nunca mais pedir.</span>
+        </span>
       </div>
 
       {/* Viewport da Câmera ou Preview com Guia Visual Anti-Tremor */}
