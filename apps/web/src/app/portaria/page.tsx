@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Package as PackageType } from '../../types/database';
 import { PackageCard } from '../../components/package-card';
@@ -35,6 +35,7 @@ import {
 
 export default function PortariaDashboardPage() {
   const { effectiveCondoId, loading: authLoading } = useAuth();
+  const alertChannelRef = useRef<any>(null);
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,6 +88,7 @@ export default function PortariaDashboardPage() {
     return clean || null;
   };
 
+  // 1. Carrega do localStorage imediato para não piscar a interface
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('condobox_stale_days_threshold');
@@ -97,11 +99,76 @@ export default function PortariaDashboardPage() {
     }
   }, []);
 
-  const handleUpdateThreshold = (days: number) => {
+  // 2. Busca a configuração oficial salva na nuvem para este condomínio
+  useEffect(() => {
+    if (!effectiveCondoId) return;
+    let isMounted = true;
+
+    fetch(`/api/condos/settings?condo_id=${effectiveCondoId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (isMounted && data?.success && typeof data.stale_days_threshold === 'number' && data.stale_days_threshold > 0) {
+          setStaleDaysThreshold(data.stale_days_threshold);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('condobox_stale_days_threshold', data.stale_days_threshold.toString());
+          }
+        }
+      })
+      .catch((err) => console.warn('[Portaria] Falha ao sincronizar tolerância do condomínio:', err));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [effectiveCondoId]);
+
+  const handleUpdateThreshold = async (days: number) => {
     const clean = Math.max(1, Math.min(60, days));
     setStaleDaysThreshold(clean);
     if (typeof window !== 'undefined') {
       localStorage.setItem('condobox_stale_days_threshold', clean.toString());
+    }
+
+    if (!effectiveCondoId) return;
+
+    // A. Dispara broadcast em tempo real para sincronizar os demais aparelhos (PC, celular) na mesma hora
+    try {
+      if (alertChannelRef.current) {
+        await alertChannelRef.current.send({
+          type: 'broadcast',
+          event: 'stale-days-threshold-updated',
+          payload: { threshold: clean, condoId: effectiveCondoId }
+        });
+      } else {
+        const supabase = createClient();
+        const ch = supabase.channel(`condo-alerts-${effectiveCondoId}`);
+        ch.subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+            ch.send({
+              type: 'broadcast',
+              event: 'stale-days-threshold-updated',
+              payload: { threshold: clean, condoId: effectiveCondoId }
+            }).finally(() => {
+              setTimeout(() => supabase.removeChannel(ch), 2000);
+            });
+          }
+        });
+      }
+    } catch (bcErr) {
+      console.warn('[Portaria] Falha ao emitir broadcast de tolerância:', bcErr);
+    }
+
+    // B. Salva no banco de dados para persistência definitiva em novos logins/reloads
+    try {
+      await fetch('/api/condos/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          condo_id: effectiveCondoId,
+          stale_days_threshold: clean
+        })
+      });
+    } catch (postErr) {
+      console.warn('[Portaria] Falha ao persistir tolerância na nuvem:', postErr);
     }
   };
 
@@ -152,6 +219,8 @@ export default function PortariaDashboardPage() {
     const supabase = createClient();
 
     const alertChannel = supabase.channel(`condo-alerts-${effectiveCondoId}`);
+    alertChannelRef.current = alertChannel;
+
     alertChannel
       .on('broadcast', { event: 'package-contested' }, (payload: any) => {
         const data = payload?.payload || {};
@@ -175,6 +244,15 @@ export default function PortariaDashboardPage() {
         });
         loadPackages();
       })
+      .on('broadcast', { event: 'stale-days-threshold-updated' }, (payload: any) => {
+        const newThreshold = payload?.payload?.threshold;
+        if (typeof newThreshold === 'number' && newThreshold > 0) {
+          setStaleDaysThreshold(newThreshold);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('condobox_stale_days_threshold', newThreshold.toString());
+          }
+        }
+      })
       .subscribe();
 
     const dbChangesChannel = supabase
@@ -189,6 +267,7 @@ export default function PortariaDashboardPage() {
       .subscribe();
 
     return () => {
+      alertChannelRef.current = null;
       supabase.removeChannel(alertChannel);
       supabase.removeChannel(dbChangesChannel);
     };
