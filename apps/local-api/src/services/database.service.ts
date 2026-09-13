@@ -485,8 +485,8 @@ export class DatabaseService {
     } else {
       // Se não digitou código, verifica se há novas encomendas pendentes de ciência
       if (unacknowledged.length === 0) {
-        console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência de todas as ${pendingDelivery.length} encomenda(s). Suprimindo envio duplicado.`);
-        return { pkg: null, pkgs: [], alreadyAcknowledged: true };
+        console.log(`ℹ️ [DatabaseService] Morador (${clean}) já havia confirmado ciência de todas as ${pendingDelivery.length} encomenda(s). Retornando encomendas ativas para reenvio.`);
+        return { pkg: pendingDelivery[0], pkgs: pendingDelivery, alreadyAcknowledged: true };
       }
 
       targetPkgs = unacknowledged;

@@ -78,6 +78,17 @@ export class AIIntentService {
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
+      .replace(/👍/g, ' emoji_positivo ')
+      .replace(/👌/g, ' emoji_positivo ')
+      .replace(/✅/g, ' emoji_positivo ')
+      .replace(/🆗/g, ' emoji_positivo ')
+      .replace(/❤️/g, ' emoji_positivo ')
+      .replace(/👏/g, ' emoji_positivo ')
+      .replace(/🙌/g, ' emoji_positivo ')
+      .replace(/📦/g, ' emoji_positivo ')
+      .replace(/👎/g, ' emoji_negativo ')
+      .replace(/❌/g, ' emoji_negativo ')
+      .replace(/🚫/g, ' emoji_negativo ')
       .replace(/[^\w\s]/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -178,7 +189,19 @@ export class AIIntentService {
       { key: 'numero errado', intent: 'CONTEST_PACKAGE', reasoning: 'Contato telefônico incorreto para a unidade' },
       { key: 'apto errado', intent: 'CONTEST_PACKAGE', reasoning: 'Apartamento incorreto' },
 
-      // 3. Solicitação de Código / QR Code
+      { key: 'emoji_positivo', intent: 'CONFIRM_SCIENCE', reasoning: 'Emoji positivo de confirmação de ciência' },
+      { key: 'emoji_negativo', intent: 'CONTEST_PACKAGE', reasoning: 'Emoji negativo contestando encomenda' },
+      { key: 'beleza me manda ai', intent: 'REQUEST_CODE', reasoning: 'Morador confirma e solicita envio do código' },
+      { key: 'me manda ai', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
+      { key: 'manda ai', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
+      { key: 'manda ae', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
+      { key: 'manda pra mim', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
+      { key: 'manda o link', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do link' },
+      { key: 'me manda o link', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do link' },
+      { key: 'pode mandar', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
+      { key: 'manda o qr', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do QR Code' },
+      { key: 'passa o codigo', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do código' },
+      { key: 'passa o link', intent: 'REQUEST_CODE', reasoning: 'Morador solicita envio do link' },
       { key: 'qual o codigo', intent: 'REQUEST_CODE', reasoning: 'Solicitação do código de retirada' },
       { key: 'qual meu codigo', intent: 'REQUEST_CODE', reasoning: 'Solicitação do código pessoal' },
       { key: 'qual o meu codigo', intent: 'REQUEST_CODE', reasoning: 'Solicitação do código pessoal' },
@@ -529,7 +552,7 @@ export class AIIntentService {
     const extractedCode = this.extractCode(text);
 
     // 3. Pedido de Código / QR Code
-    const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o qr\s?code)\b/i;
+    const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|(me )?manda (ai|ae|o link|o codigo|o qr|os dados|pra mim)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o (qr\s?code|codigo)|como (retiro|pego|faco pra pegar)|passa o (codigo|link|qr)|pode mandar)\b/i;
     if (codeRequestRegex.test(normalized)) {
       return {
         intent: 'REQUEST_CODE',
@@ -616,7 +639,7 @@ export class AIIntentService {
     };
   }
 
-  private extractCode(text: string): string | null {
+  public extractCode(text: string): string | null {
     const trimmed = text.trim();
     const hashMatch = text.match(/#([a-zA-Z0-9]{4,8})\b/);
     if (hashMatch) return hashMatch[1].toUpperCase();
