@@ -690,150 +690,6 @@ export class WhatsAppEngineService {
     );
   }
 
-  private classifyIncomingMessage(text: string, quotedText?: string): {
-    isAcknowledge: boolean;
-    isCodeRequest: boolean;
-    isContestation: boolean;
-    isUnrelated: boolean;
-    extractedCode: string | null;
-    reason: string;
-  } {
-    const trimmed = text.trim();
-    const normalized = trimmed
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
-
-    // 1. Verificação de Contestação (morador avisando que não é dele / não pediu / destinatário errado)
-    const contestationRegex = /\b(nao (e|eh) minh[ao]|nao pedi|encomenda errada|nao recebi|veio errad[ao]|nao sou eu|destinatario errado|pacote errado)\b/i;
-    if (contestationRegex.test(normalized)) {
-      return {
-        isAcknowledge: false,
-        isCodeRequest: false,
-        isContestation: true,
-        isUnrelated: false,
-        extractedCode: null,
-        reason: 'contestation'
-      };
-    }
-
-    // 2. Extração de código específico (#ABCDEF ou "codigo: ABCDEF" ou 5 a 7 caracteres alfanuméricos isolados)
-    let extractedCode: string | null = null;
-    const hashMatch = text.match(/#([a-zA-Z0-9]{4,8})\b/);
-    const codePrefixMatch = text.match(/\b(?:cod(?:igo)?|retirada)[:\s]+([a-zA-Z0-9]{4,8})\b/i);
-
-    if (hashMatch) {
-      extractedCode = hashMatch[1].toUpperCase();
-    } else if (codePrefixMatch) {
-      extractedCode = codePrefixMatch[1].toUpperCase();
-    } else if (/^[a-zA-Z0-9]{5,7}$/.test(trimmed)) {
-      // Se a mensagem inteira for apenas uma palavra de 5 a 7 caracteres, verifica se não é palavra comum em português
-      const commonWords = new Set([
-        'BOM', 'BOA', 'DIA', 'TARDE', 'NOITE', 'OLA', 'OLAA', 'OI', 'OII', 'OIII',
-        'TUDO', 'BEM', 'COMO', 'VAI', 'VALEU', 'VLW', 'OBRIGADO', 'OBRIGADA', 'OBG',
-        'SHOW', 'TOP', 'JOIA', 'BELEZA', 'BLZ', 'SIM', 'NAO', 'OK', 'OKK', 'OKEY',
-        'CIENTE', 'CONFIRMO', 'RECEBI', 'VOU', 'TESTE', 'FAVOR', 'AJUDA', 'AQUI',
-        'ONDE', 'QUEM', 'QUAL', 'PORTA', 'VAGA', 'CARRO', 'CASA', 'APTO', 'BLOCO',
-        'QUERO', 'SAIR', 'ENTRAR', 'DESCER', 'SUBIR', 'VENDO', 'PODE', 'PODEM'
-      ]);
-      const upperCandidate = trimmed.toUpperCase();
-      if (!commonWords.has(upperCandidate)) {
-        extractedCode = upperCandidate;
-      }
-    }
-
-    // 3. Pedido de Código / QR Code ("qual meu código?", "manda o qr code", "perdi meu código")
-    const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o qr\s?code)\b/i;
-    if (codeRequestRegex.test(normalized)) {
-      return {
-        isAcknowledge: false,
-        isCodeRequest: true,
-        isContestation: false,
-        isUnrelated: false,
-        extractedCode,
-        reason: 'code_request'
-      };
-    }
-
-    // 4. Assuntos diversos do condomínio (portão, vaga, síndico, boleto, interfone, barulho, etc.)
-    const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
-    if (!hashMatch && !codePrefixMatch && unrelatedCondoRegex.test(normalized)) {
-      return {
-        isAcknowledge: false,
-        isCodeRequest: false,
-        isContestation: false,
-        isUnrelated: true,
-        extractedCode: null,
-        reason: 'unrelated_condo_topic'
-      };
-    }
-
-    // 5. Perguntas gerais com ponto de interrogação que não sejam de código
-    if (text.includes('?') && !hashMatch && !codePrefixMatch && !codeRequestRegex.test(normalized)) {
-      return {
-        isAcknowledge: false,
-        isCodeRequest: false,
-        isContestation: false,
-        isUnrelated: true,
-        extractedCode: null,
-        reason: 'general_question'
-      };
-    }
-
-    // 6. Resposta direta a notificação citada (quotedMessage)
-    if (quotedText) {
-      const normQuoted = quotedText.toLowerCase();
-      const isQuotingPackage =
-        normQuoted.includes('encomenda') ||
-        normQuoted.includes('retirada') ||
-        normQuoted.includes('codigo') ||
-        normQuoted.includes('condobox') ||
-        normQuoted.includes('portaria');
-      if (isQuotingPackage && trimmed.length <= 40) {
-        return {
-          isAcknowledge: true,
-          isCodeRequest: false,
-          isContestation: false,
-          isUnrelated: false,
-          extractedCode,
-          reason: 'quoted_notification_reply'
-        };
-      }
-    }
-
-    // 7. Emojis afirmativos
-    const ackEmojis = ['👍', '👌', '📦', '✅', '🆗', '🤝', '🙏'];
-    const hasAckEmoji = ackEmojis.some(emoji => text.includes(emoji));
-
-    // 8. Expressões afirmativas explícitas (mensagens curtas <= 60 caracteres)
-    const ackKeywordsRegex = /\b(ciente|estou ciente|to ciente|tô ciente|ta ciente|tá ciente|ok|okk|okey|okay|confirmado|confirmo|confirmar|confirmada|recebido|recebi|entendido|entendi|obrigad[ao]|valeu|vlw|obg|agradecid[ao]|gratidao|show|show de bola|perfeito|maravilha|joia|beleza|blz|tranquilo|vou retirar|vou buscar|ja vou buscar|ja vou descer|estou descendo|to descendo|tô descendo|indo buscar|passo ai|passo aí|vou pegar|ja pego|pego mais tarde|logo busco)\b/i;
-
-    const isShortMessage = trimmed.length <= 60;
-    const isAckKeyword = isShortMessage && ackKeywordsRegex.test(normalized);
-    const isSimpleYes = isShortMessage && /^(sim|sim obrigado|sim valeu|sim ciente)$/i.test(normalized);
-
-    if (hasAckEmoji || isAckKeyword || isSimpleYes || extractedCode) {
-      return {
-        isAcknowledge: true,
-        isCodeRequest: false,
-        isContestation: false,
-        isUnrelated: false,
-        extractedCode,
-        reason: extractedCode ? 'extracted_code' : (hasAckEmoji ? 'ack_emoji' : 'ack_keyword')
-      };
-    }
-
-    // 9. Se for qualquer outro assunto ou saudação (ex: "Bom dia", "Olá")
-    return {
-      isAcknowledge: false,
-      isCodeRequest: false,
-      isContestation: false,
-      isUnrelated: true,
-      extractedCode: null,
-      reason: 'casual_or_unrelated'
-    };
-  }
-
   private async sendWhatsAppReply(remoteJid: string, cleanPhone: string, replyText: string): Promise<void> {
     try {
       if (this.socket) {
@@ -892,48 +748,74 @@ export class WhatsAppEngineService {
       const cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid);
       this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone: ${cleanPhone}): "${text}"`);
 
-      // 🧠 CLASSIFICAÇÃO INTELIGENTE DE INTENÇÃO
-      const intent = this.classifyIncomingMessage(text, quotedText);
-
-      // Se for contestação de morador avisando que não é dele:
-      if (intent.isContestation) {
-        this.logToFile(`⚠️ Mensagem de ${cleanPhone} classificada como contestação ("${text}"). Não confirmando ciência.`);
-        return;
-      }
-
-      // Se NÃO for confirmação de ciência, NEM pedido de código, NEM código digitado:
-      if (!intent.isAcknowledge && !intent.isCodeRequest && !intent.extractedCode) {
-        this.logToFile(`ℹ️ Mensagem recebida de ${cleanPhone} ("${text}") ignorada para auto-resposta de encomenda (motivo: ${intent.reason}).`);
-        return;
-      }
-
-      // Import dinâmico do databaseService
+      // Import dinâmico do banco e da IA
       const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
       if (!databaseService) {
         this.logToFile('databaseService não pôde ser importado.');
         return;
       }
 
+      const { aiIntentService } = await import('./ai-intent.service.js');
+
+      // Busca contexto das encomendas pendentes do morador para alimentar a IA
+      const pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone);
+      let residentName = 'Morador(a)';
+      let packagesInfo = '';
+
+      if (pendingPkgs && pendingPkgs.length > 0) {
+        const first = pendingPkgs[0];
+        residentName = first.resident?.name || first.recipient_name_ocr || 'Morador(a)';
+        packagesInfo = pendingPkgs.map((p: any) => `${p.carrier} (Código: ${p.pickup_code})`).join(', ');
+      }
+
+      // 🧠 CLASSIFICAÇÃO INTELIGENTE COM IA (Groq -> Gemini -> NVIDIA -> Heurística)
+      const aiResult = await aiIntentService.classify(text, {
+        quotedText,
+        residentName,
+        packagesInfo
+      });
+
+      this.logToFile(
+        `🤖 [IA: ${aiResult.source.toUpperCase()}] Intenção: ${aiResult.intent} (Confiança: ${aiResult.confidence}) - Motivo: "${aiResult.reasoning}"`
+      );
+
       const webBaseUrl = this.getPublicWebUrl();
 
-      // CASO 1: Morador pediu expressamente o código ou link de retirada ("qual meu código?", "manda o qr code")
-      if (intent.isCodeRequest) {
-        this.logToFile(`🔍 Morador ${cleanPhone} solicitou dados/QR Code da encomenda...`);
-        const pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone);
+      // 🚨 CASO 1: CONTESTAÇÃO / NÃO RECONHECIMENTO (Morador diz que não é dele / não tem ciência)
+      if (aiResult.intent === 'CONTEST_PACKAGE') {
+        this.logToFile(`🚨 Morador ${cleanPhone} contestou a encomenda! Registrando alerta no sistema...`);
+        const contestResult = await databaseService.contestPackageByPhone(
+          cleanPhone,
+          aiResult.conciergeAlert || aiResult.reasoning || text,
+          aiResult.extractedCode
+        );
+
+        const contestedList: any[] =
+          contestResult?.pkgs && contestResult.pkgs.length > 0
+            ? contestResult.pkgs
+            : (pendingPkgs || []);
+
+        const carrierName = contestedList[0]?.carrier || 'Encomenda';
+
+        const replyText =
+          `⚠️ *REGISTRO DE NÃO RECONHECIMENTO DE ENCOMENDA*\n\n` +
+          `Olá, *${residentName}*!\n\n` +
+          `Registramos no sistema que você *não reconhece* ou *não tem ciência* da encomenda da *${carrierName}*.\n\n` +
+          `🚨 *A equipe da portaria já foi alertada imediatamente na tela do sistema!* O pacote foi retido para conferência física de etiqueta, destinatário e apartamento.\n\n` +
+          `Agradecemos o aviso! Caso necessário, a portaria entrará em contato com você.`;
+
+        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
+        this.logToFile(`✅ Resposta de contestação enviada para ${cleanPhone} e portaria alertada com sucesso.`);
+        return;
+      }
+
+      // 📦 CASO 2: PEDIDO DE CÓDIGO / QR CODE ("qual meu código?", "manda o qr code")
+      if (aiResult.intent === 'REQUEST_CODE') {
+        this.logToFile(`🔍 Morador ${cleanPhone} solicitou código/QR Code...`);
         if (!pendingPkgs || pendingPkgs.length === 0) {
           this.logToFile(`ℹ️ Nenhuma encomenda pendente encontrada para envio de código a ${cleanPhone}.`);
           return;
         }
-
-        let residentName = 'Morador(a)';
-        const firstPkg = pendingPkgs[0];
-        try {
-          if (firstPkg.resident?.name) {
-            residentName = firstPkg.resident.name;
-          } else if (firstPkg.recipient_name_ocr) {
-            residentName = firstPkg.recipient_name_ocr;
-          }
-        } catch {}
 
         let replyText = '';
         if (pendingPkgs.length === 1) {
@@ -968,94 +850,88 @@ export class WhatsAppEngineService {
         return;
       }
 
-      // CASO 2: Confirmação de Ciência ou Envio de Código de Retirada
-      const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
-      if (!intent.extractedCode && Date.now() - lastAck < 30000) {
-        this.logToFile(`⏳ Ignorando confirmação de ${cleanPhone}: resposta enviada recentemente (<30s).`);
+      // 👍 CASO 3: CONFIRMAÇÃO DE CIÊNCIA
+      if (aiResult.intent === 'CONFIRM_SCIENCE') {
+        const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
+        if (!aiResult.extractedCode && Date.now() - lastAck < 30000) {
+          this.logToFile(`⏳ Ignorando confirmação de ${cleanPhone}: resposta enviada recentemente (<30s).`);
+          return;
+        }
+
+        this.logToFile(`Processando confirmação de ciência para ${cleanPhone} (Código mencionado: ${aiResult.extractedCode || 'nenhum'})...`);
+        const result = await databaseService.acknowledgePackageByPhone(cleanPhone, aiResult.extractedCode);
+
+        const pkgs: any[] = result?.pkgs && result.pkgs.length > 0 ? result.pkgs : (result?.pkg ? [result.pkg] : []);
+
+        // Se confirmou ciência de novos pacotes:
+        if (pkgs.length > 0 && !result?.alreadyAcknowledged) {
+          this.acknowledgmentCooldown.set(cleanPhone, Date.now());
+
+          let replyText = '';
+
+          if (pkgs.length === 1) {
+            const pkg = pkgs[0];
+            const token = pkg.qr_token || pkg.pickup_code;
+            const pickupUrl = `${webBaseUrl}/p/${token}`;
+            const carrierName = pkg.carrier || 'Encomenda';
+
+            replyText =
+              `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
+              `Que bom que você está ciente da sua encomenda da *${carrierName}*, *${residentName}*!\n\n` +
+              `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+              `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
+              `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
+          } else {
+            // Múltiplas encomendas juntas para o mesmo morador
+            const listItems = pkgs.map((pkg, idx) => {
+              const token = pkg.qr_token || pkg.pickup_code;
+              const pickupUrl = `${webBaseUrl}/p/${token}`;
+              const carrier = pkg.carrier || 'Encomenda';
+              return `📦 *${idx + 1}. ${carrier}*\n🔑 *Código:* *${pkg.pickup_code}*\n📱 *QR Code:* ${pickupUrl}`;
+            }).join('\n\n');
+
+            replyText =
+              `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
+              `Que bom que você está ciente das suas *${pkgs.length} encomendas*, *${residentName}*! Aqui estão os seus dados de retirada:\n\n` +
+              `${listItems}\n\n` +
+              `🏢 Apresente os códigos ou QR Codes na portaria para retirar todas as suas encomendas.`;
+          }
+
+          await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
+
+          const codes = pkgs.map(p => p.pickup_code).join(', ');
+          this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomendas: ${codes})`);
+        } else if (result && result.alreadyAcknowledged) {
+          // Se o morador digitou expressamente o código da encomenda já confirmada, reenviamos os dados
+          if (aiResult.extractedCode && pkgs.length > 0) {
+            const pkg = pkgs[0];
+            const token = pkg.qr_token || pkg.pickup_code;
+            const pickupUrl = `${webBaseUrl}/p/${token}`;
+            const carrierName = pkg.carrier || 'Encomenda';
+
+            const replyText =
+              `📦 *DADOS DA SUA ENCOMENDA*\n\n` +
+              `Olá, *${residentName}*! A sua encomenda da *${carrierName}* está pronta para retirada na portaria:\n\n` +
+              `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+              `📱 *Acesse seu QR Code aqui:*\n${pickupUrl}\n\n` +
+              `🏢 Apresente no balcão da portaria para retirar.`;
+
+            await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
+            this.logToFile(`ℹ️ Código digitado expressamente (${aiResult.extractedCode}). Dados de retirada reenviados para ${cleanPhone}.`);
+          } else {
+            this.acknowledgmentCooldown.set(cleanPhone, Date.now());
+            this.logToFile(`ℹ️ Ciência do morador (${cleanPhone}) já havia sido registrada. Envio repetido de QR Code suprimido para não ser repetitivo.`);
+          }
+        } else {
+          this.logToFile(`ℹ️ Nenhuma encomenda pendente elegível para confirmação para ${cleanPhone}.`);
+        }
         return;
       }
 
-      this.logToFile(`Processando confirmação de ciência para ${cleanPhone} (Código mencionado: ${intent.extractedCode || 'nenhum'})...`);
-      const result = await databaseService.acknowledgePackageByPhone(cleanPhone, intent.extractedCode);
-
-      const pkgs: any[] = result?.pkgs && result.pkgs.length > 0 ? result.pkgs : (result?.pkg ? [result.pkg] : []);
-
-      // Se confirmou ciência de novos pacotes:
-      if (pkgs.length > 0 && !result?.alreadyAcknowledged) {
-        this.acknowledgmentCooldown.set(cleanPhone, Date.now());
-
-        let residentName = 'Morador(a)';
-        const firstPkg = pkgs[0];
-        try {
-          if (firstPkg.resident?.name) {
-            residentName = firstPkg.resident.name;
-          } else if (firstPkg.resident_id) {
-            const r = databaseService.getResidentById(firstPkg.resident_id);
-            if (r?.name) residentName = r.name;
-          } else if (firstPkg.recipient_name_ocr) {
-            residentName = firstPkg.recipient_name_ocr;
-          }
-        } catch {}
-
-        let replyText = '';
-
-        if (pkgs.length === 1) {
-          const pkg = pkgs[0];
-          const token = pkg.qr_token || pkg.pickup_code;
-          const pickupUrl = `${webBaseUrl}/p/${token}`;
-          const carrierName = pkg.carrier || 'Encomenda';
-
-          replyText =
-            `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-            `Que bom que você está ciente da sua encomenda da *${carrierName}*, *${residentName}*!\n\n` +
-            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-            `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
-            `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
-        } else {
-          // Múltiplas encomendas juntas para o mesmo morador
-          const listItems = pkgs.map((pkg, idx) => {
-            const token = pkg.qr_token || pkg.pickup_code;
-            const pickupUrl = `${webBaseUrl}/p/${token}`;
-            const carrier = pkg.carrier || 'Encomenda';
-            return `📦 *${idx + 1}. ${carrier}*\n🔑 *Código:* *${pkg.pickup_code}*\n📱 *QR Code:* ${pickupUrl}`;
-          }).join('\n\n');
-
-          replyText =
-            `👍 *CONFIRMAÇÃO DE CIÊNCIA REGISTRADA!*\n\n` +
-            `Que bom que você está ciente das suas *${pkgs.length} encomendas*, *${residentName}*! Aqui estão os seus dados de retirada:\n\n` +
-            `${listItems}\n\n` +
-            `🏢 Apresente os códigos ou QR Codes na portaria para retirar todas as suas encomendas.`;
-        }
-
-        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
-
-        const codes = pkgs.map(p => p.pickup_code).join(', ');
-        this.logToFile(`✅ Ciência confirmada com sucesso e QR Code enviado para ${cleanPhone} (Encomendas: ${codes})`);
-      } else if (result && result.alreadyAcknowledged) {
-        // Se o morador digitou expressamente o código da encomenda já confirmada, reenviamos os dados
-        if (intent.extractedCode && pkgs.length > 0) {
-          const pkg = pkgs[0];
-          const token = pkg.qr_token || pkg.pickup_code;
-          const pickupUrl = `${webBaseUrl}/p/${token}`;
-          const residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
-          const carrierName = pkg.carrier || 'Encomenda';
-
-          const replyText =
-            `📦 *DADOS DA SUA ENCOMENDA*\n\n` +
-            `Olá, *${residentName}*! A sua encomenda da *${carrierName}* está pronta para retirada na portaria:\n\n` +
-            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-            `📱 *Acesse seu QR Code aqui:*\n${pickupUrl}\n\n` +
-            `🏢 Apresente no balcão da portaria para retirar.`;
-
-          await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
-          this.logToFile(`ℹ️ Código digitado expressamente (${intent.extractedCode}). Dados de retirada reenviados para ${cleanPhone}.`);
-        } else {
-          this.acknowledgmentCooldown.set(cleanPhone, Date.now());
-          this.logToFile(`ℹ️ Ciência do morador (${cleanPhone}) já havia sido registrada. Envio repetido de QR Code suprimido para não ser repetitivo.`);
-        }
-      } else {
-        this.logToFile(`ℹ️ Nenhuma encomenda pendente elegível para confirmação para ${cleanPhone}.`);
-      }
+      // 🛑 CASO 4: NÃO RELACIONADO (Assuntos do condomínio, portão, vaga, bom dia, etc.)
+      this.logToFile(
+        `ℹ️ [IA: ${aiResult.source.toUpperCase()}] Mensagem recebida de ${cleanPhone} ("${text}") classificada como assunto diverso. Nenhuma resposta automática disparada.`
+      );
     } catch (err: any) {
       this.logToFile(`❌ Erro ao tratar mensagem recebida: ${err.message}`);
     }

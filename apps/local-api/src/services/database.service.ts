@@ -536,6 +536,103 @@ export class DatabaseService {
     };
   }
 
+  public async contestPackageByPhone(
+    phone: string,
+    reason: string,
+    mentionedCode?: string | null
+  ): Promise<{ pkg?: any; pkgs?: any[] } | null> {
+    const clean = phone.replace(/\D/g, '');
+    const pendingDelivery = await this.getPendingPackagesForPhone(phone, mentionedCode);
+
+    if (pendingDelivery.length === 0) {
+      console.log(`ℹ️ [DatabaseService] Nenhuma encomenda pendente encontrada para contestar para ${clean}.`);
+      return null;
+    }
+
+    let targetPkgs: any[] = [];
+    if (mentionedCode) {
+      const matched = pendingDelivery.find(
+        p => p.pickup_code === mentionedCode || p.pickup_code?.toUpperCase() === mentionedCode.toUpperCase()
+      );
+      if (matched) {
+        targetPkgs = [matched];
+      } else {
+        targetPkgs = [pendingDelivery[0]];
+      }
+    } else {
+      targetPkgs = pendingDelivery;
+    }
+
+    const nowIso = new Date().toISOString();
+    const cleanReason = (reason || 'Morador informou que não tem ciência ou não reconhece a encomenda').trim().slice(0, 160);
+
+    for (const row of targetPkgs) {
+      const updatedNotes = row.notes
+        ? `${row.notes};CONTESTADO:${nowIso}: ${cleanReason}`
+        : `CONTESTADO:${nowIso}: ${cleanReason}`;
+      row.notes = updatedNotes;
+
+      // 1. Atualiza SQLite local
+      try {
+        this.db
+          .prepare(`
+            UPDATE packages
+            SET notes = ?,
+                sync_status = 'PENDING'
+            WHERE id = ?
+          `)
+          .run(updatedNotes, row.id);
+      } catch (e: any) {
+        console.warn(`[DatabaseService] Erro ao gravar contestação no SQLite:`, e.message);
+      }
+
+      // 2. Sincroniza com Supabase e dispara broadcast de alerta em tempo real
+      try {
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          const client = supabaseService.getClient();
+          await client
+            .from('packages')
+            .update({ notes: updatedNotes })
+            .eq('id', row.id);
+
+          const condoId = row.condo_id || env.CONDO_ID;
+          const channel = client.channel(`condo-alerts-${condoId}`);
+          channel.subscribe(async (status: string) => {
+            if (status === 'SUBSCRIBED') {
+              await channel.send({
+                type: 'broadcast',
+                event: 'package-contested',
+                payload: {
+                  packageId: row.id,
+                  carrier: row.carrier,
+                  pickupCode: row.pickup_code,
+                  residentName: row.resident?.name || row.recipient_name_ocr,
+                  reason: cleanReason,
+                  timestamp: nowIso
+                }
+              }).catch(() => {});
+              setTimeout(() => client.removeChannel(channel), 3000);
+            }
+          });
+        }
+      } catch (err: any) {
+        console.warn('[DatabaseService] Erro ao sincronizar contestação no Supabase:', err.message);
+      }
+    }
+
+    const finalPkgs = targetPkgs.map(row => {
+      const local = this.getPackageById(row.id);
+      if (local) return local;
+      return row;
+    });
+
+    return {
+      pkg: finalPkgs[0],
+      pkgs: finalPkgs
+    };
+  }
+
   public getPendingSyncPackages(): LocalPackage[] {
     return this.db
       .prepare(`SELECT * FROM packages WHERE sync_status = 'PENDING' ORDER BY received_at ASC LIMIT 50`)

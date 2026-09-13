@@ -38,7 +38,7 @@ export default function PortariaDashboardPage() {
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED' | 'STALE'>('PENDING');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED' | 'STALE' | 'CONTESTED'>('PENDING');
   const [selectedForDelivery, setSelectedForDelivery] = useState<PackageType | null>(null);
   const [deliveredToName, setDeliveredToName] = useState('');
   const [isSubmittingDelivery, setIsSubmittingDelivery] = useState(false);
@@ -109,6 +109,39 @@ export default function PortariaDashboardPage() {
     if (!authLoading) {
       loadPackages();
     }
+  }, [authLoading, effectiveCondoId]);
+
+  // Escuta alertas de contestação e atualizações em tempo real via Supabase
+  useEffect(() => {
+    if (authLoading || !effectiveCondoId) return;
+    const supabase = createClient();
+
+    const alertChannel = supabase.channel(`condo-alerts-${effectiveCondoId}`);
+    alertChannel
+      .on('broadcast', { event: 'package-contested' }, (payload: any) => {
+        const data = payload?.payload || {};
+        VoiceService.playErrorBeep();
+        VoiceService.speak('Atenção: Encomenda contestada pelo morador no WhatsApp!');
+        setSuccessToast(`🚨 Contestação: ${data.recipientName || 'Morador'} (${data.carrier || ''}) informou que não reconhece o pacote.`);
+        loadPackages();
+      })
+      .subscribe();
+
+    const dbChangesChannel = supabase
+      .channel(`packages-realtime-${effectiveCondoId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'packages', filter: `condo_id=eq.${effectiveCondoId}` },
+        () => {
+          loadPackages();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(alertChannel);
+      supabase.removeChannel(dbChangesChannel);
+    };
   }, [authLoading, effectiveCondoId]);
 
   useEffect(() => {
@@ -217,6 +250,11 @@ export default function PortariaDashboardPage() {
   const stalePackages = packages.filter((pkg) => {
     if (pkg.status === 'DELIVERED') return false;
     return getPackageAgeDays(pkg.received_at) >= staleDaysThreshold;
+  });
+
+  const contestedPackages = packages.filter((pkg) => {
+    if (pkg.status === 'DELIVERED') return false;
+    return Boolean(pkg.notes?.includes('CONTESTADO'));
   });
 
   const staleContactGroups = React.useMemo(() => {
@@ -328,6 +366,10 @@ export default function PortariaDashboardPage() {
   const filteredPackages = packages.filter(pkg => {
     if (statusFilter === 'PENDING' && pkg.status === 'DELIVERED') return false;
     if (statusFilter === 'DELIVERED' && pkg.status !== 'DELIVERED') return false;
+    if (statusFilter === 'CONTESTED') {
+      if (pkg.status === 'DELIVERED') return false;
+      if (!pkg.notes?.includes('CONTESTADO')) return false;
+    }
     if (statusFilter === 'STALE') {
       if (pkg.status === 'DELIVERED') return false;
       if (getPackageAgeDays(pkg.received_at) < staleDaysThreshold) return false;
@@ -339,14 +381,16 @@ export default function PortariaDashboardPage() {
     const nameMatch = (pkg.resident?.name || pkg.recipient_name_ocr || '').toLowerCase().includes(q);
     const codeMatch = pkg.pickup_code.toLowerCase().includes(q);
     const carrierMatch = pkg.carrier.toLowerCase().includes(q);
+    const noteMatch = (pkg.notes || '').toLowerCase().includes(q);
 
-    return unitMatch || nameMatch || codeMatch || carrierMatch;
+    return unitMatch || nameMatch || codeMatch || carrierMatch || noteMatch;
   });
 
   const pendingCount = packages.filter(p => p.status !== 'DELIVERED').length;
   const unnotifiedCount = packages.filter(p => p.status === 'RECEIVED').length;
   const deliveredTodayCount = packages.filter(p => p.status === 'DELIVERED').length;
   const staleCount = stalePackages.length;
+  const contestedCount = contestedPackages.length;
 
   return (
     <SubscriptionGate>
@@ -435,6 +479,50 @@ export default function PortariaDashboardPage() {
             <div className="hidden sm:block text-2xl font-black opacity-60">✓</div>
           </Link>
         </div>
+
+        {/* BANNER DE ALERTA DE ENCOMENDAS CONTESTADAS (RESPOSTA DE NÃO CIÊNCIA PELO MORADOR) */}
+        {contestedCount > 0 && (
+          <div className="p-4 sm:p-5 bg-gradient-to-r from-red-950 via-rose-950 to-slate-900 border-2 border-red-500 rounded-3xl shadow-2xl shadow-red-950/60 relative overflow-hidden animate-fade-in ring-2 ring-red-500/40">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 relative z-10">
+              <div className="flex items-start gap-3.5">
+                <div className="p-3 bg-red-600/30 text-red-400 border border-red-500/50 rounded-2xl shrink-0 mt-0.5 animate-pulse">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm">
+                      Alerta Urgente da Portaria
+                    </span>
+                    <span className="text-xs text-red-300 font-bold">
+                      {contestedCount} {contestedCount === 1 ? 'encomenda contestada' : 'encomendas contestadas'} no WhatsApp
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                    Morador informou que não tem ciência ou não reconhece a encomenda!
+                  </h3>
+                  <p className="text-xs text-rose-200/90 mt-0.5">
+                    A IA identificou a recusa. Verifique o pacote físico na bancada da portaria para evitar entrega para pessoa ou unidade incorreta.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-start lg:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('CONTESTED')}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black shadow-lg transition cursor-pointer ${
+                    statusFilter === 'CONTESTED'
+                      ? 'bg-red-600 text-white border border-red-400 ring-2 ring-red-400/50'
+                      : 'bg-red-600/30 hover:bg-red-600/50 text-red-200 border border-red-500/50'
+                  }`}
+                >
+                  <Filter className="w-4 h-4" />
+                  <span>Ver Contestadas ({contestedCount})</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* BANNER DE ALERTA DE ENCOMENDAS PARADAS */}
         {stalePackages.length > 0 && (
@@ -531,6 +619,25 @@ export default function PortariaDashboardPage() {
                 }`}
               >
                 Pendentes ({pendingCount})
+              </button>
+              <button
+                onClick={() => setStatusFilter('CONTESTED')}
+                className={`px-2.5 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  statusFilter === 'CONTESTED'
+                    ? 'bg-red-600 text-white border border-red-400 shadow-md'
+                    : contestedCount > 0
+                    ? 'text-red-400 hover:text-red-300 bg-red-950/60 border border-red-800/80 animate-pulse'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Exibe encomendas contestadas por moradores no WhatsApp"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                <span>Contestadas</span>
+                {contestedCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-red-600 text-white font-black rounded-full text-[10px]">
+                    {contestedCount}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setStatusFilter('STALE')}

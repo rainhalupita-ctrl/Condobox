@@ -98,12 +98,27 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
   };
 
   const isCiente = (pkg as any).notes?.includes('CIENTE');
+  const isContested = Boolean((pkg as any).notes?.includes('CONTESTADO') && pkg.status !== 'DELIVERED');
+
+  let contestReason: string | null = null;
+  if (isContested && (pkg as any).notes) {
+    const match = (pkg as any).notes.match(/CONTESTADO:[^:]*:\s*([^;]+)/);
+    contestReason = match ? match[1].trim() : 'Morador informou no WhatsApp que não reconhece ou não tem ciência da encomenda.';
+  }
 
   const getStatusBadge = () => {
     if (pkg.status === 'DELIVERED') {
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
           <CheckCircle2 className="w-3.5 h-3.5" /> Entregue
+        </span>
+      );
+    }
+
+    if (isContested) {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600/30 text-rose-300 border border-rose-500/60 shadow-md animate-pulse">
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" /> Contestada pelo Morador
         </span>
       );
     }
@@ -201,7 +216,9 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
 
   return (
     <div className={`bg-slate-900/90 backdrop-blur-md rounded-2xl p-4 sm:p-5 shadow-xl transition flex flex-col justify-between gap-4 ${
-      isStale
+      isContested
+        ? 'border-2 border-red-500 bg-gradient-to-b from-red-950/30 via-slate-900/95 to-slate-900 shadow-2xl shadow-red-950/60 ring-2 ring-red-500/40'
+        : isStale
         ? 'border-2 border-rose-500/60 bg-gradient-to-b from-rose-950/20 via-slate-900/90 to-slate-900/90 shadow-rose-950/30 ring-1 ring-rose-500/30'
         : 'border border-slate-800 hover:border-slate-700'
     }`}>
@@ -209,11 +226,13 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className={`p-2.5 rounded-xl border ${
-            isStale
+            isContested
+              ? 'bg-red-950/50 text-red-300 border-red-800/60'
+              : isStale
               ? 'bg-rose-950/40 text-rose-300 border-rose-800/50'
               : 'bg-slate-800 text-slate-300 border-slate-700/50'
           }`}>
-            <Package className={`w-5 h-5 ${isStale ? 'text-rose-400' : 'text-emerald-400'}`} />
+            <Package className={`w-5 h-5 ${isContested ? 'text-red-400' : isStale ? 'text-rose-400' : 'text-emerald-400'}`} />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -264,6 +283,24 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
           </div>
         )}
       </div>
+
+      {/* Alerta de Contestação pelo Morador */}
+      {isContested && (
+        <div className="p-3 bg-red-950/60 border border-red-500/60 rounded-xl text-xs text-red-200 flex items-start gap-2.5 shadow-inner animate-fade-in">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5 animate-bounce" />
+          <div className="min-w-0 flex-1">
+            <span className="font-black text-red-300 uppercase tracking-wide text-[10px] block">
+              🚨 Atenção Portaria: Morador Contestou Encomenda
+            </span>
+            <p className="mt-1 text-slate-200 text-xs font-medium italic break-words bg-slate-950/70 p-2 rounded-lg border border-red-500/30">
+              "{contestReason}"
+            </p>
+            <span className="text-[10px] text-red-300/80 block mt-1">
+              Verifique a encomenda física na bancada antes de entregar.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* WhatsApp Feedback Banner */}
       {whatsAppFeedback && (
