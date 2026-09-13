@@ -16,6 +16,12 @@ function getSupabaseAdmin() {
   );
 }
 
+const noCacheHeaders = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+};
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -24,7 +30,7 @@ export async function GET(request: NextRequest) {
     if (!condoId) {
       return NextResponse.json(
         { success: false, error: 'condo_id é obrigatório.' },
-        { status: 400 }
+        { status: 400, headers: noCacheHeaders }
       );
     }
 
@@ -40,20 +46,23 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.warn('[api/condos/settings] Erro ao buscar configuração:', error.message);
-      return NextResponse.json({ success: true, stale_days_threshold: 5 });
+      return NextResponse.json({ success: true, stale_days_threshold: 5 }, { headers: noCacheHeaders });
     }
 
     const savedVal = data?.details?.stale_days_threshold;
     const threshold = typeof savedVal === 'number' && savedVal > 0 ? savedVal : 5;
 
-    return NextResponse.json({
-      success: true,
-      condo_id: condoId,
-      stale_days_threshold: threshold,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        condo_id: condoId,
+        stale_days_threshold: threshold,
+      },
+      { headers: noCacheHeaders }
+    );
   } catch (err: any) {
     console.error('[api/condos/settings] Exceção no GET:', err.message);
-    return NextResponse.json({ success: true, stale_days_threshold: 5 });
+    return NextResponse.json({ success: true, stale_days_threshold: 5 }, { headers: noCacheHeaders });
   }
 }
 
@@ -95,17 +104,20 @@ export async function POST(request: NextRequest) {
       console.error('[api/condos/settings] Erro ao gravar configuração:', insertErr.message);
       return NextResponse.json(
         { success: false, error: insertErr.message },
-        { status: 500 }
+        { status: 500, headers: noCacheHeaders }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      condo_id,
-      stale_days_threshold: cleanThreshold,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        condo_id,
+        stale_days_threshold: cleanThreshold,
+      },
+      { headers: noCacheHeaders }
+    );
   } catch (err: any) {
     console.error('[api/condos/settings] Exceção no POST:', err.message);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: 500, headers: noCacheHeaders });
   }
 }

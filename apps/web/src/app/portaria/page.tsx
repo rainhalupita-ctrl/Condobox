@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Package as PackageType } from '../../types/database';
 import { PackageCard } from '../../components/package-card';
@@ -126,27 +126,54 @@ export default function PortariaDashboardPage() {
     }
   }, []);
 
-  // 2. Busca a configuração oficial salva na nuvem para este condomínio
-  useEffect(() => {
-    if (!effectiveCondoId) return;
-    let isMounted = true;
+  // 2. Função robusta para sincronizar a tolerância de alertas com a nuvem (com no-cache garantido)
+  const syncSettingsFromCloud = useCallback(async (condoId?: string) => {
+    const targetCondoId = condoId || effectiveCondoId;
+    if (!targetCondoId) return;
 
-    fetch(`/api/condos/settings?condo_id=${effectiveCondoId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (isMounted && data?.success && typeof data.stale_days_threshold === 'number' && data.stale_days_threshold > 0) {
-          setStaleDaysThreshold(data.stale_days_threshold);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('condobox_stale_days_threshold', data.stale_days_threshold.toString());
-          }
+    try {
+      const res = await fetch(`/api/condos/settings?condo_id=${targetCondoId}&_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+      });
+      const data = await res.json();
+      if (data?.success && typeof data.stale_days_threshold === 'number' && data.stale_days_threshold > 0) {
+        setStaleDaysThreshold(data.stale_days_threshold);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('condobox_stale_days_threshold', data.stale_days_threshold.toString());
         }
-      })
-      .catch((err) => console.warn('[Portaria] Falha ao sincronizar tolerância do condomínio:', err));
+      }
+    } catch (err) {
+      console.warn('[Portaria] Falha ao sincronizar tolerância do condomínio:', err);
+    }
+  }, [effectiveCondoId]);
+
+  // Busca a configuração ao iniciar ou alterar o condomínio ativo
+  useEffect(() => {
+    if (effectiveCondoId) {
+      syncSettingsFromCloud(effectiveCondoId);
+    }
+  }, [effectiveCondoId, syncSettingsFromCloud]);
+
+  // Revalida automaticamente ao focar na janela ou voltar de outro app no celular
+  useEffect(() => {
+    const handleRecheck = () => {
+      if (document.visibilityState === 'visible' && effectiveCondoId) {
+        syncSettingsFromCloud(effectiveCondoId);
+      }
+    };
+
+    window.addEventListener('focus', handleRecheck);
+    document.addEventListener('visibilitychange', handleRecheck);
 
     return () => {
-      isMounted = false;
+      window.removeEventListener('focus', handleRecheck);
+      document.removeEventListener('visibilitychange', handleRecheck);
     };
-  }, [effectiveCondoId]);
+  }, [effectiveCondoId, syncSettingsFromCloud]);
 
   const handleUpdateThreshold = async (days: number) => {
     const clean = Math.max(1, Math.min(60, days));
@@ -157,13 +184,31 @@ export default function PortariaDashboardPage() {
 
     if (!effectiveCondoId) return;
 
-    // A. Dispara broadcast em tempo real para sincronizar os demais aparelhos (PC, celular) na mesma hora
+    // A. Salva no banco de dados para persistência definitiva em novos logins/reloads
+    try {
+      await fetch('/api/condos/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+        body: JSON.stringify({
+          condo_id: effectiveCondoId,
+          stale_days_threshold: clean,
+        }),
+      });
+    } catch (postErr) {
+      console.warn('[Portaria] Falha ao persistir tolerância na nuvem:', postErr);
+    }
+
+    // B. Dispara broadcast em tempo real para sincronizar os demais aparelhos (PC, celular) na mesma hora
     try {
       if (alertChannelRef.current) {
         await alertChannelRef.current.send({
           type: 'broadcast',
           event: 'stale-days-threshold-updated',
-          payload: { threshold: clean, condoId: effectiveCondoId }
+          payload: { threshold: clean, condoId: effectiveCondoId },
         });
       } else {
         const supabase = createClient();
@@ -173,7 +218,7 @@ export default function PortariaDashboardPage() {
             ch.send({
               type: 'broadcast',
               event: 'stale-days-threshold-updated',
-              payload: { threshold: clean, condoId: effectiveCondoId }
+              payload: { threshold: clean, condoId: effectiveCondoId },
             }).finally(() => {
               setTimeout(() => supabase.removeChannel(ch), 2000);
             });
@@ -182,20 +227,6 @@ export default function PortariaDashboardPage() {
       }
     } catch (bcErr) {
       console.warn('[Portaria] Falha ao emitir broadcast de tolerância:', bcErr);
-    }
-
-    // B. Salva no banco de dados para persistência definitiva em novos logins/reloads
-    try {
-      await fetch('/api/condos/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          condo_id: effectiveCondoId,
-          stale_days_threshold: clean
-        })
-      });
-    } catch (postErr) {
-      console.warn('[Portaria] Falha ao persistir tolerância na nuvem:', postErr);
     }
   };
 
@@ -231,6 +262,10 @@ export default function PortariaDashboardPage() {
       setPackages([]);
     } finally {
       setLoading(false);
+      // Sempre re-sincroniza a tolerância para alertar em conjunto com as encomendas
+      if (effectiveCondoId) {
+        syncSettingsFromCloud(effectiveCondoId);
+      }
     }
   };
 
@@ -305,7 +340,10 @@ export default function PortariaDashboardPage() {
     const onSetFilter = (e: any) => {
       if (e.detail) setStatusFilter(e.detail);
     };
-    const onRefresh = () => loadPackages();
+    const onRefresh = () => {
+      loadPackages();
+      if (effectiveCondoId) syncSettingsFromCloud(effectiveCondoId);
+    };
     const onNotify = () => handleNotifyPending();
     const onCloseModals = () => {
       setSelectedForDelivery(null);
