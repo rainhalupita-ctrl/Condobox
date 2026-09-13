@@ -766,8 +766,8 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         </span>
       </div>
 
-      {/* Passo 1: Captura da Foto Imediata (Mantido montado com keepStreamAlive para preservar a permissão e stream da câmera) */}
-      <div className={step === 'CAPTURE' ? 'space-y-5 animate-fade-in' : 'hidden'}>
+      {/* Passo 1: Captura da Foto Imediata (Mantido montado fora de display:none para preservar a permissão e o pipeline de vídeo no iOS) */}
+      <div className={step === 'CAPTURE' ? 'space-y-5 animate-fade-in' : 'fixed -top-[9999px] -left-[9999px] w-1 h-1 opacity-0 pointer-events-none overflow-hidden'}>
         <CameraCapture
           keepStreamAlive={true}
           isCaptureActive={step === 'CAPTURE'}

@@ -284,11 +284,35 @@ export function CameraCapture({
       setIsSteady(false);
 
       const hasLiveTracks = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'live');
-      if (!hasLiveTracks) {
+      if (!hasLiveTracks || !streamRef.current) {
         startCamera();
-      } else if (videoRef.current && videoRef.current.srcObject !== streamRef.current) {
-        videoRef.current.srcObject = streamRef.current;
-        videoRef.current.play().catch(() => {});
+      } else {
+        const video = videoRef.current;
+        if (video) {
+          video.muted = true;
+          video.setAttribute('playsinline', 'true');
+          video.setAttribute('webkit-playsinline', 'true');
+          if (video.srcObject !== streamRef.current) {
+            video.srcObject = streamRef.current;
+          }
+          video.play().catch(() => {});
+
+          // Garante destravamento do renderizador no Safari (evita tela preta por pausa do WebKit)
+          const unfreezePlayback = () => {
+            if (videoRef.current && streamRef.current) {
+              if (videoRef.current.paused || videoRef.current.readyState < 2) {
+                videoRef.current.srcObject = streamRef.current;
+                videoRef.current.play().catch(() => {
+                  startCamera();
+                });
+              }
+            }
+          };
+
+          requestAnimationFrame(unfreezePlayback);
+          setTimeout(unfreezePlayback, 120);
+          setTimeout(unfreezePlayback, 350);
+        }
       }
     } else {
       // Pausado durante a confirmação de dados para economizar CPU
@@ -702,7 +726,18 @@ export function CameraCapture({
       </div>
 
       {/* Viewport da Câmera ou Preview com Guia Visual Anti-Tremor */}
-      <div className="relative w-full h-[58vh] sm:h-[62vh] min-h-[440px] max-h-[680px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner">
+      <div 
+        onClick={() => {
+          if (videoRef.current) {
+            if (videoRef.current.paused) {
+              videoRef.current.play().catch(() => startCamera());
+            } else if (videoRef.current.readyState < 2) {
+              startCamera();
+            }
+          }
+        }}
+        className="relative w-full h-[58vh] sm:h-[62vh] min-h-[440px] max-h-[680px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner cursor-pointer"
+      >
         {capturedPreview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -731,6 +766,17 @@ export function CameraCapture({
               disablePictureInPicture
               // @ts-ignore
               webkit-playsinline="true"
+              onPause={() => {
+                if (isCaptureActive && !capturedBlob && streamRef.current) {
+                  videoRef.current?.play().catch(() => {});
+                }
+              }}
+              onLoadedMetadata={() => {
+                videoRef.current?.play().catch(() => {});
+              }}
+              onCanPlay={() => {
+                videoRef.current?.play().catch(() => {});
+              }}
               className="w-full h-full object-cover pointer-events-none select-none"
             />
 
