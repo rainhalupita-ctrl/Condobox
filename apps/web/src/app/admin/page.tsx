@@ -311,12 +311,22 @@ export default function AdminPage() {
         setWhatsappQrCode(null);
         setWhatsappError(null);
       } else {
-        const fallbackSt = await LocalApiClient.getWhatsAppStatus();
-        if (fallbackSt?.qrcode) {
-          setWhatsappQrCode(fallbackSt.qrcode);
-          setWhatsappState(fallbackSt);
-          setWhatsappError(null);
-          return;
+        // Polling curto de contingência caso o QR Code esteja sendo finalizado
+        for (let i = 0; i < 6; i++) {
+          await new Promise(r => setTimeout(r, 600));
+          const fallbackSt = await LocalApiClient.getWhatsAppStatus();
+          if (fallbackSt?.qrcode) {
+            setWhatsappQrCode(fallbackSt.qrcode);
+            setWhatsappState(fallbackSt);
+            setWhatsappError(null);
+            return;
+          }
+          if (fallbackSt?.connected) {
+            setWhatsappState(fallbackSt);
+            setWhatsappQrCode(null);
+            setWhatsappError(null);
+            return;
+          }
         }
       }
 
@@ -334,7 +344,7 @@ export default function AdminPage() {
   };
 
   const handleLogoutWhatsApp = async () => {
-    if (!confirm('Deseja realmente desconectar e deslogar o WhatsApp da Portaria? Será necessário escanear o QR Code novamente.')) {
+    if (!confirm('Deseja realmente desconectar e deslogar o WhatsApp da Portaria? Um novo QR Code será gerado imediatamente para pareamento.')) {
       return;
     }
     setWhatsappLoading(true);
@@ -348,10 +358,19 @@ export default function AdminPage() {
 
     try {
       const res = await LocalApiClient.logoutWhatsApp();
-      const st = await LocalApiClient.getWhatsAppStatus();
-      setWhatsappState(st);
-      setWhatsappQrCode(null);
-      alert(res?.message || 'Sessão do WhatsApp desconectada com sucesso!');
+      if (res?.qrcode) {
+        setWhatsappQrCode(res.qrcode);
+        setWhatsappState(prev => ({ ...prev, qrcode: res.qrcode, connected: false, status: 'DISCONNECTED', phone: null }));
+      } else {
+        const st = await LocalApiClient.getWhatsAppStatus();
+        setWhatsappState(st);
+        if (st?.qrcode) {
+          setWhatsappQrCode(st.qrcode);
+        } else {
+          setWhatsappQrCode(null);
+        }
+      }
+      alert(res?.message || 'Sessão do WhatsApp desconectada com sucesso! Um novo QR Code foi gerado para pareamento.');
     } catch (err: any) {
       console.error('Erro ao desconectar WhatsApp:', err);
     } finally {

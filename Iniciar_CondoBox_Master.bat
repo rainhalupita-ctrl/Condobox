@@ -4,10 +4,15 @@ title CondoBox SaaS Master
 REM 1. Fecha eventuais instancias anteriores do Electron
 taskkill /F /IM electron.exe >nul 2>&1
 
-REM 2. Garante que o servidor web esteja rodando na porta 3000 de forma 100% invisivel
+REM 2. Garante que o servidor web (3000) e a API local (3001) estejam rodando de forma 100% invisivel
 netstat -ano | findstr :3000 >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c npm run dev' -WorkingDirectory '%~dp0apps\web' -WindowStyle Hidden"
+)
+
+netstat -ano | findstr :3001 >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c npm run dev' -WorkingDirectory '%~dp0apps\local-api' -WindowStyle Hidden"
 )
 
 set "ELECTRON_EXE=%~dp0apps\desktop\node_modules\electron\dist\electron.exe"

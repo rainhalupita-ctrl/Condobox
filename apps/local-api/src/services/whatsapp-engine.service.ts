@@ -164,13 +164,31 @@ export class WhatsAppEngineService {
     this.reconnectAttempts = 0;
 
     try {
+      // 1. Auto-recuperação (Self-Healing): se creds.json estiver corrompido, vazio ou sem chaves, limpa a sessão
+      const credsFile = path.join(this.sessionDir, 'creds.json');
+      if (fs.existsSync(credsFile)) {
+        try {
+          const raw = fs.readFileSync(credsFile, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (!parsed || !parsed.noiseKey || !parsed.signedIdentityKey) {
+            console.warn('⚠️ [WhatsApp Engine] creds.json corrompido ou incompleto detectado. Resetando sessão para novo pareamento...');
+            this.cleanSessionDir();
+          }
+        } catch (parseErr) {
+          console.warn('⚠️ [WhatsApp Engine] Erro ao analisar creds.json (JSON inválido). Resetando sessão...');
+          this.cleanSessionDir();
+        }
+      }
+
       const { state, saveCreds } = await useMultiFileAuthState(this.sessionDir);
-      if (state.creds?.me?.id) {
+      if (state.creds?.me?.id && state.creds?.registered !== false) {
         const meId = state.creds.me.id;
         this.connectedPhone = meId.split(':')[0] || meId.split('@')[0];
         if (this.connectedPhone) {
           this.syncConnectedPhoneToCondo(this.connectedPhone);
         }
+      } else {
+        this.connectedPhone = null;
       }
 
       const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] as [number, number, number] }));
@@ -216,7 +234,7 @@ export class WhatsAppEngineService {
           this.broadcastStatus();
 
           if (statusCode === DisconnectReason.loggedOut) {
-            console.log('🔒 [WhatsApp Engine] Sessão deslogada. Limpando credenciais locais e gerando novo QR Code...');
+            console.log('🔒 [WhatsApp Engine] Sessão deslogada pelo WhatsApp. Limpando credenciais locais e gerando novo QR Code...');
             this.cleanSessionDir();
             this.qrCodeBase64 = null;
             this.reconnectAttempts = 0;
@@ -224,7 +242,7 @@ export class WhatsAppEngineService {
             // Reinicia imediatamente com sessão limpa para emitir novo QR Code para pareamento
             setTimeout(() => {
               this.initialize().catch(() => {});
-            }, 1000);
+            }, 800);
           } else if (shouldReconnect) {
             this.scheduleReconnect();
           }
@@ -284,28 +302,26 @@ export class WhatsAppEngineService {
     }, delay);
   }
 
-  private cleanSessionDir() {
+  private cleanSessionDir(): void {
     try {
       if (fs.existsSync(this.sessionDir)) {
-        const files = fs.readdirSync(this.sessionDir);
-        for (const file of files) {
-          const filePath = path.join(this.sessionDir, file);
-          try {
-            if (fs.statSync(filePath).isDirectory()) {
-              fs.rmSync(filePath, { recursive: true, force: true });
-            } else {
-              if (file.startsWith('creds')) {
-                fs.writeFileSync(filePath, '{}', 'utf-8');
-              }
-              fs.unlinkSync(filePath);
-            }
-          } catch (fileErr: any) {
+        try {
+          fs.rmSync(this.sessionDir, { recursive: true, force: true });
+        } catch (rmErr: any) {
+          console.warn('[WhatsApp Engine] rmSync direto falhou, limpando itens individualmente:', rmErr.message);
+          const files = fs.readdirSync(this.sessionDir);
+          for (const file of files) {
             try {
-              fs.writeFileSync(filePath, '', 'utf-8');
+              const fullPath = path.join(this.sessionDir, file);
+              fs.rmSync(fullPath, { recursive: true, force: true });
             } catch {}
           }
         }
       }
+      if (!fs.existsSync(this.sessionDir)) {
+        fs.mkdirSync(this.sessionDir, { recursive: true });
+      }
+      console.log('🧹 [WhatsApp Engine] Diretório de sessão limpo com sucesso.');
     } catch (err: any) {
       console.error('[WhatsApp Engine] Erro ao limpar diretório de sessão:', err.message);
     }
@@ -325,8 +341,16 @@ export class WhatsAppEngineService {
         this.socket.ev.removeAllListeners('creds.update');
         this.socket.ev.removeAllListeners('messages.upsert');
         this.socket.ev.removeAllListeners('messages.reaction');
-        await this.socket.logout().catch(() => {});
-        this.socket.end(new Error('Logout manual'));
+
+        // Logout com timeout para não travar a requisição caso a conexão já esteja fechada
+        await Promise.race([
+          this.socket.logout().catch(() => {}),
+          new Promise((r) => setTimeout(r, 1500))
+        ]);
+
+        try {
+          this.socket.end(new Error('Logout manual'));
+        } catch {}
       } catch (err: any) {
         console.warn('[WhatsApp Engine] Aviso ao finalizar socket:', err.message);
       }
@@ -340,7 +364,14 @@ export class WhatsAppEngineService {
     this.qrCodeBase64 = null;
     this.reconnectAttempts = 0;
     this.broadcastStatus();
-    console.log('🔓 [WhatsApp Engine] Sessão encerrada manualmente.');
+    console.log('🔓 [WhatsApp Engine] Sessão encerrada e limpa.');
+
+    // Reinicia imediatamente para emitir um novo QR Code pronto para pareamento
+    setTimeout(() => {
+      this.initialize().catch((err: any) => {
+        console.error('[WhatsApp Engine] Erro ao gerar novo QR Code após logout:', err?.message);
+      });
+    }, 600);
   }
 
   private bridgeChannel: any = null;

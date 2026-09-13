@@ -279,13 +279,19 @@ function startLocalApi() {
   console.log(`[CondoBox] Diretório de dados persistentes: ${dataDir}`);
 
   try {
+    const logFilePath = path.join(dataDir, "local-api.log");
+    const logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+
     apiProcess = spawn(nodeExe, [scriptPath], {
       cwd: cwd,
       env: childEnv,
-      stdio: "inherit",
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       detached: false,
     });
+
+    if (apiProcess.stdout) apiProcess.stdout.pipe(logStream);
+    if (apiProcess.stderr) apiProcess.stderr.pipe(logStream);
 
     apiProcess.on("error", (err) => {
       console.error(`[CondoBox] Erro ao iniciar processo da API via ${nodeExe}:`, err?.message);
@@ -293,10 +299,34 @@ function startLocalApi() {
 
     apiProcess.on("exit", (code) => {
       console.log(`[CondoBox] Processo da API local finalizado com código ${code}`);
+      apiProcess = null;
     });
   } catch (err) {
     console.error("[CondoBox] Falha crítica ao disparar API Local:", err?.message);
   }
+}
+
+let localApiWatchdogInterval = null;
+
+function setupLocalApiWatchdog() {
+  if (localApiWatchdogInterval) return;
+  const net = require("net");
+
+  localApiWatchdogInterval = setInterval(() => {
+    const socket = new net.Socket();
+    socket.setTimeout(800);
+    socket.on("connect", () => {
+      socket.destroy();
+    });
+    const handleDown = () => {
+      socket.destroy();
+      console.log("[CondoBox] Watchdog: API local (3001) inativa. Reiniciando...");
+      startLocalApi();
+    };
+    socket.on("error", handleDown);
+    socket.on("timeout", handleDown);
+    socket.connect(3001, "127.0.0.1");
+  }, 10000);
 }
 
 app.whenReady().then(() => {
@@ -311,6 +341,7 @@ app.whenReady().then(() => {
   });
 
   startLocalApi();
+  setupLocalApiWatchdog();
   createSplash();
   createWindow();
 

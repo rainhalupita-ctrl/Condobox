@@ -26,7 +26,7 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
 
       // Aguarda até o QR Code ser gerado pelo Baileys (ou conexão ser restabelecida)
       let attempts = 0;
-      while (!whatsAppEngineService.getStatus().qrcode && !whatsAppEngineService.getStatus().connected && attempts < 15) {
+      while (!whatsAppEngineService.getStatus().qrcode && !whatsAppEngineService.getStatus().connected && attempts < 40) {
         await new Promise(r => setTimeout(r, 200));
         attempts++;
       }
@@ -57,9 +57,19 @@ export async function whatsappRoutes(fastify: FastifyInstance) {
   const logoutHandler = async (_request: any, reply: any) => {
     try {
       await whatsAppEngineService.logout();
+
+      // Aguarda brevemente a emissão do novo QR code para novo pareamento
+      let attempts = 0;
+      while (!whatsAppEngineService.getStatus().qrcode && attempts < 30) {
+        await new Promise(r => setTimeout(r, 200));
+        attempts++;
+      }
+
+      const status = whatsAppEngineService.getStatus();
       return reply.send({
         success: true,
-        message: 'WhatsApp desconectado com sucesso.'
+        message: 'WhatsApp desconectado com sucesso. Novo QR Code gerado para pareamento.',
+        ...status
       });
     } catch (err: any) {
       return reply.status(500).send({

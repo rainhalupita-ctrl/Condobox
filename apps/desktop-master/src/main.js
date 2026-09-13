@@ -102,12 +102,57 @@ function ensureWebServer() {
   });
 }
 
-// Watchdog continuo para manter o servidor web sempre ativo na porta 3000
+let isStartingLocalApi = false;
+
+function ensureLocalApi() {
+  if (isStartingLocalApi) return Promise.resolve();
+  return checkPortListening(3001).then((isListening) => {
+    if (!isListening) {
+      isStartingLocalApi = true;
+      log("Porta 3001 nao esta escutando. Iniciando apps/local-api em background...");
+      const apiDir = path.resolve(__dirname, "..", "..", "local-api");
+
+      try {
+        if (process.platform === "win32") {
+          spawn("powershell.exe", [
+            "-WindowStyle", "Hidden",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-Command",
+            `Start-Process cmd.exe -ArgumentList '/c npm run dev' -WorkingDirectory '${apiDir}' -WindowStyle Hidden`
+          ], {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          }).unref();
+        } else {
+          spawn("npm", ["run", "dev"], {
+            cwd: apiDir,
+            detached: true,
+            stdio: "ignore",
+          }).unref();
+        }
+      } catch (err) {
+        log("Erro ao iniciar local-api:", err.message);
+      } finally {
+        setTimeout(() => { isStartingLocalApi = false; }, 4000);
+      }
+    }
+  });
+}
+
+// Watchdog continuo para manter o servidor web (3000) e local-api (3001) sempre ativos
 setInterval(() => {
   checkPortListening(3000).then((isListening) => {
     if (!isListening && !isStartingWebServer) {
       log("Watchdog: Servidor web (porta 3000) indisponivel. Relancando...");
       ensureWebServer();
+    }
+  });
+  checkPortListening(3001).then((isListening) => {
+    if (!isListening && !isStartingLocalApi) {
+      log("Watchdog: Local API (porta 3001) indisponivel. Relancando...");
+      ensureLocalApi();
     }
   });
 }, 4000);
@@ -139,8 +184,9 @@ function createWindow() {
   log("Carregando loading.html local:", loadingHtmlPath);
   mainWindow.loadFile(loadingHtmlPath);
 
-  // Garante inicializacao do servidor web se necessario
+  // Garante inicializacao do servidor web e api local se necessario
   ensureWebServer();
+  ensureLocalApi();
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
