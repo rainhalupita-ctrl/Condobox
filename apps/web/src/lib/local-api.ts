@@ -256,6 +256,66 @@ export class LocalApiClient {
   }
 
   /**
+   * Exclui definitivamente uma encomenda (Ação de Síndico/Admin)
+   */
+  static async deletePackage(packageId: string): Promise<{ success: boolean; error?: string }> {
+    const baseUrl = this.getBaseUrl();
+    try {
+      // 1. Tenta API local se conectada
+      if (baseUrl) {
+        try {
+          const localRes = await fetch(`${baseUrl}/api/packages/${packageId}`, {
+            method: 'DELETE',
+            signal: AbortSignal.timeout(3000)
+          });
+          if (localRes.ok) return await localRes.json();
+        } catch {}
+      }
+
+      // 2. Chama rota Next.js com Supabase
+      const res = await fetch(`/api/packages/${packageId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) return await res.json();
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, error: errData.error || 'Falha ao excluir encomenda' };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Marca a encomenda como devolvida ao entregador / cancelada (Ação de Síndico/Admin)
+   */
+  static async returnPackage(packageId: string, reason?: string): Promise<{ success: boolean; error?: string }> {
+    const baseUrl = this.getBaseUrl();
+    try {
+      if (baseUrl) {
+        try {
+          const localRes = await fetch(`${baseUrl}/api/packages/${packageId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'RETURNED', reason }),
+            signal: AbortSignal.timeout(3000)
+          });
+          if (localRes.ok) return await localRes.json();
+        } catch {}
+      }
+
+      const res = await fetch(`/api/packages/${packageId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'RETURNED', reason })
+      });
+      if (res.ok) return await res.json();
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, error: errData.error || 'Falha ao devolver encomenda' };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
    * Checagem de saúde da API local
    */
   static async checkHealth() {

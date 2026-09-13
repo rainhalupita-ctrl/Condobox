@@ -312,4 +312,75 @@ export async function packageRoutes(fastify) {
             });
         }
     });
+    /**
+     * DELETE /api/packages/:id
+     * Exclui definitivamente a encomenda do SQLite local e sincroniza com o Supabase
+     */
+    fastify.delete('/api/packages/:id', async (request, reply) => {
+        const { id } = request.params;
+        try {
+            const deletedLocal = databaseService.deletePackage(id);
+            // Sincroniza exclusão no Supabase se conectado
+            if (supabaseService.isConfigured()) {
+                try {
+                    const client = supabaseService.getClient();
+                    await client.from('packages').delete().eq('id', id);
+                }
+                catch (cloudErr) {
+                    console.warn('[PackageRoutes] Falha ao excluir pacote no Supabase:', cloudErr?.message);
+                }
+            }
+            return reply.send({
+                success: true,
+                deleted: deletedLocal,
+                message: 'Encomenda excluída com sucesso.'
+            });
+        }
+        catch (err) {
+            return reply.status(500).send({
+                success: false,
+                error: `Erro ao excluir encomenda: ${err.message}`
+            });
+        }
+    });
+    /**
+     * PATCH /api/packages/:id/status
+     * Altera status da encomenda (ex: 'RETURNED' / Devolvida ao entregador)
+     */
+    fastify.patch('/api/packages/:id/status', async (request, reply) => {
+        const { id } = request.params;
+        const { status, reason } = request.body || {};
+        try {
+            if (status === 'RETURNED') {
+                databaseService.returnPackage(id, reason);
+            }
+            else if (status) {
+                databaseService.updatePackageStatus(id, status);
+            }
+            // Sincroniza no Supabase se configurado
+            if (supabaseService.isConfigured()) {
+                try {
+                    const client = supabaseService.getClient();
+                    const updateData = { status: status || 'RETURNED' };
+                    if (reason) {
+                        updateData.notes = `[DEVOLVIDA AO ENTREGADOR]: ${reason}`;
+                    }
+                    await client.from('packages').update(updateData).eq('id', id);
+                }
+                catch (cloudErr) {
+                    console.warn('[PackageRoutes] Falha ao atualizar status no Supabase:', cloudErr?.message);
+                }
+            }
+            return reply.send({
+                success: true,
+                message: 'Status da encomenda atualizado com sucesso.'
+            });
+        }
+        catch (err) {
+            return reply.status(500).send({
+                success: false,
+                error: `Erro ao atualizar status da encomenda: ${err.message}`
+            });
+        }
+    });
 }

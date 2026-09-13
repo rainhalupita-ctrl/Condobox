@@ -32,6 +32,19 @@ export default function RetiradaPage() {
   const [receiptData, setReceiptData] = useState<any | null>(null);
   const [additionalPendingPackages, setAdditionalPendingPackages] = useState<PackageType[]>([]);
   const [isFlushingBatch, setIsFlushingBatch] = useState(false);
+  const [nextPackageCodeInput, setNextPackageCodeInput] = useState('');
+  const [nextPackageCodeError, setNextPackageCodeError] = useState<string | null>(null);
+
+  // Remove marcações internas como CIENTE e DELIVERY_NOTIFIED para exibição amigável
+  const getCleanNotes = (notes?: string | null) => {
+    if (!notes) return null;
+    const clean = notes
+      .split(';')
+      .filter((n) => !n.startsWith('CIENTE:') && !n.startsWith('DELIVERY_NOTIFIED:') && !n.startsWith('Ciência confirmada'))
+      .join(' ')
+      .trim();
+    return clean || null;
+  };
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -171,24 +184,26 @@ export default function RetiradaPage() {
         });
       });
 
-      // Busca outras encomendas pendentes para este mesmo morador / unidade
+      // Busca apenas encomendas que realmente NÃO foram recebidas/entregues ainda deste morador
       let otherPending: PackageType[] = [];
-      if (supabase && (scannedPackage.unit_id || scannedPackage.resident_id)) {
+      if (supabase && (scannedPackage.resident_id || scannedPackage.unit_id)) {
         try {
           let pendingQuery = supabase
             .from('packages')
             .select('*, unit:units(*), resident:residents(*)')
             .neq('id', scannedPackage.id)
-            .neq('status', 'DELIVERED');
+            .in('status', ['RECEIVED', 'NOTIFIED'])
+            .is('delivered_at', null);
 
           if (scannedPackage.condo_id || effectiveCondoId) {
             pendingQuery = pendingQuery.eq('condo_id', scannedPackage.condo_id || effectiveCondoId);
           }
 
-          if (scannedPackage.unit_id) {
-            pendingQuery = pendingQuery.eq('unit_id', scannedPackage.unit_id);
-          } else if (scannedPackage.resident_id) {
+          // Filtra estritamente pelo morador específico que está retirando
+          if (scannedPackage.resident_id) {
             pendingQuery = pendingQuery.eq('resident_id', scannedPackage.resident_id);
+          } else if (scannedPackage.unit_id) {
+            pendingQuery = pendingQuery.eq('unit_id', scannedPackage.unit_id);
           }
 
           const { data } = await pendingQuery;
@@ -210,12 +225,37 @@ export default function RetiradaPage() {
     }
   };
 
-  const handleDeliverNextImmediately = (nextPkg: PackageType) => {
-    setScannedPackage(nextPkg);
-    setAdditionalPendingPackages(prev => prev.filter(p => p.id !== nextPkg.id));
-    setReceiptData(null);
+  const handleValidateNextCode = async (codeToVerify: string) => {
+    const clean = codeToVerify.trim().toUpperCase();
+    if (!clean) return;
+    setNextPackageCodeError(null);
+
+    // 1. Verifica se o código confere com alguma das encomendas pendentes deste morador
+    const match = additionalPendingPackages.find(
+      (p) => p.pickup_code?.toUpperCase() === clean || p.qr_token?.toUpperCase() === clean
+    );
+
+    if (match) {
+      setScannedPackage(match);
+      setAdditionalPendingPackages((prev) => prev.filter((p) => p.id !== match.id));
+      setReceiptData(null);
+      setErrorMessage(null);
+      setNextPackageCodeInput('');
+      setNextPackageCodeError(null);
+      setStep('SIGN');
+      return;
+    }
+
+    // 2. Se não bateu na lista pendente deste morador, avisa o porteiro
+    setNextPackageCodeError(`Código "${clean}" não confere com as encomendas pendentes deste morador.`);
+  };
+
+  const handleStartScanningNext = () => {
+    setStep('SCAN');
+    setScannedPackage(null);
     setErrorMessage(null);
-    setStep('SIGN');
+    setNextPackageCodeInput('');
+    setNextPackageCodeError(null);
   };
 
   const handleFinishWithoutOthers = async () => {
@@ -240,6 +280,8 @@ export default function RetiradaPage() {
     setReceiptData(null);
     setErrorMessage(null);
     setAdditionalPendingPackages([]);
+    setNextPackageCodeInput('');
+    setNextPackageCodeError(null);
   };
 
   return (
@@ -362,7 +404,7 @@ export default function RetiradaPage() {
 
           {/* Card Interativo de Encomendas Adicionais Pendentes */}
           {additionalPendingPackages.length > 0 && (
-            <div className="p-5 bg-amber-500/10 border-2 border-amber-500/40 rounded-3xl text-left space-y-4 shadow-xl">
+            <div className="p-5 bg-amber-500/10 border-2 border-amber-500/40 rounded-3xl text-left space-y-4 shadow-xl animate-fade-in">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl">
                   <Package className="w-6 h-6" />
@@ -377,51 +419,112 @@ export default function RetiradaPage() {
                 </div>
               </div>
 
+              {/* Lista das encomendas restantes (sem exibir o código secreto do morador) */}
               <div className="space-y-2">
-                {additionalPendingPackages.map((pkg, idx) => (
-                  <div
-                    key={pkg.id}
-                    className="flex items-center justify-between p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-[10px]">
-                        {idx + 1}
+                {additionalPendingPackages.map((pkg, idx) => {
+                  const cleanNotes = getCleanNotes(pkg.notes);
+                  const receivedDate = pkg.received_at
+                    ? new Date(pkg.received_at).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })
+                    : null;
+
+                  return (
+                    <div
+                      key={pkg.id}
+                      className="flex items-center justify-between p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-[10px] shrink-0">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-100 block truncate">{pkg.carrier}</span>
+                          {receivedDate && (
+                            <span className="text-[10px] text-slate-400 block">Recebida em: {receivedDate}</span>
+                          )}
+                          {cleanNotes && (
+                            <span className="text-[10px] text-amber-400/90 block truncate">{cleanNotes}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-lg shrink-0">
+                        Aguardando Validação
                       </span>
-                      <span className="font-bold text-slate-100">{pkg.carrier}</span>
-                      {pkg.notes && <span className="text-[10px] text-slate-400">({pkg.notes})</span>}
                     </div>
-                    <span className="font-mono font-bold text-amber-300 bg-amber-950/80 border border-amber-800/60 px-2 py-0.5 rounded-md text-[11px]">
-                      Cód: {pkg.pickup_code}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              <p className="text-xs font-bold text-amber-200 text-center">
-                Deseja seguir com o recebimento do outro pacote do morador agora?
-              </p>
+              <div className="p-4 bg-slate-950/70 border border-amber-500/30 rounded-2xl space-y-3">
+                <p className="text-xs font-bold text-amber-200">
+                  Para fazer a retirada do outro pacote, bipe o QR Code ou insira o código do morador:
+                </p>
 
-              <div className="flex flex-col sm:flex-row gap-2.5">
+                {/* Inserir Código do Morador */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleValidateNextCode(nextPackageCodeInput);
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={nextPackageCodeInput}
+                    onChange={(e) => {
+                      setNextPackageCodeInput(e.target.value.toUpperCase());
+                      setNextPackageCodeError(null);
+                    }}
+                    placeholder="Digite o código (ex: 7E50DB)..."
+                    maxLength={10}
+                    className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl text-amber-300 font-mono font-bold text-center uppercase tracking-widest text-sm outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!nextPackageCodeInput.trim() || isLoading}
+                    className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs rounded-xl transition flex items-center gap-1.5 shadow-md shadow-amber-950/50 active:scale-95 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Validar
+                  </button>
+                </form>
+
+                {nextPackageCodeError && (
+                  <p className="text-xs text-rose-400 font-semibold flex items-center gap-1.5 animate-fade-in">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {nextPackageCodeError}
+                  </p>
+                )}
+
+                {/* Botão de Bipar QR Code com a Câmera */}
                 <button
                   type="button"
-                  onClick={() => handleDeliverNextImmediately(additionalPendingPackages[0])}
-                  className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-950/50 transition flex items-center justify-center gap-2 active:scale-[0.98]"
+                  onClick={handleStartScanningNext}
+                  className="w-full py-2.5 px-4 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 text-sky-300 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-sm active:scale-98 cursor-pointer"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  Sim, Entregar Próximo Pacote Agora
+                  <QrCode className="w-4 h-4 text-sky-400" />
+                  <span>Bipar QR Code com a Câmera</span>
                 </button>
+              </div>
+
+              {/* Botão Finalizar Atendimento */}
+              <div className="pt-1">
                 <button
                   type="button"
                   disabled={isFlushingBatch}
                   onClick={handleFinishWithoutOthers}
-                  className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl border border-slate-700 transition active:scale-[0.98]"
+                  className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl border border-slate-700 transition active:scale-[0.98] cursor-pointer"
                 >
-                  {isFlushingBatch ? 'Enviando WhatsApp...' : 'Não, Finalizar Atendimento'}
+                  {isFlushingBatch ? 'Enviando WhatsApp...' : 'Finalizar Atendimento (Entregar apenas este)'}
                 </button>
               </div>
 
               <p className="text-[10px] text-center text-slate-500">
-                💡 Se optar por não entregar ou trocar de tela, a notificação deste pacote será enviada normalmente.
+                💡 Ao finalizar, o morador receberá a notificação de confirmação da retirada feita.
               </p>
             </div>
           )}

@@ -41,7 +41,11 @@ import {
   X,
   Check,
   ChevronDown,
-  Pencil
+  Pencil,
+  Eye,
+  Copy,
+  ExternalLink,
+  ShieldCheck
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { PackageCard } from '../../components/package-card';
@@ -58,7 +62,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'METRICS' | 'PACKAGES' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM' | 'AUTOMATIONS'>('METRICS');
   const [packageSearchQuery, setPackageSearchQuery] = useState('');
-  const [packageStatusFilter, setPackageStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED'>('ALL');
+  const [packageStatusFilter, setPackageStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED' | 'RETURNED'>('ALL');
 
   // Automações & Utilidades (Python & JS)
   const [reportResult, setReportResult] = useState<any>(null);
@@ -122,6 +126,12 @@ export default function AdminPage() {
   const [newResUnitNumber, setNewResUnitNumber] = useState('');
   const [isUnitDropdownOpen, setIsUnitDropdownOpen] = useState(false);
 
+  // Modal de Perfil Completo do Morador
+  const [selectedResidentProfile, setSelectedResidentProfile] = useState<Resident | null>(null);
+  const [profilePackageFilter, setProfilePackageFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED' | 'RETURNED'>('ALL');
+  const [profilePackageSearch, setProfilePackageSearch] = useState('');
+  const [copiedPhone, setCopiedPhone] = useState(false);
+
   // Modal de Detalhes da Unidade / Moradores do Apartamento
   const [selectedUnitModal, setSelectedUnitModal] = useState<Unit | null>(null);
   const [isUnitAddResidentOpen, setIsUnitAddResidentOpen] = useState(false);
@@ -136,6 +146,16 @@ export default function AdminPage() {
       loadData();
     }
   }, [authLoading, effectiveCondoId]);
+
+  // Fecha modal de perfil de morador com ESC
+  useEffect(() => {
+    if (!selectedResidentProfile) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedResidentProfile(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedResidentProfile]);
 
   // Ponte Supabase Realtime para WhatsApp (comunicação instantânea nuvem <-> portaria)
   useEffect(() => {
@@ -738,6 +758,9 @@ export default function AdminPage() {
       alert(`Erro ao excluir morador: ${error.message}`);
     } else {
       setResidents((prev) => prev.filter((r) => r.id !== residentId));
+      if (selectedResidentProfile?.id === residentId) {
+        setSelectedResidentProfile(null);
+      }
       loadData();
     }
   };
@@ -936,13 +959,15 @@ export default function AdminPage() {
     }
   };
 
-  const pendingCount = packages.filter(p => p.status !== 'DELIVERED').length;
+  const pendingCount = packages.filter(p => p.status !== 'DELIVERED' && p.status !== 'RETURNED').length;
   const deliveredCount = packages.filter(p => p.status === 'DELIVERED').length;
+  const returnedCount = packages.filter(p => p.status === 'RETURNED').length;
   const totalCount = packages.length;
 
   const filteredPackages = packages.filter((pkg) => {
-    if (packageStatusFilter === 'PENDING' && pkg.status === 'DELIVERED') return false;
+    if (packageStatusFilter === 'PENDING' && (pkg.status === 'DELIVERED' || pkg.status === 'RETURNED')) return false;
     if (packageStatusFilter === 'DELIVERED' && pkg.status !== 'DELIVERED') return false;
+    if (packageStatusFilter === 'RETURNED' && pkg.status !== 'RETURNED') return false;
 
     if (!packageSearchQuery.trim()) return true;
     const q = packageSearchQuery.toLowerCase();
@@ -1226,6 +1251,17 @@ export default function AdminPage() {
                     }`}
                   >
                     Entregues ({deliveredCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPackageStatusFilter('RETURNED')}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                      packageStatusFilter === 'RETURNED'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Devolvidas ({returnedCount})
                   </button>
                 </div>
 
@@ -1644,21 +1680,31 @@ export default function AdminPage() {
                     .map((r) => (
                       <tr
                         key={r.id}
-                        onClick={() => handleOpenEditResidentModal(r)}
+                        onClick={() => {
+                          setSelectedResidentProfile(r);
+                          setProfilePackageFilter('ALL');
+                          setProfilePackageSearch('');
+                        }}
                         className="hover:bg-slate-800/60 transition group cursor-pointer"
-                        title={`Clique para editar os dados de ${r.name}`}
+                        title={`Clique para ver o perfil completo e histórico de encomendas de ${r.name}`}
                       >
                         <td className="p-4 font-semibold text-slate-100">
-                          <div className="flex items-center gap-2">
-                            <span className="group-hover:text-indigo-400 transition font-bold">
-                              {r.name}
-                            </span>
-                            {r.is_primary && (
-                              <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded">
-                                Titular
-                              </span>
-                            )}
-                            <Pencil className="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold text-xs shrink-0 group-hover:scale-105 group-hover:border-indigo-500/60 transition">
+                              {r.name ? r.name.substring(0, 2).toUpperCase() : <Users size={14} />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="group-hover:text-indigo-400 transition font-bold truncate">
+                                  {r.name}
+                                </span>
+                                {r.is_primary && (
+                                  <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded font-semibold shrink-0">
+                                    Titular
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </td>
                         <td className="p-4 font-medium text-slate-200">
@@ -1677,6 +1723,18 @@ export default function AdminPage() {
                         </td>
                         <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedResidentProfile(r);
+                                setProfilePackageFilter('ALL');
+                                setProfilePackageSearch('');
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Ver Perfil e Encomendas"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleOpenEditResidentModal(r)}
@@ -2326,9 +2384,13 @@ export default function AdminPage() {
                     {unitResidents.map((r) => (
                       <div
                         key={r.id}
-                        onClick={() => handleOpenEditResidentModal(r)}
+                        onClick={() => {
+                          setSelectedResidentProfile(r);
+                          setProfilePackageFilter('ALL');
+                          setProfilePackageSearch('');
+                        }}
                         className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 hover:border-indigo-500/50 hover:bg-slate-900/80 transition flex items-center justify-between gap-3 cursor-pointer group"
-                        title={`Clique para editar os dados de ${r.name}`}
+                        title={`Clique para ver o perfil completo e encomendas de ${r.name}`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-bold text-xs shrink-0 group-hover:border-indigo-500/50 transition">
@@ -2342,7 +2404,6 @@ export default function AdminPage() {
                                   Titular
                                 </span>
                               )}
-                              <Pencil className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition" />
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                               <span className="flex items-center gap-1 font-mono text-emerald-400 font-semibold">
@@ -2358,6 +2419,18 @@ export default function AdminPage() {
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedResidentProfile(r);
+                              setProfilePackageFilter('ALL');
+                              setProfilePackageSearch('');
+                            }}
+                            className="p-2 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition"
+                            title="Ver Perfil e Encomendas"
+                          >
+                            <Eye size={14} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleOpenEditResidentModal(r)}
@@ -2476,9 +2549,467 @@ export default function AdminPage() {
         );
       })()}
 
+      {/* Modal de Perfil Completo do Morador */}
+      {selectedResidentProfile && (() => {
+        const activeProfile = residents.find((r) => r.id === selectedResidentProfile.id) || selectedResidentProfile;
+
+        // Encomendas vinculadas ao morador (por resident_id OU pela unidade)
+        const profilePackages = packages.filter((p) => {
+          if (p.resident_id && p.resident_id === activeProfile.id) return true;
+          if (activeProfile.unit_id && p.unit_id === activeProfile.unit_id) return true;
+          if (
+            activeProfile.unit &&
+            p.unit &&
+            (p.unit.block || 'Bloco A').toUpperCase() === (activeProfile.unit.block || 'Bloco A').toUpperCase() &&
+            p.unit.unit_number === activeProfile.unit.unit_number
+          ) {
+            return true;
+          }
+          return false;
+        });
+
+        const pendingPkgs = profilePackages.filter((p) => p.status === 'RECEIVED' || p.status === 'NOTIFIED');
+        const deliveredPkgs = profilePackages.filter((p) => p.status === 'DELIVERED');
+        const returnedPkgs = profilePackages.filter((p) => p.status === 'RETURNED');
+
+        const filteredProfilePkgs = profilePackages.filter((p) => {
+          if (profilePackageFilter === 'PENDING' && p.status !== 'RECEIVED' && p.status !== 'NOTIFIED') return false;
+          if (profilePackageFilter === 'DELIVERED' && p.status !== 'DELIVERED') return false;
+          if (profilePackageFilter === 'RETURNED' && p.status !== 'RETURNED') return false;
+
+          if (profilePackageSearch.trim()) {
+            const q = profilePackageSearch.toLowerCase();
+            const carrierMatch = p.carrier?.toLowerCase().includes(q);
+            const codeMatch = p.pickup_code?.toLowerCase().includes(q);
+            const trackMatch = p.tracking_code?.toLowerCase().includes(q);
+            const notesMatch = p.notes?.toLowerCase().includes(q);
+            const recipientMatch = p.recipient_name_ocr?.toLowerCase().includes(q);
+            return carrierMatch || codeMatch || trackMatch || notesMatch || recipientMatch;
+          }
+          return true;
+        });
+
+        const rawPhone = activeProfile.phone || '';
+        let cleanPhone = rawPhone.replace(/\D/g, '');
+        if (cleanPhone && !cleanPhone.startsWith('55') && cleanPhone.length >= 10) {
+          cleanPhone = `55${cleanPhone}`;
+        }
+        const waUrl = cleanPhone ? `https://wa.me/${cleanPhone}` : null;
+
+        const otherResidents = residents.filter(
+          (r) => r.unit_id === activeProfile.unit_id && r.id !== activeProfile.id
+        );
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-6 animate-fade-in">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+              {/* Header do Perfil */}
+              <div className="p-5 sm:p-6 border-b border-slate-800 bg-slate-950/60 flex items-start sm:items-center justify-between gap-4 shrink-0">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500/30 to-purple-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 font-black text-xl shadow-inner shrink-0">
+                    {activeProfile.name ? activeProfile.name.substring(0, 2).toUpperCase() : <Users size={24} />}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight truncate">
+                        {activeProfile.name}
+                      </h2>
+                      {activeProfile.is_primary ? (
+                        <span className="text-[11px] font-bold px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full shadow-sm">
+                          Titular
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold px-2.5 py-0.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full">
+                          Dependente
+                        </span>
+                      )}
+                      <span className="text-[11px] font-semibold px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full">
+                        Ativo
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-400 mt-1 flex-wrap">
+                      <span className="flex items-center gap-1.5 font-semibold text-slate-200">
+                        <Building2 size={13} className="text-indigo-400" />
+                        {activeProfile.unit ? `${activeProfile.unit.block} - Apto ${activeProfile.unit.unit_number}` : 'Sem Unidade'}
+                      </span>
+                      <span className="text-slate-600">•</span>
+                      <span>ID: <span className="font-mono text-slate-400">{activeProfile.id.slice(0, 8)}</span></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditResidentModal(activeProfile)}
+                    className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-indigo-950/50 active:scale-95 cursor-pointer"
+                    title="Editar dados cadastrais deste morador"
+                  >
+                    <Pencil size={13} />
+                    <span>Editar Cadastro</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedResidentProfile(null)}
+                    className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer"
+                    title="Fechar perfil"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Corpo do Perfil (Scrollable) */}
+              <div className="overflow-y-auto p-5 sm:p-6 space-y-6 flex-1">
+                {/* Card de Informações do Morador e Contatos */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* Contato Principal: WhatsApp & Telefone */}
+                  <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-4 sm:p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <MessageSquare size={14} className="text-emerald-400" /> WhatsApp / Celular
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (activeProfile.phone) {
+                            navigator.clipboard.writeText(activeProfile.phone);
+                            setCopiedPhone(true);
+                            setTimeout(() => setCopiedPhone(false), 2000);
+                          }
+                        }}
+                        className="text-[11px] font-semibold text-slate-400 hover:text-indigo-400 transition flex items-center gap-1 cursor-pointer"
+                        title="Copiar telefone"
+                      >
+                        {copiedPhone ? (
+                          <>
+                            <Check size={12} className="text-emerald-400" />
+                            <span className="text-emerald-400">Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={12} />
+                            <span>Copiar</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="font-mono text-lg font-bold text-emerald-400">
+                      {activeProfile.phone || 'Sem telefone'}
+                    </div>
+
+                    {waUrl && (
+                      <a
+                        href={waUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-2 px-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        <MessageSquare size={14} className="text-emerald-400" />
+                        <span>Conversar no WhatsApp</span>
+                        <ExternalLink size={12} className="opacity-70" />
+                      </a>
+                    )}
+                  </div>
+
+                  {/* E-mail e Notificações */}
+                  <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-4 sm:p-5 space-y-3">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Mail size={14} className="text-indigo-400" /> E-mail
+                    </span>
+
+                    <div className="text-sm font-semibold text-slate-200 truncate">
+                      {activeProfile.email || 'Não cadastrado'}
+                    </div>
+
+                    {activeProfile.email ? (
+                      <a
+                        href={`mailto:${activeProfile.email}`}
+                        className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
+                      >
+                        <Mail size={14} />
+                        <span>Enviar E-mail</span>
+                      </a>
+                    ) : (
+                      <div className="text-[11px] text-slate-500 italic py-1">
+                        E-mail opcional para avisos e comprovantes.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Status e Permissões */}
+                  <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-4 sm:p-5 space-y-3">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <ShieldCheck size={14} className="text-sky-400" /> Permissões & Retirada
+                    </span>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-slate-200 font-semibold">Receptor Autorizado</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Autorizado a retirar encomendas do condomínio vinculadas a esta unidade.
+                      </p>
+                    </div>
+
+                    <div className="sm:hidden pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditResidentModal(activeProfile)}
+                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                      >
+                        <Pencil size={13} />
+                        <span>Editar Cadastro</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Outros Moradores da Mesma Unidade (se houver) */}
+                {otherResidents.length > 0 && (
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3.5 sm:p-4">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Users size={14} className="text-indigo-400" />
+                      <span className="text-xs font-bold text-slate-300">
+                        Outros moradores deste apartamento ({otherResidents.length}):
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {otherResidents.map((other) => (
+                        <button
+                          key={other.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedResidentProfile(other);
+                            setProfilePackageFilter('ALL');
+                            setProfilePackageSearch('');
+                          }}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 hover:bg-indigo-950/50 border border-slate-800 hover:border-indigo-500/40 rounded-xl text-xs text-slate-300 transition group cursor-pointer"
+                          title={`Ver perfil de ${other.name}`}
+                        >
+                          <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold flex items-center justify-center">
+                            {other.name ? other.name.substring(0, 1).toUpperCase() : '?'}
+                          </div>
+                          <span className="group-hover:text-indigo-300 font-semibold">{other.name}</span>
+                          {other.is_primary && (
+                            <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 py-0.2 rounded font-bold">
+                              Titular
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Métricas / Estatísticas de Encomendas do Morador */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                      <Package size={16} className="text-indigo-400" />
+                      Histórico de Encomendas ({profilePackages.length})
+                    </h3>
+                    <span className="text-xs text-slate-500">
+                      Vinculadas a este morador e ao apartamento
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {/* Todas */}
+                    <button
+                      type="button"
+                      onClick={() => setProfilePackageFilter('ALL')}
+                      className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                        profilePackageFilter === 'ALL'
+                          ? 'bg-sky-950/40 border-sky-500/60 ring-2 ring-sky-500/20'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="text-[11px] font-semibold text-slate-400 block">Total</span>
+                      <span className="text-2xl font-black text-sky-400 mt-0.5 block">{profilePackages.length}</span>
+                      <span className="text-[10px] text-slate-500">Registradas</span>
+                    </button>
+
+                    {/* Aguardando Retirada */}
+                    <button
+                      type="button"
+                      onClick={() => setProfilePackageFilter('PENDING')}
+                      className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                        profilePackageFilter === 'PENDING'
+                          ? 'bg-amber-950/40 border-amber-500/60 ring-2 ring-amber-500/20'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="text-[11px] font-semibold text-slate-400 block">Aguardando</span>
+                      <span className="text-2xl font-black text-amber-400 mt-0.5 block">{pendingPkgs.length}</span>
+                      <span className="text-[10px] text-slate-500">Na portaria</span>
+                    </button>
+
+                    {/* Entregues */}
+                    <button
+                      type="button"
+                      onClick={() => setProfilePackageFilter('DELIVERED')}
+                      className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                        profilePackageFilter === 'DELIVERED'
+                          ? 'bg-emerald-950/40 border-emerald-500/60 ring-2 ring-emerald-500/20'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="text-[11px] font-semibold text-slate-400 block">Entregues</span>
+                      <span className="text-2xl font-black text-emerald-400 mt-0.5 block">{deliveredPkgs.length}</span>
+                      <span className="text-[10px] text-slate-500">Com comprovante</span>
+                    </button>
+
+                    {/* Devolvidas */}
+                    <button
+                      type="button"
+                      onClick={() => setProfilePackageFilter('RETURNED')}
+                      className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                        profilePackageFilter === 'RETURNED'
+                          ? 'bg-rose-950/40 border-rose-500/60 ring-2 ring-rose-500/20'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="text-[11px] font-semibold text-slate-400 block">Devolvidas</span>
+                      <span className="text-2xl font-black text-rose-400 mt-0.5 block">{returnedPkgs.length}</span>
+                      <span className="text-[10px] text-slate-500">Canceladas/Devolvidas</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filtros e Busca de Encomendas */}
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                    {/* Barra de Filtros rápidos */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setProfilePackageFilter('ALL')}
+                        className={`px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+                          profilePackageFilter === 'ALL'
+                            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Todas ({profilePackages.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProfilePackageFilter('PENDING')}
+                        className={`px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+                          profilePackageFilter === 'PENDING'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Pendentes ({pendingPkgs.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProfilePackageFilter('DELIVERED')}
+                        className={`px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+                          profilePackageFilter === 'DELIVERED'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Entregues ({deliveredPkgs.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProfilePackageFilter('RETURNED')}
+                        className={`px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+                          profilePackageFilter === 'RETURNED'
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Devolvidas ({returnedPkgs.length})
+                      </button>
+                    </div>
+
+                    {/* Campo de Busca */}
+                    <div className="relative min-w-[220px]">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={profilePackageSearch}
+                        onChange={(e) => setProfilePackageSearch(e.target.value)}
+                        placeholder="Buscar por código, rastreio..."
+                        className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Listagem das Encomendas */}
+                  {filteredProfilePkgs.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredProfilePkgs.map((pkg) => (
+                        <PackageCard
+                          key={pkg.id}
+                          pkg={pkg}
+                          onPackageUpdated={loadData}
+                          showActions={true}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 border border-dashed border-slate-800/80 rounded-3xl bg-slate-950/40 space-y-2">
+                      <Package className="w-10 h-10 text-slate-600 mx-auto" />
+                      <p className="text-sm font-bold text-slate-300">Nenhuma encomenda encontrada</p>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        {profilePackageSearch || profilePackageFilter !== 'ALL'
+                          ? 'Tente ajustar os filtros ou a busca de encomendas.'
+                          : 'Ainda não há encomendas registradas na portaria para este morador ou apartamento.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Rodapé de Ações */}
+              <div className="p-4 sm:p-5 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Deseja realmente remover o morador ${activeProfile.name}?`)) {
+                      handleDeleteResident(activeProfile.id, activeProfile.name);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                >
+                  <Trash2 size={14} />
+                  <span>Excluir Morador</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditResidentModal(activeProfile)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-indigo-950 active:scale-95 cursor-pointer"
+                  >
+                    <Pencil size={13} />
+                    <span>Editar Cadastro</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedResidentProfile(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Modal de Cadastro Individual de Morador */}
       {isAddResidentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
           <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">

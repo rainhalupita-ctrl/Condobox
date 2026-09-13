@@ -21,8 +21,11 @@ import {
   AlertTriangle,
   X,
   ExternalLink,
-  User
+  User,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
+import { useAuth } from '../contexts/auth-context';
 
 interface PackageCardProps {
   pkg: PackageType;
@@ -33,6 +36,7 @@ interface PackageCardProps {
 }
 
 export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showActions = true, staleDaysThreshold = 5 }: PackageCardProps) {
+  const { isAdmin } = useAuth();
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [whatsAppFeedback, setWhatsAppFeedback] = useState<string | null>(null);
@@ -40,9 +44,54 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
   const [wasNotified, setWasNotified] = useState<boolean | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
+  // Estados para Gerenciamento do Síndico (Excluir / Devolver)
+  const [showManageModal, setShowManageModal] = useState(false);
+  const [manageReason, setManageReason] = useState('');
+  const [isManaging, setIsManaging] = useState(false);
+  const [manageFeedback, setManageFeedback] = useState<string | null>(null);
+
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  const handleDeletePackage = async () => {
+    if (!window.confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE esta encomenda (${pkg.carrier} - Cód: ${pkg.pickup_code})?\n\nEsta ação apagará todo o registro de forma permanente.`)) {
+      return;
+    }
+    setIsManaging(true);
+    setManageFeedback(null);
+    try {
+      const res = await LocalApiClient.deletePackage(pkg.id);
+      if (res.success) {
+        setShowManageModal(false);
+        if (onPackageUpdated) onPackageUpdated();
+      } else {
+        setManageFeedback(`❌ Erro ao excluir: ${res.error || 'Falha na operação'}`);
+      }
+    } catch (err: any) {
+      setManageFeedback(`❌ Erro: ${err.message}`);
+    } finally {
+      setIsManaging(false);
+    }
+  };
+
+  const handleReturnPackage = async () => {
+    setIsManaging(true);
+    setManageFeedback(null);
+    try {
+      const res = await LocalApiClient.returnPackage(pkg.id, manageReason.trim() || undefined);
+      if (res.success) {
+        setShowManageModal(false);
+        if (onPackageUpdated) onPackageUpdated();
+      } else {
+        setManageFeedback(`❌ Erro ao devolver: ${res.error || 'Falha na operação'}`);
+      }
+    } catch (err: any) {
+      setManageFeedback(`❌ Erro: ${err.message}`);
+    } finally {
+      setIsManaging(false);
+    }
+  };
 
   // Verifica se existe log de notificação enviada (SENT) para este pacote
   useEffect(() => {
@@ -107,6 +156,14 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
   }
 
   const getStatusBadge = () => {
+    if (pkg.status === 'RETURNED') {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          <RotateCcw className="w-3.5 h-3.5 text-amber-400" /> Devolvida ao Entregador
+        </span>
+      );
+    }
+
     if (pkg.status === 'DELIVERED') {
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -333,6 +390,18 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
               <span>Assinatura</span>
             </button>
           )}
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowManageModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-300 hover:text-white bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/35 transition cursor-pointer"
+              title="Excluir ou Devolver Encomenda (Ação de Síndico/Admin)"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Gerenciar</span>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -522,6 +591,148 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
                   <span>{isEffectivelyNotified ? 'Reenviar Notificação' : 'Enviar pro Morador'}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal de Gerenciamento do Síndico: Excluir ou Devolver Encomenda */}
+      {showManageModal && isMounted && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in"
+          onClick={() => !isManaging && setShowManageModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-slate-900 border-2 border-slate-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 text-left"
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500 text-white">
+                      Ação do Síndico
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                    Gerenciar Encomenda
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isManaging}
+                onClick={() => setShowManageModal(false)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Informações da Encomenda */}
+            <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Transportadora:</span>
+                <span className="font-bold text-slate-100">{pkg.carrier}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Código de Retirada:</span>
+                <span className="font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-md">
+                  {pkg.pickup_code}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Unidade:</span>
+                <span className="font-semibold text-slate-200">
+                  {pkg.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'Unidade'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Destinatário:</span>
+                <span className="font-semibold text-slate-200">{residentName}</span>
+              </div>
+            </div>
+
+            {/* Campo Opcional de Motivo */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Motivo / Justificativa (Opcional):
+              </label>
+              <input
+                type="text"
+                value={manageReason}
+                onChange={(e) => setManageReason(e.target.value)}
+                placeholder="Ex: Entregador levou de volta / Cadastro duplicado"
+                disabled={isManaging}
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-rose-500 disabled:opacity-50"
+              />
+            </div>
+
+            {manageFeedback && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs">
+                {manageFeedback}
+              </div>
+            )}
+
+            {/* As Duas Opções de Ação */}
+            <div className="space-y-3 pt-1">
+              {/* Opção 1: Devolver / Cancelar (Mantém histórico) */}
+              <button
+                type="button"
+                disabled={isManaging}
+                onClick={handleReturnPackage}
+                className="w-full p-3.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-200 rounded-2xl text-left transition flex items-start gap-3 disabled:opacity-50 cursor-pointer group"
+              >
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0 mt-0.5">
+                  <RotateCcw className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-xs sm:text-sm text-amber-300 group-hover:text-amber-200">
+                    Devolver ao Entregador / Cancelar
+                  </div>
+                  <p className="text-[11px] text-amber-300/80 mt-0.5 leading-relaxed">
+                    Muda o status para Devolvida e retira da fila da portaria, <strong>preservando o histórico para auditoria</strong>.
+                  </p>
+                </div>
+              </button>
+
+              {/* Opção 2: Excluir Definitivamente (Hard Delete) */}
+              <button
+                type="button"
+                disabled={isManaging}
+                onClick={handleDeletePackage}
+                className="w-full p-3.5 bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/40 text-rose-200 rounded-2xl text-left transition flex items-start gap-3 disabled:opacity-50 cursor-pointer group"
+              >
+                <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/40 shrink-0 mt-0.5">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-xs sm:text-sm text-rose-300 group-hover:text-rose-200">
+                    Excluir Definitivamente
+                  </div>
+                  <p className="text-[11px] text-rose-300/80 mt-0.5 leading-relaxed">
+                    Apaga completamente o registro da encomenda do sistema e do banco de dados. <strong>Ação permanente</strong>.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            {/* Botão Cancelar */}
+            <div className="pt-2">
+              <button
+                type="button"
+                disabled={isManaging}
+                onClick={() => setShowManageModal(false)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+              >
+                Cancelar
+              </button>
             </div>
           </div>
         </div>,

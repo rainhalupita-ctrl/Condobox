@@ -762,8 +762,42 @@ export class DatabaseService {
     }
   }
 
-  public updatePackageStatus(packageId: string, status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED'): void {
+  public updatePackageStatus(packageId: string, status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED' | 'RETURNED'): void {
     this.db.prepare('UPDATE packages SET status = ? WHERE id = ?').run(status, packageId);
+  }
+
+  /**
+   * Exclui definitivamente uma encomenda e seus registros vinculados no SQLite
+   */
+  public deletePackage(id: string): boolean {
+    try {
+      // Remove logs vinculados primeiro (caso foreign_keys não esteja ativado)
+      this.db.prepare('DELETE FROM notifications_log WHERE package_id = ?').run(id);
+      const res = this.db.prepare('DELETE FROM packages WHERE id = ?').run(id);
+      return res.changes > 0;
+    } catch (err: any) {
+      console.error('[DatabaseService] Erro ao excluir pacote:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Marca uma encomenda como DEVOLVIDA/CANCELADA mantendo o registro para auditoria
+   */
+  public returnPackage(id: string, reason?: string): boolean {
+    try {
+      const noteAppend = reason ? `[DEVOLVIDA AO ENTREGADOR]: ${reason}` : '[DEVOLVIDA AO ENTREGADOR]';
+      const res = this.db.prepare(`
+        UPDATE packages
+        SET status = 'RETURNED',
+            notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || ' | ' || ? END
+        WHERE id = ?
+      `).run(noteAppend, noteAppend, id);
+      return res.changes > 0;
+    } catch (err: any) {
+      console.error('[DatabaseService] Erro ao devolver pacote:', err.message);
+      return false;
+    }
   }
 
   public getLearnedPattern(patternKey: string) {

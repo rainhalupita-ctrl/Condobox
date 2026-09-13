@@ -61,6 +61,18 @@ export default function PortariaDashboardPage() {
   const [contactSearch, setContactSearch] = useState('');
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
   const [notifyingMap, setNotifyingMap] = useState<{ [pkgId: string]: boolean }>({});
+  const [promptCodeInput, setPromptCodeInput] = useState('');
+  const [promptCodeError, setPromptCodeError] = useState<string | null>(null);
+
+  const getCleanNotes = (notes?: string | null) => {
+    if (!notes) return null;
+    const clean = notes
+      .split(';')
+      .filter((n) => !n.startsWith('CIENTE:') && !n.startsWith('DELIVERY_NOTIFIED:') && !n.startsWith('Ciência confirmada'))
+      .join(' ')
+      .trim();
+    return clean || null;
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -224,12 +236,15 @@ export default function PortariaDashboardPage() {
         ? `${deliveredPkg.unit.block} - Apto ${deliveredPkg.unit.unit_number}`
         : 'Unidade';
 
-      // Verifica se o morador ainda possui OUTRAS encomendas pendentes no condomínio
+      // Verifica se o morador ainda possui OUTRAS encomendas pendentes no condomínio (estritamente não entregues)
       const otherPending = packages.filter(
-        p => p.id !== deliveredPkg.id &&
-             p.status !== 'DELIVERED' &&
-             ((deliveredPkg.unit_id && p.unit_id === deliveredPkg.unit_id) ||
-              (deliveredPkg.resident_id && p.resident_id === deliveredPkg.resident_id))
+        (p) =>
+          p.id !== deliveredPkg.id &&
+          (p.status === 'RECEIVED' || p.status === 'NOTIFIED') &&
+          !p.delivered_at &&
+          (deliveredPkg.resident_id
+            ? p.resident_id === deliveredPkg.resident_id
+            : deliveredPkg.unit_id && p.unit_id === deliveredPkg.unit_id)
       );
 
       setSelectedForDelivery(null);
@@ -871,60 +886,131 @@ export default function PortariaDashboardPage() {
                 </div>
               </div>
 
-              {/* Lista dos Pacotes Pendentes Restantes */}
+              {/* Lista dos Pacotes Pendentes Restantes (sem exibir o código secreto do morador) */}
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {additionalPendingPrompt.pendingPackages.map((pkg, idx) => (
-                  <div
-                    key={pkg.id}
-                    className="flex items-center justify-between p-3 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs hover:border-amber-500/40 transition"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-[11px]">
-                        {idx + 1}
-                      </span>
-                      <div>
-                        <span className="font-bold text-slate-100 block">{pkg.carrier}</span>
-                        {pkg.notes && (
-                          <span className="text-[10px] text-slate-400 block">{pkg.notes}</span>
-                        )}
+                {additionalPendingPrompt.pendingPackages.map((pkg, idx) => {
+                  const cleanNotes = getCleanNotes(pkg.notes);
+                  const receivedDate = pkg.received_at
+                    ? new Date(pkg.received_at).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })
+                    : null;
+
+                  return (
+                    <div
+                      key={pkg.id}
+                      className="flex items-center justify-between p-3 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs hover:border-amber-500/40 transition"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-[11px] shrink-0">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-100 block truncate">{pkg.carrier}</span>
+                          {receivedDate && (
+                            <span className="text-[10px] text-slate-400 block">Recebida em: {receivedDate}</span>
+                          )}
+                          {cleanNotes && (
+                            <span className="text-[10px] text-amber-400/90 block truncate">{cleanNotes}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-lg">
+                          Aguardando Validação
+                        </span>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className="font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded-lg text-xs">
-                        {pkg.pickup_code}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-2xl text-center">
-                <p className="text-xs font-bold text-amber-200">
-                  Deseja seguir com a entrega do próximo pacote para este morador agora?
+              {/* Área para Inserir Código ou Bipar QR Code */}
+              <div className="p-4 bg-slate-950/70 border border-amber-500/30 rounded-2xl space-y-3">
+                <p className="text-xs font-bold text-amber-200 text-center">
+                  Para fazer a retirada, bipe o QR Code ou insira o código do morador:
                 </p>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!additionalPendingPrompt) return;
+                    const clean = promptCodeInput.trim().toUpperCase();
+                    if (!clean) return;
+                    setPromptCodeError(null);
+
+                    const matched = additionalPendingPrompt.pendingPackages.find(
+                      (p) => p.pickup_code?.toUpperCase() === clean || p.qr_token?.toUpperCase() === clean
+                    );
+
+                    if (matched) {
+                      setPromptCodeInput('');
+                      setPromptCodeError(null);
+                      handleDeliverNextPackage(matched);
+                      return;
+                    }
+
+                    setPromptCodeError(`Código "${clean}" não confere com as encomendas pendentes deste morador.`);
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={promptCodeInput}
+                    onChange={(e) => {
+                      setPromptCodeInput(e.target.value.toUpperCase());
+                      setPromptCodeError(null);
+                    }}
+                    placeholder="Digite o código (ex: 7E50DB)..."
+                    maxLength={10}
+                    className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl text-amber-300 font-mono font-bold text-center uppercase tracking-widest text-sm outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!promptCodeInput.trim()}
+                    className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs rounded-xl transition flex items-center gap-1.5 shadow-md shadow-amber-950/50 cursor-pointer active:scale-95"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    Validar
+                  </button>
+                </form>
+
+                {promptCodeError && (
+                  <p className="text-xs text-rose-400 font-semibold flex items-center justify-center gap-1.5 animate-fade-in">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {promptCodeError}
+                  </p>
+                )}
+
+                <Link
+                  href="/portaria/retirada"
+                  className="w-full py-2.5 px-4 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 text-sky-300 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-sm active:scale-98"
+                >
+                  <QrCode className="w-4 h-4 text-sky-400" />
+                  <span>Bipar QR Code na Tela de Retirada</span>
+                </Link>
               </div>
 
               {/* Botões de Ação do Porteiro */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+              <div className="pt-1">
                 <button
                   type="button"
-                  onClick={() => handleDeliverNextPackage(additionalPendingPrompt.pendingPackages[0])}
-                  className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-950/50 transition flex items-center justify-center gap-2 active:scale-[0.98]"
+                  onClick={() => {
+                    setPromptCodeInput('');
+                    setPromptCodeError(null);
+                    handleFinishWithoutAdditional();
+                  }}
+                  className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs sm:text-sm rounded-xl border border-slate-700 transition active:scale-[0.98] cursor-pointer"
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  Sim, Entregar Próximo Pacote
-                </button>
-                <button
-                  type="button"
-                  onClick={handleFinishWithoutAdditional}
-                  className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs sm:text-sm rounded-xl border border-slate-700 transition active:scale-[0.98]"
-                >
-                  Não, Finalizar Atendimento
+                  Finalizar Atendimento (Entregar apenas este)
                 </button>
               </div>
 
               <p className="text-[10px] text-center text-slate-500">
-                💡 Se optar por não entregar ou fechar, o sistema enviará a notificação da retirada feita sem aguardar o segundo pacote.
+                💡 Ao finalizar, o morador receberá a notificação de confirmação da retirada feita.
               </p>
             </div>
           </div>
