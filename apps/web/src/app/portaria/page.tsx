@@ -37,9 +37,11 @@ export default function PortariaDashboardPage() {
   const { effectiveCondoId, loading: authLoading } = useAuth();
   const alertChannelRef = useRef<any>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const userInteractedWithSearchRef = useRef(false);
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchReady, setIsSearchReady] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED' | 'STALE' | 'CONTESTED'>('PENDING');
   const [selectedForDelivery, setSelectedForDelivery] = useState<PackageType | null>(null);
   const [deliveredToName, setDeliveredToName] = useState('');
@@ -47,17 +49,31 @@ export default function PortariaDashboardPage() {
   const [isNotifyingPending, setIsNotifyingPending] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
+  // Ativação segura do campo de busca apenas mediante interação explícita do usuário
+  const handleActivateSearch = useCallback((e: React.SyntheticEvent<HTMLInputElement>) => {
+    userInteractedWithSearchRef.current = true;
+    setIsSearchReady(true);
+    const target = e.currentTarget;
+    if (target) {
+      target.readOnly = false;
+      target.removeAttribute('readonly');
+      target.setAttribute('inputmode', 'search');
+    }
+  }, []);
+
   // Previne que o Safari/Chrome no celular restaure foco ou abra o teclado virtual automaticamente ao carregar/atualizar a página
   useEffect(() => {
     const dismissAutoFocus = () => {
-      if (searchInputRef.current && document.activeElement === searchInputRef.current) {
-        searchInputRef.current.blur();
-      }
-      if (
-        document.activeElement instanceof HTMLElement &&
-        (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')
-      ) {
-        document.activeElement.blur();
+      if (!userInteractedWithSearchRef.current) {
+        if (searchInputRef.current && document.activeElement === searchInputRef.current) {
+          searchInputRef.current.blur();
+        }
+        if (
+          document.activeElement instanceof HTMLElement &&
+          (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')
+        ) {
+          document.activeElement.blur();
+        }
       }
     };
 
@@ -65,11 +81,32 @@ export default function PortariaDashboardPage() {
     const t1 = setTimeout(dismissAutoFocus, 50);
     const t2 = setTimeout(dismissAutoFocus, 150);
     const t3 = setTimeout(dismissAutoFocus, 300);
+    const t4 = setTimeout(dismissAutoFocus, 600);
+    const t5 = setTimeout(() => {
+      dismissAutoFocus();
+      setIsSearchReady(true);
+    }, 1000);
+
+    const handleShortcutFocus = () => {
+      userInteractedWithSearchRef.current = true;
+      setIsSearchReady(true);
+      if (searchInputRef.current) {
+        searchInputRef.current.readOnly = false;
+        searchInputRef.current.removeAttribute('readonly');
+        searchInputRef.current.setAttribute('inputmode', 'search');
+        searchInputRef.current.focus();
+        searchInputRef.current.select();
+      }
+    };
+    window.addEventListener('condobox:focus-search', handleShortcutFocus);
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      clearTimeout(t4);
+      clearTimeout(t5);
+      window.removeEventListener('condobox:focus-search', handleShortcutFocus);
     };
   }, []);
 
@@ -834,18 +871,44 @@ export default function PortariaDashboardPage() {
         {/* Barra de Filtros, Busca e Disparo de WhatsApp */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-lg">
           <div className="relative w-full md:w-80 lg:w-96">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               ref={searchInputRef}
+              id="portaria-search-input"
+              name="condobox-search-packages"
               type="text"
               placeholder="Buscar por Apto, Morador, Código..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              readOnly={!isSearchReady}
+              inputMode={isSearchReady ? 'search' : 'none'}
               autoFocus={false}
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
+              onPointerDown={handleActivateSearch}
+              onTouchStart={handleActivateSearch}
+              onMouseDown={handleActivateSearch}
+              onClick={(e) => {
+                handleActivateSearch(e);
+                if (document.activeElement !== e.currentTarget) {
+                  e.currentTarget.focus();
+                }
+              }}
+              onKeyDown={() => {
+                userInteractedWithSearchRef.current = true;
+              }}
+              onFocus={(e) => {
+                if (!userInteractedWithSearchRef.current) {
+                  e.target.blur();
+                  return;
+                }
+                handleActivateSearch(e);
+              }}
+              onBlur={() => {
+                userInteractedWithSearchRef.current = false;
+              }}
               className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 text-sm focus:outline-none focus:border-emerald-500 transition"
             />
           </div>

@@ -81,8 +81,12 @@ export function KeyboardShortcuts() {
       // Atalhos que funcionam mesmo com foco (Ctrl + K para busca)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        window.dispatchEvent(new CustomEvent('condobox:focus-search'));
         const searchInput = document.querySelector('input[placeholder*="Buscar"]') as HTMLInputElement;
         if (searchInput) {
+          searchInput.readOnly = false;
+          searchInput.removeAttribute('readonly');
+          searchInput.setAttribute('inputmode', 'search');
           searchInput.focus();
           searchInput.select();
         }
@@ -108,8 +112,12 @@ export function KeyboardShortcuts() {
         // Barra '/' para focar busca
         if (e.key === '/') {
           e.preventDefault();
+          window.dispatchEvent(new CustomEvent('condobox:focus-search'));
           const searchInput = document.querySelector('input[placeholder*="Buscar"]') as HTMLInputElement;
           if (searchInput) {
+            searchInput.readOnly = false;
+            searchInput.removeAttribute('readonly');
+            searchInput.setAttribute('inputmode', 'search');
             searchInput.focus();
             searchInput.select();
           }
