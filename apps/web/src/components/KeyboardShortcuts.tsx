@@ -41,6 +41,15 @@ export function KeyboardShortcuts() {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
+    // Desativa atalhos globais de teclado físico em dispositivos móveis e touch (evita abrir teclado virtual no celular)
+    const isMobileOrTouch = typeof window !== 'undefined' && (
+      /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+    );
+    if (isMobileOrTouch) {
+      return;
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);

@@ -36,6 +36,7 @@ import {
 export default function PortariaDashboardPage() {
   const { effectiveCondoId, loading: authLoading } = useAuth();
   const alertChannelRef = useRef<any>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,6 +46,32 @@ export default function PortariaDashboardPage() {
   const [isSubmittingDelivery, setIsSubmittingDelivery] = useState(false);
   const [isNotifyingPending, setIsNotifyingPending] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // Previne que o Safari/Chrome no celular restaure foco ou abra o teclado virtual automaticamente ao carregar/atualizar a página
+  useEffect(() => {
+    const dismissAutoFocus = () => {
+      if (searchInputRef.current && document.activeElement === searchInputRef.current) {
+        searchInputRef.current.blur();
+      }
+      if (
+        document.activeElement instanceof HTMLElement &&
+        (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')
+      ) {
+        document.activeElement.blur();
+      }
+    };
+
+    dismissAutoFocus();
+    const t1 = setTimeout(dismissAutoFocus, 50);
+    const t2 = setTimeout(dismissAutoFocus, 150);
+    const t3 = setTimeout(dismissAutoFocus, 300);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, []);
 
   // Pop-up interativo para avisar o porteiro de outras encomendas pendentes para o mesmo morador
   const [additionalPendingPrompt, setAdditionalPendingPrompt] = useState<{
@@ -771,10 +798,16 @@ export default function PortariaDashboardPage() {
           <div className="relative w-full md:w-80 lg:w-96">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Buscar por Apto, Morador, Código..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              autoFocus={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 text-sm focus:outline-none focus:border-emerald-500 transition"
             />
           </div>
