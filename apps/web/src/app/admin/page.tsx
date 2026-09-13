@@ -1080,7 +1080,7 @@ export default function AdminPage() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Cpu className="w-4 h-4" /> Automações & JS/Python
+                <Cpu className="w-4 h-4" /> Automações
               </button>
             </>
           )}
@@ -1185,93 +1185,103 @@ export default function AdminPage() {
 
           {/* Painel Completo de Encomendas do Condomínio */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                  <Package className="w-5 h-5 text-indigo-400" />
-                  Encomendas do Condomínio ({packages.length})
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Histórico completo com fotos da etiqueta, assinaturas de retirada, transportadora e avisos de WhatsApp.
-                </p>
+            {/* Header do Card com Título e Ação de Atualização */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20 shrink-0">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    Encomendas do Condomínio ({packages.length})
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Histórico completo com fotos da etiqueta, assinaturas de retirada, transportadora e avisos de WhatsApp.
+                  </p>
+                </div>
               </div>
 
-              {/* Filtros e Busca */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Buscar morador, apto, código..."
-                    value={packageSearchQuery}
-                    onChange={(e) => setPackageSearchQuery(e.target.value)}
-                    className="pl-9 pr-8 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition w-full sm:w-64"
-                  />
-                  {packageSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setPackageSearchQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+              <button
+                type="button"
+                onClick={loadData}
+                disabled={loading}
+                className="self-start sm:self-center px-3.5 py-2 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-800 hover:border-slate-700 transition flex items-center gap-2 text-xs font-semibold shadow-sm shrink-0 active:scale-95 disabled:opacity-50 group"
+                title="Atualizar lista de encomendas"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 group-hover:rotate-180 transition-transform duration-500 ${loading ? 'animate-spin' : ''}`} />
+                <span>Atualizar</span>
+              </button>
+            </div>
 
-                <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs shrink-0">
+            {/* Barra de Filtros e Busca */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {/* Campo de Busca */}
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Buscar morador, apto, código..."
+                  value={packageSearchQuery}
+                  onChange={(e) => setPackageSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                />
+                {packageSearchQuery && (
                   <button
                     type="button"
-                    onClick={() => setPackageStatusFilter('ALL')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                      packageStatusFilter === 'ALL'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
+                    onClick={() => setPackageSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    title="Limpar busca"
                   >
-                    Todas ({totalCount})
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPackageStatusFilter('PENDING')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                      packageStatusFilter === 'PENDING'
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Aguardando ({pendingCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPackageStatusFilter('DELIVERED')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                      packageStatusFilter === 'DELIVERED'
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Entregues ({deliveredCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPackageStatusFilter('RETURNED')}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                      packageStatusFilter === 'RETURNED'
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Devolvidas ({returnedCount})
-                  </button>
-                </div>
+                )}
+              </div>
 
+              {/* Filtros de Status em Tabs */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs overflow-x-auto max-w-full">
                 <button
                   type="button"
-                  onClick={loadData}
-                  className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition shrink-0"
-                  title="Atualizar lista"
+                  onClick={() => setPackageStatusFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition whitespace-nowrap ${
+                    packageStatusFilter === 'ALL'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  Todas ({totalCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPackageStatusFilter('PENDING')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition whitespace-nowrap ${
+                    packageStatusFilter === 'PENDING'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Aguardando ({pendingCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPackageStatusFilter('DELIVERED')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition whitespace-nowrap ${
+                    packageStatusFilter === 'DELIVERED'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Entregues ({deliveredCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPackageStatusFilter('RETURNED')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition whitespace-nowrap ${
+                    packageStatusFilter === 'RETURNED'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Devolvidas ({returnedCount})
                 </button>
               </div>
             </div>
