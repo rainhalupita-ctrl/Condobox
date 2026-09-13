@@ -276,6 +276,77 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
   return null;
 }
 
+// ─── Provider: Mistral AI (Pixtral 12B Vision) ───────────────────────────────
+async function tryMistral(base64Image: string, mimeType: string, apiKey: string) {
+  const PROMPT = `Você é especialista em OCR de etiquetas residenciais brasileiras.
+Extraia em JSON estrito: {"recipientName":string|null,"block":string|null,"unitNumber":string|null,"carrier":string|null,"trackingCode":string|null,"confidence":1.0}
+Diretrizes: Diferencie 8 de 6. Em "Avenida Civit I, 1770 - A805", o apto é "805" e o bloco é "Bloco A". NUNCA use CEP como trackingCode.`;
+
+  try {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'pixtral-12b-2409',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: PROMPT },
+              { type: 'image_url', image_url: `data:${mimeType};base64,${base64Image}` },
+            ],
+          },
+        ],
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        max_tokens: 500,
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    const result = formatOcrResult(parsed);
+    if (result.confidence > 0) {
+      console.log('[OCR-LIVE] ✅ Mistral Pixtral', result);
+      return { ...result, provider: 'mistral' };
+    }
+  } catch (e: any) {
+    console.warn('[OCR-LIVE] Mistral falhou:', e.message?.slice(0, 80));
+  }
+  return null;
+}
+
+// ─── Provider: EasyOCR (Local Neural OCR, PyTorch, Zero Tokens, 100% Offline) ───
+async function tryEasyOCR(base64Image: string) {
+  try {
+    const res = await fetch('http://127.0.0.1:5055/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64Image }),
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.text || data.text.trim().length < 4) return null;
+    const result = parseRawText(data.text);
+    if (result.confidence > 0) {
+      console.log('[OCR-LIVE] ✅ EasyOCR Local Neural (Zero Tokens)', result);
+      return { ...result, confidence: Math.max(result.confidence, 0.88), provider: 'easyocr_local' };
+    }
+  } catch {
+    // Daemon não disponível ou timeout
+  }
+  return null;
+}
+
 // ─── Provider: Tesseract.js (Local, Offline, Ilimitado, Zero Tokens) ──────────
 async function tryTesseract(buffer: Buffer) {
   try {
@@ -302,6 +373,7 @@ export async function POST(request: NextRequest) {
       process.env.GEMINI_BACKUP_KEY || '',
     ].map(k => k.trim()).filter(Boolean);
 
+    const mistralKey = process.env.MISTRAL_API_KEY || '';
     const nvidiaKey = process.env.NVIDIA_API_KEY || '';
 
     const formData = await request.formData();
@@ -321,7 +393,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Camada 2: NVIDIA NIM Vision (Fallback Nuvem) ──
+    // ── Camada 2: Mistral AI Pixtral (Nuvem Independente do Google) ──
+    if (mistralKey) {
+      const mistralResult = await tryMistral(base64Image, mimeType, mistralKey);
+      if (mistralResult && mistralResult.confidence > 0) {
+        return NextResponse.json(mistralResult);
+      }
+    }
+
+    // ── Camada 3: NVIDIA NIM Vision (Fallback Nuvem) ──
     if (nvidiaKey) {
       const nvidiaResult = await tryNvidia(base64Image, mimeType, nvidiaKey);
       if (nvidiaResult && nvidiaResult.confidence > 0) {
@@ -329,9 +409,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Camada 3: Tesseract Local (Zero Tokens, Nunca Fica Sem Ler!) ──
-    // Se a cota de tokens estourar, a internet oscilar ou a API do Google cair,
-    // o Tesseract processa diretamente na CPU do servidor sem gastar tokens.
+    // ── Camada 4: EasyOCR Local Neural (Zero Tokens, 100% Offline) ──
+    const easyOcrResult = await tryEasyOCR(base64Image);
+    if (easyOcrResult && easyOcrResult.confidence > 0) {
+      return NextResponse.json(easyOcrResult);
+    }
+
+    // ── Camada 5: Tesseract Local (Zero Tokens, 100% Offline) ──
     const tesseractResult = await tryTesseract(buffer);
     if (tesseractResult && tesseractResult.confidence > 0) {
       return NextResponse.json(tesseractResult);

@@ -277,6 +277,63 @@ async function tryNvidia(base64Image: string, mimeType: string, apiKey: string) 
   return null;
 }
 
+async function tryMistral(base64Image: string, mimeType: string, apiKey: string) {
+  try {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'pixtral-12b-2409',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: RICH_PROMPT },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          ],
+        }],
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        max_tokens: 500,
+      }),
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    const result = cleanOcrData(parsed);
+    if (result.confidence > 0) { console.log('[OCR-UPLOAD] ✅ Mistral Pixtral', result); return result; }
+  } catch (e: any) {
+    console.warn('[OCR-UPLOAD] Mistral falhou:', e.message?.slice(0, 80));
+  }
+  return null;
+}
+
+// ─── Provider: EasyOCR (Local Neural OCR, PyTorch, Zero Tokens, 100% Offline) ───
+async function tryEasyOCR(base64Image: string) {
+  try {
+    const res = await fetch('http://127.0.0.1:5055/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64Image }),
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.text || data.text.trim().length < 4) return null;
+    const result = parseRawText(data.text);
+    if (result.confidence > 0) {
+      console.log('[OCR-UPLOAD] ✅ EasyOCR Local Neural (Zero Tokens)', result);
+      return { ...result, confidence: Math.max(result.confidence, 0.88), provider: 'easyocr_local' };
+    }
+  } catch {
+    // Daemon não disponível ou timeout
+  }
+  return null;
+}
+
 async function tryTesseract(buffer: Buffer) {
   try {
     const { data: { text } } = await Tesseract.recognize(buffer, 'por+eng', { logger: () => {} });
@@ -303,6 +360,7 @@ export async function POST(request: NextRequest) {
     const mimeType = file.type || 'image/jpeg';
 
     const geminiKey = process.env.GEMINI_API_KEY || '';
+    const mistralKey = process.env.MISTRAL_API_KEY || '';
     const groqKey = process.env.GROQ_API_KEY || '';
     const nvidiaKey = process.env.NVIDIA_API_KEY || '';
 
@@ -319,12 +377,22 @@ export async function POST(request: NextRequest) {
       ).catch(() => null);
     }
 
-    // ── TIER 1: NVIDIA NIM ─────────────────────────────────────────────────────
+    // ── TIER 1: Mistral AI (Pixtral 12B Vision) ───────────────────────────────
+    if (!ocrResult && mistralKey) {
+      ocrResult = await tryMistral(base64Image, mimeType, mistralKey);
+    }
+
+    // ── TIER 2: NVIDIA NIM ─────────────────────────────────────────────────────
     if (!ocrResult && nvidiaKey) {
       ocrResult = await tryNvidia(base64Image, mimeType, nvidiaKey);
     }
 
-    // ── TIER 2: Tesseract.js local ─────────────────────────────────────────────
+    // ── TIER 3: EasyOCR Local Neural (Zero Tokens, 100% Offline) ──────────────
+    if (!ocrResult) {
+      ocrResult = await tryEasyOCR(base64Image);
+    }
+
+    // ── TIER 4: Tesseract.js local (Zero Tokens, 100% Offline) ────────────────
     if (!ocrResult) {
       ocrResult = await tryTesseract(buffer);
     }

@@ -15,6 +15,14 @@ if %ERRORLEVEL% neq 0 (
     powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c npm run dev' -WorkingDirectory '%~dp0apps\local-api' -WindowStyle Hidden"
 )
 
+REM 2.1 Garante que o Microservico EasyOCR (5055) esteja rodando em segundo plano
+netstat -ano | findstr :5055 >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    if exist "%~dp0tools\easyocr\.venv\Scripts\python.exe" (
+        powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~dp0tools\easyocr\.venv\Scripts\python.exe' -ArgumentList '%~dp0tools\easyocr\easyocr_bridge.py --serve --port 5055' -WindowStyle Hidden"
+    )
+)
+
 set "ELECTRON_EXE=%~dp0apps\desktop\node_modules\electron\dist\electron.exe"
 set "APP_DIR=%~dp0apps\desktop-master"
 

@@ -65,14 +65,8 @@ export default function ResidentLoginPage() {
       return;
     }
 
-    // Se for Síndico entrando pelo portal do morador, encaminha para a gestão
-    if (role === 'SYNDIC' || (role === 'ADMIN' && profile?.condo_id)) {
-      router.push('/admin');
-      return;
-    }
-
-    // Se for Porteiro
-    if (role === 'GUARD') {
+    // Se for Síndico ou Porteiro entrando pelo portal do morador, encaminha para a portaria
+    if (role === 'SYNDIC' || (role === 'ADMIN' && profile?.condo_id) || role === 'GUARD') {
       router.push('/portaria');
       return;
     }

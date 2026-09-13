@@ -1,5 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { execFile } from 'child_process';
 // Tesseract.js import dinâmico para compatibilidade ESM
 let TesseractWorker = null;
 const FORBIDDEN_WORDS = [
@@ -288,6 +292,117 @@ export class OCRService {
         }
         return null;
     }
+    // ── Mistral AI Vision (Ministral / Pixtral) ──────────────────────────────
+    async tryMistral(base64Image, mimeType) {
+        const mistralKey = env.MISTRAL_API_KEY;
+        if (!mistralKey)
+            return null;
+        const models = ['ministral-8b-latest', 'ministral-3b-latest', 'ministral-14b-latest'];
+        for (const model of models) {
+            try {
+                const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${mistralKey}` },
+                    body: JSON.stringify({
+                        model,
+                        messages: [{
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: RICH_PROMPT },
+                                    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+                                ],
+                            }],
+                        temperature: 0,
+                        max_tokens: 300,
+                        response_format: { type: 'json_object' },
+                    }),
+                    signal: AbortSignal.timeout(6000),
+                });
+                if (!res.ok)
+                    continue;
+                const data = (await res.json());
+                const content = data.choices?.[0]?.message?.content || '';
+                const jsonMatch = content.match(/\{[\s\S]*\}/);
+                if (!jsonMatch)
+                    continue;
+                const parsed = JSON.parse(jsonMatch[0]);
+                const result = this.sanitize(parsed);
+                if (result.confidence > 0) {
+                    console.log(`[OCRService] ✅ Mistral [${model}]`, result);
+                    return result;
+                }
+            }
+            catch (e) {
+                console.warn(`[OCRService] Mistral [${model}] falhou:`, e.message?.slice(0, 80));
+            }
+        }
+        return null;
+    }
+    // ── EasyOCR (Local Neural OCR, PyTorch, Zero Tokens, 100% Offline) ─────────
+    async tryEasyOCR(imageBuffer, mimeType) {
+        const base64Image = imageBuffer.toString('base64');
+        // 1. Tenta microserviço HTTP EasyOCR persistente (porta 5055)
+        try {
+            const res = await fetch('http://127.0.0.1:5055/ocr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64Image }),
+                signal: AbortSignal.timeout(3500),
+            });
+            if (res.ok) {
+                const data = (await res.json());
+                if (data.text && data.text.trim().length >= 4) {
+                    const result = this.parseRawText(data.text);
+                    if (result.confidence > 0) {
+                        console.log('[OCRService] ✅ EasyOCR (HTTP Daemon)', result);
+                        return { ...result, confidence: Math.max(result.confidence, 0.88) };
+                    }
+                }
+            }
+        }
+        catch {
+            // Daemon HTTP não está ativo no momento, tenta CLI
+        }
+        // 2. Fallback CLI caso o daemon não esteja rodando mas o ambiente exista
+        try {
+            const candidates = [
+                path.resolve(process.cwd(), '../../tools/easyocr/.venv/Scripts/python.exe'),
+                path.resolve(process.cwd(), '../tools/easyocr/.venv/Scripts/python.exe'),
+                'c:\\Users\\Kleber\\Condo\\tools\\easyocr\\.venv\\Scripts\\python.exe',
+            ];
+            const pythonPath = candidates.find(p => fs.existsSync(p));
+            const bridgeScript = 'c:\\Users\\Kleber\\Condo\\tools\\easyocr\\easyocr_bridge.py';
+            if (pythonPath && fs.existsSync(bridgeScript)) {
+                const tmpPath = path.join(os.tmpdir(), `condo_ocr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
+                await fs.promises.writeFile(tmpPath, imageBuffer);
+                try {
+                    const stdout = await new Promise((resolve, reject) => {
+                        execFile(pythonPath, [bridgeScript, '--image', tmpPath], { timeout: 7000 }, (error, out) => {
+                            if (error)
+                                reject(error);
+                            else
+                                resolve(out);
+                        });
+                    });
+                    const data = JSON.parse(stdout.trim());
+                    if (data.text && data.text.trim().length >= 4) {
+                        const result = this.parseRawText(data.text);
+                        if (result.confidence > 0) {
+                            console.log('[OCRService] ✅ EasyOCR (CLI Subprocess)', result);
+                            return { ...result, confidence: Math.max(result.confidence, 0.85) };
+                        }
+                    }
+                }
+                finally {
+                    fs.promises.unlink(tmpPath).catch(() => { });
+                }
+            }
+        }
+        catch (e) {
+            console.warn('[OCRService] EasyOCR CLI falhou:', e.message?.slice(0, 80));
+        }
+        return null;
+    }
     // ── Tesseract.js (local, offline) ──────────────────────────────────────────
     async tryTesseract(imageBuffer, mimeType) {
         try {
@@ -321,11 +436,19 @@ export class OCRService {
         const tier0Result = await Promise.any(tier0.map(p => p.then(r => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data')))))).catch(() => null);
         if (tier0Result)
             return tier0Result;
-        // TIER 1: NVIDIA NIM
+        // TIER 1: Mistral AI (Ministral / Pixtral)
+        const mistralResult = await this.tryMistral(base64Image, mimeType);
+        if (mistralResult)
+            return mistralResult;
+        // TIER 2: NVIDIA NIM
         const nvidiaResult = await this.tryNvidia(base64Image, mimeType);
         if (nvidiaResult)
             return nvidiaResult;
-        // TIER 2: Tesseract.js local
+        // TIER 3: EasyOCR Local Neural (Zero Tokens, 100% Offline)
+        const easyOcrResult = await this.tryEasyOCR(imageBuffer, mimeType);
+        if (easyOcrResult)
+            return easyOcrResult;
+        // TIER 4: Tesseract.js local (Zero Tokens, 100% Offline)
         const tesseractResult = await this.tryTesseract(imageBuffer, mimeType);
         if (tesseractResult)
             return tesseractResult;
@@ -337,7 +460,6 @@ export class OCRService {
      */
     async extractLiveOCR(imageBuffer, mimeType = 'image/jpeg') {
         const base64Image = imageBuffer.toString('base64');
-        const dataUrl = `data:${mimeType};base64,${base64Image}`;
         // TIER 0: Gemini e Groq em paralelo
         const tier0Result = await Promise.any([
             this.tryGemini(base64Image, mimeType),
@@ -345,11 +467,19 @@ export class OCRService {
         ].map(p => p.then(r => (r && r.confidence > 0 ? r : Promise.reject(new Error('no data')))))).catch(() => null);
         if (tier0Result)
             return tier0Result;
-        // TIER 1: NVIDIA
+        // TIER 1: Mistral AI (Ministral / Pixtral)
+        const mistralResult = await this.tryMistral(base64Image, mimeType);
+        if (mistralResult)
+            return mistralResult;
+        // TIER 2: NVIDIA
         const nvidiaResult = await this.tryNvidia(base64Image, mimeType);
         if (nvidiaResult)
             return nvidiaResult;
-        // TIER 2: Tesseract
+        // TIER 3: EasyOCR Local Neural
+        const easyOcrResult = await this.tryEasyOCR(imageBuffer, mimeType);
+        if (easyOcrResult)
+            return easyOcrResult;
+        // TIER 4: Tesseract
         const tessResult = await this.tryTesseract(imageBuffer, mimeType);
         if (tessResult)
             return tessResult;

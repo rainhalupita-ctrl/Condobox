@@ -77,7 +77,13 @@ export async function middleware(request: NextRequest) {
         .eq('id', user.id)
         .single();
       const role = profile.data?.role || 'RESIDENT';
-      const dest = role === 'RESIDENT' ? '/morador' : role === 'GUARD' ? '/portaria' : role === 'ADMIN' ? '/super-admin' : '/admin';
+      const userEmail = (user.email || '').toLowerCase();
+      const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+        .split(',')
+        .map(e => e.trim().toLowerCase());
+      const isMasterOwner = (role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+
+      const dest = isMasterOwner ? '/super-admin' : role === 'RESIDENT' ? '/morador' : '/portaria';
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
@@ -103,7 +109,7 @@ export async function middleware(request: NextRequest) {
     if (isMasterOwner) {
       return NextResponse.redirect(new URL('/super-admin', request.url));
     }
-    const dest = role === 'RESIDENT' ? '/morador' : role === 'GUARD' ? '/portaria' : '/admin';
+    const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
     return NextResponse.redirect(new URL(dest, request.url));
   }
 
@@ -139,7 +145,7 @@ export async function middleware(request: NextRequest) {
   // Proteção estrita para o Painel Master (/super-admin) - APENAS o Dono do Sistema
   if (pathname.startsWith('/super-admin')) {
     if (!isMasterOwner) {
-      const dest = profile?.role === 'RESIDENT' ? '/morador' : profile?.role === 'GUARD' ? '/portaria' : '/admin';
+      const dest = profile?.role === 'RESIDENT' ? '/morador' : '/portaria';
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
@@ -152,7 +158,7 @@ export async function middleware(request: NextRequest) {
 
   if (!hasAccess) {
     // Redireciona para o destino padrão do papel
-    const fallback = role === 'RESIDENT' ? '/morador' : role === 'GUARD' ? '/portaria' : '/admin';
+    const fallback = role === 'RESIDENT' ? '/morador' : '/portaria';
     return NextResponse.redirect(new URL(fallback, request.url));
   }
 

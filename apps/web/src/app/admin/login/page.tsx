@@ -9,7 +9,7 @@ import Link from 'next/link';
 function SyndicLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect') || '/admin';
+  const redirectTo = searchParams.get('redirect') || '/portaria';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
