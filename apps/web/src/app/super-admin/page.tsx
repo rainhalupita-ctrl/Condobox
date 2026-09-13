@@ -37,8 +37,12 @@ import {
   AlertTriangle,
   TrendingUp,
   Download,
-  Laptop
+  Laptop,
+  Copy,
+  Check,
+  MessageSquare
 } from 'lucide-react';
+import { buildSupportWhatsAppUrl, SUPPORT_CONTACTS } from '@/lib/support-contacts';
 
 interface AccountItem {
   id: string;
@@ -656,10 +660,10 @@ export default function SuperAdminPage() {
             </div>
             <div>
               <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-                Super Admin <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono font-bold">MASTER SaaS</span>
+                Painel do Sócio Proprietário <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono font-bold">MASTER SaaS</span>
               </h1>
               <p className="text-slate-400 text-xs mt-0.5">
-                Controle global de contas de condomínios, licenciamento, limites de capacidade e impersonação.
+                Controle global de contas de condomínios, licenciamento, limites de capacidade, pagamentos e suporte.
               </p>
             </div>
           </div>
@@ -819,6 +823,53 @@ export default function SuperAdminPage() {
               </span>
             </div>
           </button>
+        </div>
+      )}
+
+      {/* ⚠️ Alerta de Contas Expiradas & Contatos Oficiais de Suporte */}
+      {metrics && metrics.paused_condos > 0 && (
+        <div className="bg-gradient-to-r from-rose-950/40 via-red-950/30 to-slate-900/90 border border-rose-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl backdrop-blur-xl animate-fade-in space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl border border-rose-500/30 shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h3 className="text-base font-bold text-white tracking-tight">
+                    {metrics.paused_condos} {metrics.paused_condos === 1 ? 'Condomínio Expirado' : 'Condomínios Expirados'} • Falta de Pagamento
+                  </h3>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
+                    Acesso Interrompido
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                  Para as contas onde o tempo acabou, os usuários visualizam a tela de bloqueio pedindo para <strong>efetuar o pagamento</strong> ou <strong>entrar em contato com o suporte para desbloqueio</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <a
+                href={buildSupportWhatsAppUrl('5573998419901')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95"
+              >
+                <Phone size={13} />
+                <span>WhatsApp: (73) 99841-9901</span>
+              </a>
+              <a
+                href={buildSupportWhatsAppUrl('5521971966473')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95"
+              >
+                <Phone size={13} />
+                <span>WhatsApp: (21) 97196-6473</span>
+              </a>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1119,29 +1170,56 @@ export default function SuperAdminPage() {
 
                         {/* Status e Validade */}
                         <td className="p-4">
-                          <div className="space-y-1">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                                status === 'ACTIVE' && !isExpired
-                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                  : status === 'BLOCKED'
-                                  ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                  : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                              }`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${status === 'ACTIVE' && !isExpired ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-                              {status === 'ACTIVE' && !isExpired ? 'Liberado' : status === 'BLOCKED' ? 'Bloqueado' : isExpired ? 'Expirado' : status}
-                            </span>
-                            <p className="text-[11px] text-slate-400 flex items-center gap-1">
-                              <Calendar size={11} className="text-slate-500" />
-                              Validade: <strong className="text-slate-300">{expiresFormatted}</strong>
-                            </p>
-                          </div>
+                          {isExpired || status === 'EXPIRED' || status === 'BLOCKED' ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-rose-500/15 text-rose-300 border border-rose-500/30 animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                                {status === 'BLOCKED' ? 'Bloqueado' : 'Tempo Esgotado'}
+                              </span>
+                              <p className="text-[10px] text-rose-400 font-semibold">
+                                Pagamento / Suporte Pendente
+                              </p>
+                              <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                                <Calendar size={11} className="text-slate-500" />
+                                Validade: <strong className="text-rose-300">{expiresFormatted}</strong>
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+                                  status === 'ACTIVE'
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${status === 'ACTIVE' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                {status === 'ACTIVE' ? 'Liberado' : status}
+                              </span>
+                              <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                                <Calendar size={11} className="text-slate-500" />
+                                Validade: <strong className="text-slate-300">{expiresFormatted}</strong>
+                              </p>
+                            </div>
+                          )}
                         </td>
 
                         {/* Ações Master */}
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Botão de WhatsApp de Suporte / Pagamento para contas expiradas */}
+                            {(isExpired || status === 'EXPIRED' || status === 'BLOCKED') && (
+                              <a
+                                href={buildSupportWhatsAppUrl('5573998419901', account.name, account.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40 rounded-xl transition border border-emerald-500/30"
+                                title="Abrir WhatsApp com suporte de desbloqueio para este condomínio"
+                              >
+                                <Phone size={14} />
+                              </a>
+                            )}
+
                             {/* Botão de Impersonação */}
                             <button
                               type="button"
@@ -1749,9 +1827,24 @@ export default function SuperAdminPage() {
                 >
                   <option value="ACTIVE">ATIVO (Acesso liberado normal)</option>
                   <option value="TRIAL">EM TESTE (Trial gratuito)</option>
-                  <option value="EXPIRED">EXPIRADO (Avisa expiração)</option>
-                  <option value="BLOCKED">BLOQUEADO (Inadimplente / Bloqueio total)</option>
+                  <option value="EXPIRED">EXPIRADO (Avisa expiração e pede pagamento)</option>
+                  <option value="BLOCKED">BLOQUEADO (Bloqueio total / Suporte)</option>
                 </select>
+
+                {(editStatus === 'EXPIRED' || editStatus === 'BLOCKED') && (
+                  <div className="mt-2.5 p-3 bg-rose-950/30 border border-rose-500/30 rounded-xl space-y-1.5 text-slate-300">
+                    <div className="flex items-center gap-1.5 text-rose-400 font-bold text-xs">
+                      <AlertTriangle size={13} />
+                      <span>Mensagem de Bloqueio Ativa na Conta</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed">
+                      Ao acessar, os usuários serão orientados a efetuar o pagamento ou acionar o suporte para desbloqueio:
+                      <span className="block font-mono text-white font-bold mt-1">
+                        (73) 99841-9901 / (21) 97196-6473
+                      </span>
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Data de Expiração */}

@@ -6,6 +6,7 @@ import { ImpersonationBanner } from './impersonation-banner';
 import { CookieConsent } from './cookie-consent';
 import { BarcodeListener } from './BarcodeListener';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+import { ExpiredAccountGate } from './ExpiredAccountGate';
 import { useAuth } from '@/contexts/auth-context';
 
 const NO_NAVBAR_PATHS = ['/login', '/cadastro', '/p/', '/master', '/admin/login', '/portaria/login'];
@@ -13,12 +14,29 @@ const NO_NAVBAR_PATHS = ['/login', '/cadastro', '/p/', '/master', '/admin/login'
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const showNavbar = !NO_NAVBAR_PATHS.some(p => pathname.startsWith(p));
-  const { license, isPortaria, isMorador, isSuperAdmin } = useAuth();
+  const { user, license, isPortaria, isMorador, isSuperAdmin, impersonatedCondo, effectiveCondoId } = useAuth();
   const isMaster = isSuperAdmin || pathname.startsWith('/super-admin') || pathname.startsWith('/master');
 
-  const isBlocked = license && (license.status === 'EXPIRED' || license.status === 'BLOCKED');
-  // Se for super admin ou acessando o super-admin, não bloqueia
-  const shouldBlock = !isSuperAdmin && isBlocked && (pathname.startsWith('/portaria') || pathname.startsWith('/morador') || pathname.startsWith('/admin'));
+  const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+    .split(',')
+    .map(e => e.trim().toLowerCase());
+  const userEmail = (user?.email || '').toLowerCase();
+  const isDeveloperMaster = !!userEmail && superAdminEmails.includes(userEmail);
+
+  // Verifica se o tempo acabou (expirado por status ou por data expires_at)
+  const isExpiredByDate = Boolean(
+    license?.expires_at && new Date(license.expires_at).getTime() <= Date.now()
+  );
+  const isBlocked = Boolean(
+    license && (license.status === 'EXPIRED' || license.status === 'BLOCKED' || license.status === 'SUSPENDED' || isExpiredByDate)
+  );
+
+  // Bloqueia telas operacionais caso o tempo tenha acabado
+  const shouldBlock = !isDeveloperMaster && isBlocked && (
+    pathname.startsWith('/portaria') || 
+    pathname.startsWith('/morador') || 
+    pathname.startsWith('/admin')
+  );
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -26,13 +44,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {showNavbar && <Navbar />}
       <main className={`flex-1 w-full pb-32 sm:pb-6 ${showNavbar ? 'max-w-7xl mx-auto p-3 sm:p-6 md:p-8' : ''}`}>
         {shouldBlock ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <h1 className="text-3xl font-bold text-red-500 mb-4">Acesso Bloqueado</h1>
-            <p className="text-slate-400 max-w-md mb-6">
-              A licença deste condomínio encontra-se {license.status === 'EXPIRED' ? 'expirada' : 'bloqueada'}. 
-              Entre em contato com o suporte ou realize o pagamento para continuar usando o CondoBox.
-            </p>
-          </div>
+          <ExpiredAccountGate
+            condoName={impersonatedCondo?.name}
+            condoId={effectiveCondoId || undefined}
+          />
         ) : (
           children
         )}

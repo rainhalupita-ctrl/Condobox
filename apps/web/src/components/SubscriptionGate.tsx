@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '../lib/supabase/client';
 import { useAuth } from '../contexts/auth-context';
+import { buildSupportWhatsAppUrl } from '@/lib/support-contacts';
 import {
   Lock,
   KeyRound,
@@ -173,30 +174,88 @@ export function SubscriptionGate({ children }: Props) {
     return days;
   };
 
-  // Se a assinatura estiver expirada ou suspensa, exibe a tela de bloqueio
-  const isBlocked = sub && (sub.status === 'EXPIRED' || sub.status === 'SUSPENDED');
+  const daysRemaining = getDaysRemaining();
+
+  // Se a assinatura estiver expirada, suspensa ou com tempo esgotado (dias <= 0), exibe a tela de bloqueio
+  const isExpiredByDate = daysRemaining !== null && daysRemaining <= 0;
+  const isLicenseExpired = Boolean(
+    license?.expires_at && new Date(license.expires_at).getTime() <= Date.now()
+  );
+  const isBlocked = Boolean(
+    (sub && (sub.status === 'EXPIRED' || sub.status === 'SUSPENDED' || isExpiredByDate)) ||
+    (license && (license.status === 'EXPIRED' || license.status === 'BLOCKED' || isLicenseExpired))
+  );
 
   if (isBlocked) {
+    const waMessage73 = buildSupportWhatsAppUrl('5573998419901', undefined, effectiveCondoId || undefined);
+    const waMessage21 = buildSupportWhatsAppUrl('5521971966473', undefined, effectiveCondoId || undefined);
+
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 border border-red-500/30 rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 text-center">
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 select-none">
+        <div className="max-w-lg w-full bg-slate-900/95 border border-rose-500/40 rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 text-center backdrop-blur-xl relative overflow-hidden">
           
-          <div className="w-16 h-16 bg-red-500/10 border border-red-500/30 rounded-3xl flex items-center justify-center mx-auto text-red-400">
-            <Lock className="w-8 h-8" />
+          <div className="w-16 h-16 bg-gradient-to-br from-rose-500/20 to-red-500/10 border border-rose-500/40 rounded-3xl flex items-center justify-center mx-auto text-rose-400 shadow-lg shadow-rose-950/50">
+            <Lock className="w-8 h-8 animate-pulse" />
           </div>
 
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-white">Assinatura Expirada</h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              O período de uso ou teste do <strong>CondoBox Portaria</strong> expirou. Para continuar registrando encomendas e enviando notificações no WhatsApp, renove sua assinatura.
+          <div className="space-y-2.5">
+            <span className="inline-block px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold uppercase tracking-wider">
+              Tempo Esgotado • Conta Bloqueada
+            </span>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Efetue o Pagamento ou Contate o Suporte
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-md mx-auto">
+              O tempo do seu plano no <strong>CondoBox</strong> encerrou. Para continuar registrando encomendas, enviando avisos aos moradores e acessando a portaria, <strong>efetue o pagamento</strong> ou <strong>entre em contato com o suporte para desbloqueio da conta</strong>.
             </p>
+          </div>
+
+          {/* NÚMEROS DO SUPORTE PARA DESBLOQUEIO */}
+          <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-3 text-left">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+              Contatos de Suporte para Desbloqueio:
+            </span>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Contato 1: 73 99841-9901 */}
+              <a
+                href={waMessage73}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-3 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/40 hover:border-emerald-500/60 rounded-xl flex items-center gap-3 transition group active:scale-[0.98]"
+              >
+                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg group-hover:scale-110 transition shrink-0">
+                  <PhoneCall className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-emerald-400 font-bold block uppercase tracking-wider">Suporte 1 (WhatsApp)</span>
+                  <span className="text-xs font-black text-white font-mono">(73) 99841-9901</span>
+                </div>
+              </a>
+
+              {/* Contato 2: 21 97196-6473 */}
+              <a
+                href={waMessage21}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-3 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/40 hover:border-emerald-500/60 rounded-xl flex items-center gap-3 transition group active:scale-[0.98]"
+              >
+                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg group-hover:scale-110 transition shrink-0">
+                  <PhoneCall className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-emerald-400 font-bold block uppercase tracking-wider">Suporte 2 (WhatsApp)</span>
+                  <span className="text-xs font-black text-white font-mono">(21) 97196-6473</span>
+                </div>
+              </a>
+            </div>
           </div>
 
           {/* FORMULÁRIO DE CHAVE DE ATIVAÇÃO */}
           <form onSubmit={handleActivateKey} className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-3 text-left">
             <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
               <KeyRound className="w-3.5 h-3.5 text-purple-400" />
-              <span>Possui uma Chave de Ativação?</span>
+              <span>Recebeu uma Chave de Desbloqueio do Suporte?</span>
             </label>
             <input
               type="text"
@@ -204,15 +263,15 @@ export function SubscriptionGate({ children }: Props) {
               placeholder="Cole sua Chave CND-..."
               value={licenseKeyInput}
               onChange={e => setLicenseKeyInput(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-purple-500 focus:outline-none"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:border-purple-500 focus:outline-none"
             />
             <button
               type="submit"
               disabled={activating}
-              className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-purple-950/40 active:scale-[0.98] disabled:opacity-50"
             >
               {activating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              <span>Ativar Licença Imediatamente</span>
+              <span>Ativar e Desbloquear Imediatamente</span>
             </button>
           </form>
 
@@ -226,26 +285,16 @@ export function SubscriptionGate({ children }: Props) {
             </div>
           )}
 
-          {/* CONTATO DE SUPORTE / RENOVAÇÃO */}
-          <div className="pt-2 border-t border-slate-800 space-y-2">
-            <span className="text-[10px] text-slate-500 uppercase font-bold block">Falar com o Administrador:</span>
-            <a
-              href="https://wa.me/5511999999999?text=Ol%C3%A1%2C+preciso+renovar+a+assinatura+do+CondoBox+Portaria"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition"
-            >
-              <PhoneCall className="w-4 h-4" />
-              <span>Falar no WhatsApp para Renovar</span>
-            </a>
-          </div>
+          {effectiveCondoId && (
+            <p className="text-[10px] text-slate-500 font-mono">
+              Código da Conta: {effectiveCondoId}
+            </p>
+          )}
 
         </div>
       </div>
     );
   }
-
-  const daysRemaining = getDaysRemaining();
 
   return (
     <div className="relative">
