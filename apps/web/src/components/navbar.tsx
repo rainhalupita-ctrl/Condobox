@@ -148,11 +148,14 @@ export function Navbar() {
         </div>
       </nav>
 
-      {/* Barra de Navegação Inferior Fixa para Mobile (Estilo PWA Nativo) */}
+      {/* Barra de Navegação Inferior Fixa para Mobile (Estilo PWA Nativo com Safe Area) */}
       {navLinks.length > 0 && (
         <div 
-          className="fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800 sm:hidden flex items-center justify-around px-2 py-1.5 shadow-2xl"
-          style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 6px)' }}
+          className="fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/80 sm:hidden flex items-center justify-around px-3 pt-2 shadow-[0_-10px_30px_rgba(0,0,0,0.7)]"
+          style={{ 
+            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+            minHeight: 'calc(env(safe-area-inset-bottom, 0px) + 64px)'
+          }}
         >
           {navLinks.map(({ href, label, icon: Icon }) => {
             const isActive = pathname.startsWith(href);
@@ -160,14 +163,14 @@ export function Navbar() {
               <Link
                 key={href}
                 href={href}
-                className={`flex-1 flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition-all ${
+                className={`flex-1 flex flex-col items-center justify-center gap-1.5 py-2 px-2.5 rounded-2xl text-[11px] font-bold transition-all active:scale-95 ${
                   isActive
-                    ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/25'
+                    ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Icon size={18} className={isActive ? 'text-emerald-400' : 'text-slate-400'} />
-                <span>{label}</span>
+                <Icon size={20} className={isActive ? 'text-emerald-400' : 'text-slate-400'} />
+                <span className="leading-tight text-center">{label}</span>
               </Link>
             );
           })}
