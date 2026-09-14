@@ -67,7 +67,7 @@ async function verifyAdminAuth(request?: Request) {
     .split(',')
     .map(e => e.trim().toLowerCase());
 
-  const isMaster = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+  const isMaster = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
   if (!isMaster) {
     return { error: 'Acesso negado. Apenas o Sócio Proprietário tem acesso à Gestão Financeira.', status: 403 };

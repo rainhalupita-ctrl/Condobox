@@ -67,9 +67,7 @@ async function verifyAdminAuth(request?: Request) {
     .split(',')
     .map((e) => e.trim().toLowerCase());
 
-  const isMaster =
-    (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) ||
-    superAdminEmails.includes(userEmail);
+  const isMaster = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
   if (!isMaster) {
     return { error: 'Apenas o Dono do Sistema pode publicar versões.', status: 403 };

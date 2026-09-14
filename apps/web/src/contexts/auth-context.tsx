@@ -173,21 +173,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const userEmail = user?.email?.toLowerCase() || '';
   const isMasterByEmail = !!userEmail && superAdminEmails.includes(userEmail);
 
-  // O Dono do Sistema tem acesso Master apenas se for perfil de sistema ou estiver na lista de e-mails do proprietário
-  const isSuperAdmin = (role === 'ADMIN' && (!profile?.condo_id || isMasterByEmail)) || isMasterByEmail;
-  const isPortaria = isSuperAdmin || role === 'ADMIN' || role === 'SYNDIC' || role === 'GUARD';
-  const isAdmin = isSuperAdmin || role === 'ADMIN' || role === 'SYNDIC';
-  const isMorador = isSuperAdmin || role === 'ADMIN' || role === 'RESIDENT' || role === 'SYNDIC';
+  // O Dono do Sistema / Administrador tem acesso Master sempre que tiver perfil ADMIN ou estiver na lista de e-mails
+  const isSuperAdmin = role === 'ADMIN' || isMasterByEmail;
+  const isPortaria = isSuperAdmin || role === 'SYNDIC' || role === 'GUARD';
+  const isAdmin = isSuperAdmin || role === 'SYNDIC';
+  const isMorador = isSuperAdmin || role === 'RESIDENT' || role === 'SYNDIC';
 
   // Administradores e Super Admins podem impersonar condomínios para suporte e gestão
-  const canImpersonate = isSuperAdmin || role === 'ADMIN';
+  const canImpersonate = isSuperAdmin;
 
   // Se não for admin, cada síndico ou porteiro fica 100% isolado no seu próprio condomínio.
   const effectiveCondoId = canImpersonate
     ? (impersonatedCondo?.id || profile?.condo_id || null)
     : (profile?.condo_id || null);
 
-  const isImpersonating = canImpersonate && !!impersonatedCondo;
+  // Apenas considera impersonando se estiver operando em um condomínio diferente do seu condomínio padrão
+  const isImpersonating = canImpersonate && !!impersonatedCondo && impersonatedCondo.id !== profile?.condo_id;
 
   // Se o usuário logado não for admin mas houver impersonação salva, limpa imediatamente
   useEffect(() => {

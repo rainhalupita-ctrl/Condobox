@@ -80,7 +80,7 @@ function MasterLoginForm() {
         .split(',')
         .map(e => e.trim().toLowerCase());
 
-      const isMaster = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+      const isMaster = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
       // 2. Se NÃO for o Dono do Sistema, desloga imediatamente
       if (!isMaster) {

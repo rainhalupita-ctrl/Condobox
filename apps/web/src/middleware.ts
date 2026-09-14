@@ -63,7 +63,7 @@ export async function middleware(request: NextRequest) {
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
         .map(e => e.trim().toLowerCase());
-      const isMasterOwner = (profile.data?.role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+      const isMasterOwner = profile.data?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
       if (isMasterOwner) {
         return NextResponse.redirect(new URL('/super-admin', request.url));
       }
@@ -81,7 +81,7 @@ export async function middleware(request: NextRequest) {
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
         .map(e => e.trim().toLowerCase());
-      const isMasterOwner = (role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+      const isMasterOwner = role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
       const redirectParam = request.nextUrl.searchParams.get('redirect');
       if (redirectParam && redirectParam.startsWith('/') && !redirectParam.includes('login')) {
@@ -115,7 +115,7 @@ export async function middleware(request: NextRequest) {
     const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
       .split(',')
       .map(e => e.trim().toLowerCase());
-    const isMasterOwner = (role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+    const isMasterOwner = role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
     if (isMasterOwner) {
       return NextResponse.redirect(new URL('/super-admin', request.url));
@@ -151,7 +151,7 @@ export async function middleware(request: NextRequest) {
   const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
     .split(',')
     .map(e => e.trim().toLowerCase());
-  const isMasterOwner = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+  const isMasterOwner = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
   // Proteção estrita para o Painel Master (/super-admin) - APENAS o Dono do Sistema
   if (pathname.startsWith('/super-admin')) {

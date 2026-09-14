@@ -76,7 +76,7 @@ function SyndicLoginForm() {
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
         .map(e => e.trim().toLowerCase());
-      const isMasterOwner = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
+      const isMasterOwner = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
       // Se for o dono do sistema e não houver redirecionamento específico, manda para o super-admin
       if (isMasterOwner && (!redirectTo || redirectTo === '/portaria')) {
