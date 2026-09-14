@@ -79,7 +79,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
     }
 
-    const quota = await checkStorageGuard(true);
+    const quota = await checkStorageGuard(false);
     return NextResponse.json({
       success: true,
       quota,

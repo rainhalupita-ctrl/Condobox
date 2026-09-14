@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -245,16 +245,18 @@ export default function SuperAdminPage() {
   const [purgeResultMsg, setPurgeResultMsg] = useState<string | null>(null);
   const [purgeDaysSelect, setPurgeDaysSelect] = useState<number>(0);
 
+  const initialLoadDoneRef = useRef(false);
+
   useEffect(() => {
     document.title = 'CondoBox SaaS Master - Painel do Proprietário';
     if (!loading) {
       if (!user) {
         router.replace('/master/login');
-      } else {
-        loadData();
+      } else if (!initialLoadDoneRef.current) {
+        loadData(true);
       }
     }
-  }, [user, loading, router]);
+  }, [user?.id, loading, router]);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     try {
@@ -268,111 +270,35 @@ export default function SuperAdminPage() {
     return {};
   };
 
-  const loadData = async () => {
-    setLoadingData(true);
+  const loadVersions = async () => {
     try {
-      const authHeaders = await getAuthHeaders();
-      let loadedFromApi = false;
-
-      // 1. Tenta carregar dados via API de Super Admin
-      try {
-        const res = await fetch('/api/super-admin/accounts', {
-          headers: { ...authHeaders },
+      const res = await fetch(`/api/app-version?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setVersionConfig(data);
+        setVersionForm({
+          'condobox-desktop': {
+            version: data['condobox-desktop']?.latest_version || '1.0.0',
+            url: data['condobox-desktop']?.download_url || '',
+            notes: data['condobox-desktop']?.release_notes || '',
+            mandatory: Boolean(data['condobox-desktop']?.is_mandatory),
+          },
+          'condobox-master': {
+            version: data['condobox-master']?.latest_version || '1.0.0',
+            url: data['condobox-master']?.download_url || '',
+            notes: data['condobox-master']?.release_notes || '',
+            mandatory: Boolean(data['condobox-master']?.is_mandatory),
+          },
         });
-        if (res.ok) {
-          const data = await res.json();
-          setAccounts(data.accounts || []);
-          setMetrics(data.metrics || null);
-          loadedFromApi = true;
-        }
-      } catch (apiErr) {
-        console.warn('API /api/super-admin/accounts inacessível, utilizando fallback do Supabase:', apiErr);
       }
-
-      // Fallback direto via Supabase se a rota local estiver momentaneamente fora
-      if (!loadedFromApi) {
-        const [
-          { data: condosData },
-          { data: licensesData },
-          { data: unitsData },
-          { data: residentsData },
-          { data: packagesData },
-        ] = await Promise.all([
-          supabase.from('condos').select('*').order('created_at', { ascending: false }),
-          supabase.from('licenses').select('*'),
-          supabase.from('units').select('id, condo_id'),
-          supabase.from('residents').select('id, unit_id'),
-          supabase.from('packages').select('id, condo_id, status'),
-        ]);
-
-        if (condosData) {
-          const unitCondoMap = new Map((unitsData || []).map(u => [u.id, u.condo_id]));
-          const mappedAccounts: AccountItem[] = condosData.map((c: any) => {
-            const lic = (licensesData || []).find((l: any) => l.condo_id === c.id) || null;
-            const cUnits = (unitsData || []).filter((u: any) => u.condo_id === c.id).length;
-            const cPkgs = (packagesData || []).filter((p: any) => p.condo_id === c.id);
-            const cRes = (residentsData || []).filter((r: any) => unitCondoMap.get(r.unit_id) === c.id).length;
-            return {
-              id: c.id,
-              name: c.name,
-              address: c.address || '',
-              phone: c.phone || '',
-              created_at: c.created_at,
-              license: lic ? {
-                id: lic.id,
-                plan: lic.plan,
-                status: lic.status,
-                expires_at: lic.expires_at,
-                max_apartments: lic.max_apartments || 250,
-                created_at: lic.created_at,
-              } : null,
-              syndic: null,
-              stats: {
-                units_count: cUnits,
-                max_units: lic?.max_apartments || 250,
-                residents_count: cRes,
-                packages_count: cPkgs.length,
-                pending_packages: cPkgs.filter((p: any) => p.status === 'RECEIVED' || p.status === 'NOTIFIED').length,
-                staff_count: 0,
-              }
-            };
-          });
-          setAccounts(mappedAccounts);
-        }
-      }
-
-      // 2. Carrega anúncios
-      const { data: adsData } = await supabase.from('ads').select('*').order('created_at', { ascending: false });
-      if (adsData) setAds(adsData);
-
-      // 3. Carrega versões OTA dos aplicativos
-      await loadVersions();
-
-      // 4. Carrega dados financeiros e assinantes Netflix
-      await loadFinancialData();
-
-      // 5. Carrega status de armazenamento e trava anti-cobrança
-      try {
-        const quotaRes = await fetch('/api/super-admin/storage-status', {
-          headers: { ...authHeaders },
-        });
-        if (quotaRes.ok) {
-          const qData = await quotaRes.json();
-          if (qData.quota) setStorageQuota(qData.quota);
-        }
-      } catch (quotaErr) {
-        console.warn('Falha ao carregar status da trava anti-cobrança:', quotaErr);
-      }
-    } catch (e) {
-      console.error('Erro ao carregar dados:', e);
-    } finally {
-      setLoadingData(false);
+    } catch (err) {
+      console.warn('Erro ao carregar versões:', err);
     }
   };
 
   // --- HANDLERS DA ABA FINANCEIRA & ASSINATURAS ---
-  const loadFinancialData = async () => {
-    setLoadingFinancial(true);
+  const loadFinancialData = async (silent = false) => {
+    if (!silent) setLoadingFinancial(true);
     setFinancialError(null);
     try {
       const authHeaders = await getAuthHeaders();
@@ -405,7 +331,134 @@ export default function SuperAdminPage() {
     } catch (err: any) {
       setFinancialError(err.message || 'Falha de conexão com a API financeira.');
     } finally {
-      setLoadingFinancial(false);
+      if (!silent) setLoadingFinancial(false);
+    }
+  };
+
+  const loadData = async (isInitial = false) => {
+    // Apenas ativa tela cheia de carregamento na inicialização se ainda não houver dados
+    if (isInitial && !initialLoadDoneRef.current && accounts.length === 0) {
+      setLoadingData(true);
+    }
+
+    try {
+      const authHeaders = await getAuthHeaders();
+
+      // 1. Carregamento de Contas e Condomínios
+      const accountsPromise = (async () => {
+        let loadedFromApi = false;
+        try {
+          const res = await fetch('/api/super-admin/accounts', {
+            headers: { ...authHeaders },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAccounts(data.accounts || []);
+            setMetrics(data.metrics || null);
+            loadedFromApi = true;
+          }
+        } catch (apiErr) {
+          console.warn('API /api/super-admin/accounts inacessível, utilizando fallback do Supabase:', apiErr);
+        }
+
+        // Fallback direto via Supabase se a rota local estiver momentaneamente fora
+        if (!loadedFromApi) {
+          const [
+            { data: condosData },
+            { data: licensesData },
+            { data: unitsData },
+            { data: residentsData },
+            { data: packagesData },
+          ] = await Promise.all([
+            supabase.from('condos').select('*').order('created_at', { ascending: false }),
+            supabase.from('licenses').select('*'),
+            supabase.from('units').select('id, condo_id'),
+            supabase.from('residents').select('id, unit_id'),
+            supabase.from('packages').select('id, condo_id, status'),
+          ]);
+
+          if (condosData) {
+            const unitCondoMap = new Map((unitsData || []).map(u => [u.id, u.condo_id]));
+            const mappedAccounts: AccountItem[] = condosData.map((c: any) => {
+              const lic = (licensesData || []).find((l: any) => l.condo_id === c.id) || null;
+              const cUnits = (unitsData || []).filter((u: any) => u.condo_id === c.id).length;
+              const cPkgs = (packagesData || []).filter((p: any) => p.condo_id === c.id);
+              const cRes = (residentsData || []).filter((r: any) => unitCondoMap.get(r.unit_id) === c.id).length;
+              return {
+                id: c.id,
+                name: c.name,
+                address: c.address || '',
+                phone: c.phone || '',
+                created_at: c.created_at,
+                license: lic ? {
+                  id: lic.id,
+                  plan: lic.plan,
+                  status: lic.status,
+                  expires_at: lic.expires_at,
+                  max_apartments: lic.max_apartments || 250,
+                  created_at: lic.created_at,
+                } : null,
+                syndic: null,
+                stats: {
+                  units_count: cUnits,
+                  max_units: lic?.max_apartments || 250,
+                  residents_count: cRes,
+                  packages_count: cPkgs.length,
+                  pending_packages: cPkgs.filter((p: any) => p.status === 'RECEIVED' || p.status === 'NOTIFIED').length,
+                  staff_count: 0,
+                }
+              };
+            });
+            setAccounts(mappedAccounts);
+          }
+        }
+      })();
+
+      // 2. Carregamento de Anúncios
+      const adsPromise = (async () => {
+        try {
+          const { data: adsData } = await supabase.from('ads').select('*').order('created_at', { ascending: false });
+          if (adsData) setAds(adsData);
+        } catch (adsErr) {
+          console.warn('Falha ao carregar anúncios:', adsErr);
+        }
+      })();
+
+      // 3. Versões OTA dos aplicativos
+      const versionsPromise = loadVersions();
+
+      // 4. Dados financeiros e assinaturas SaaS
+      const financialPromise = loadFinancialData(true);
+
+      // 5. Cota de armazenamento e trava anti-cobrança
+      const storagePromise = (async () => {
+        try {
+          const quotaRes = await fetch('/api/super-admin/storage-status', {
+            headers: { ...authHeaders },
+          });
+          if (quotaRes.ok) {
+            const qData = await quotaRes.json();
+            if (qData.quota) setStorageQuota(qData.quota);
+          }
+        } catch (quotaErr) {
+          console.warn('Falha ao carregar status da trava anti-cobrança:', quotaErr);
+        }
+      })();
+
+      // Executa todas as buscas em paralelo para resposta instantânea (<300ms)
+      await Promise.allSettled([
+        accountsPromise,
+        adsPromise,
+        versionsPromise,
+        financialPromise,
+        storagePromise,
+      ]);
+
+      initialLoadDoneRef.current = true;
+    } catch (e) {
+      console.error('Erro ao carregar dados:', e);
+    } finally {
+      setLoadingData(false);
     }
   };
 
@@ -627,32 +680,6 @@ export default function SuperAdminPage() {
       alert(`Erro na limpeza: ${err.message}`);
     } finally {
       setPurgingStorage(false);
-    }
-  };
-
-  const loadVersions = async () => {
-    try {
-      const res = await fetch(`/api/app-version?t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        setVersionConfig(data);
-        setVersionForm({
-          'condobox-desktop': {
-            version: data['condobox-desktop']?.latest_version || '1.0.0',
-            url: data['condobox-desktop']?.download_url || '',
-            notes: data['condobox-desktop']?.release_notes || '',
-            mandatory: Boolean(data['condobox-desktop']?.is_mandatory),
-          },
-          'condobox-master': {
-            version: data['condobox-master']?.latest_version || '1.0.0',
-            url: data['condobox-master']?.download_url || '',
-            notes: data['condobox-master']?.release_notes || '',
-            mandatory: Boolean(data['condobox-master']?.is_mandatory),
-          },
-        });
-      }
-    } catch (err) {
-      console.warn('Erro ao carregar versões:', err);
     }
   };
 
@@ -940,7 +967,7 @@ export default function SuperAdminPage() {
     return matchSearch && matchPlan && matchStatus;
   });
 
-  if (loading || loadingData) {
+  if (loading || (loadingData && accounts.length === 0)) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3">
         <Loader2 className="animate-spin text-purple-500 w-9 h-9" />
@@ -972,7 +999,7 @@ export default function SuperAdminPage() {
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
-            onClick={loadData}
+            onClick={() => loadData()}
             className="p-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
             title="Atualizar dados"
           >
@@ -1299,10 +1326,7 @@ export default function SuperAdminPage() {
 
         <button
           type="button"
-          onClick={() => {
-            setActiveTab('FINANCIAL');
-            loadFinancialData();
-          }}
+          onClick={() => setActiveTab('FINANCIAL')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap relative ${
             activeTab === 'FINANCIAL'
               ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40'
@@ -1641,7 +1665,7 @@ export default function SuperAdminPage() {
 
               <button
                 type="button"
-                onClick={loadFinancialData}
+                onClick={() => loadFinancialData()}
                 disabled={loadingFinancial}
                 className="p-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
                 title="Atualizar dados financeiros"
