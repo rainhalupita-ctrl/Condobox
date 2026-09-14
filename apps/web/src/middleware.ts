@@ -10,7 +10,7 @@ const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
 };
 
 // Rotas públicas (sem autenticação necessária)
-const PUBLIC_PATHS = ['/login', '/cadastro', '/p/', '/encomenda', '/master/login', '/admin/login', '/portaria/login'];
+const PUBLIC_PATHS = ['/login', '/cadastro', '/p/', '/encomenda', '/master/login', '/admin/login', '/portaria/login', '/auth/callback', '/login/callback'];
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;

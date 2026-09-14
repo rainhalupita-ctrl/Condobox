@@ -103,7 +103,7 @@ export default function AdminPage() {
   const [staffList, setStaffList] = useState<any[]>([]);
   const [staffDeleteLoading, setStaffDeleteLoading] = useState<string | null>(null);
   const [staffQrLoading, setStaffQrLoading] = useState<string | null>(null);
-  const [staffQrData, setStaffQrData] = useState<{link: string, name: string} | null>(null);
+  const [staffQrData, setStaffQrData] = useState<{link: string, name: string, otp?: string | null} | null>(null);
   const [healthStatus, setHealthStatus] = useState<any | null>(null);
 
   // WhatsApp Evolution API State
@@ -511,7 +511,8 @@ export default function AdminPage() {
           email: staffEmail,
           phone: staffPhone,
           password: staffPassword,
-          role: staffRole
+          role: staffRole,
+          condoId: effectiveCondoId,
         })
       });
 
@@ -543,7 +544,7 @@ export default function AdminPage() {
     
     setStaffDeleteLoading(userId);
     try {
-      const res = await fetch(`/api/staff?userId=${userId}`, {
+      const res = await fetch(`/api/staff?userId=${userId}&condoId=${effectiveCondoId || ''}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -564,13 +565,13 @@ export default function AdminPage() {
   const handleGenerateQR = async (userId: string, userName: string) => {
     setStaffQrLoading(userId);
     try {
-      const res = await fetch(`/api/staff/qr?userId=${userId}`);
+      const res = await fetch(`/api/staff/qr?userId=${userId}&condoId=${effectiveCondoId || ''}`);
       const data = await res.json();
       
       if (!res.ok) {
         alert(data.error || 'Erro ao gerar o QR Code de acesso.');
       } else {
-        setStaffQrData({ link: data.actionLink, name: userName });
+        setStaffQrData({ link: data.actionLink, name: userName, otp: data.otp });
       }
     } catch (err) {
       alert('Erro de conexão ao gerar o QR Code.');
@@ -2148,7 +2149,13 @@ export default function AdminPage() {
               <div className="bg-white p-4 rounded-xl inline-block shadow-lg mx-auto mb-4">
                 <QRCodeSVG value={staffQrData.link} size={200} level="H" includeMargin={false} />
               </div>
-              <p className="text-white font-medium mt-2">{staffQrData.name}</p>
+              <p className="text-white font-medium mt-1">{staffQrData.name}</p>
+              {staffQrData.otp && (
+                <div className="mt-3 bg-slate-800/80 border border-slate-700/80 rounded-xl py-2 px-3 inline-block">
+                  <span className="text-slate-400 text-[11px] uppercase tracking-wider block font-semibold">Código Numérico Rápido</span>
+                  <span className="text-emerald-400 font-mono font-black text-xl tracking-widest">{staffQrData.otp}</span>
+                </div>
+              )}
             </div>
             <div className="bg-slate-800 p-4 border-t border-slate-700 flex justify-center">
               <button 

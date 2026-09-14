@@ -32,16 +32,22 @@ export async function POST(request: Request) {
       .eq('id', session.user.id)
       .single();
 
-    if (!adminProfile || (adminProfile.role !== 'ADMIN' && adminProfile.role !== 'SYNDIC')) {
-      return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou admins podem criar equipe.' }, { status: 403 });
+    const userEmail = (session.user.email || '').toLowerCase();
+    const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+      .split(',')
+      .map(e => e.trim().toLowerCase());
+    const isSuperAdmin = adminProfile?.role === 'ADMIN' || (!!userEmail && superAdminEmails.includes(userEmail));
+
+    if (!isSuperAdmin && (!adminProfile || adminProfile.role !== 'SYNDIC')) {
+      return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou administradores podem criar equipe.' }, { status: 403 });
     }
 
-    const condoId = adminProfile.condo_id;
+    const { name, email, phone, password, role, condoId: requestedCondoId } = await request.json();
+
+    const condoId = (isSuperAdmin && requestedCondoId) ? requestedCondoId : adminProfile?.condo_id;
     if (!condoId) {
-      return NextResponse.json({ error: 'Seu usuário não possui um ID de condomínio vinculado.' }, { status: 400 });
+      return NextResponse.json({ error: 'Condomínio não informado ou usuário sem condomínio vinculado.' }, { status: 400 });
     }
-
-    const { name, email, phone, password, role } = await request.json();
 
     if (!name || !email || !password || !role) {
       return NextResponse.json(
@@ -127,8 +133,14 @@ export async function DELETE(request: Request) {
       .eq('id', session.user.id)
       .single();
 
-    if (!adminProfile || (adminProfile.role !== 'ADMIN' && adminProfile.role !== 'SYNDIC')) {
-      return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou admins podem gerenciar equipe.' }, { status: 403 });
+    const userEmail = (session.user.email || '').toLowerCase();
+    const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
+      .split(',')
+      .map(e => e.trim().toLowerCase());
+    const isSuperAdmin = adminProfile?.role === 'ADMIN' || (!!userEmail && superAdminEmails.includes(userEmail));
+
+    if (!isSuperAdmin && (!adminProfile || adminProfile.role !== 'SYNDIC')) {
+      return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou administradores podem gerenciar equipe.' }, { status: 403 });
     }
 
     const url = new URL(request.url);
@@ -143,7 +155,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Você não pode excluir sua própria conta.' }, { status: 400 });
     }
 
-    // Verificar se o usuário a ser deletado pertence ao mesmo condomínio
+    // Verificar se o usuário existe
     const supabaseAdmin = getSupabaseAdmin();
     const { data: userToDelete } = await supabaseAdmin
       .from('profiles')
@@ -151,8 +163,13 @@ export async function DELETE(request: Request) {
       .eq('id', userIdToDelete)
       .single();
 
-    if (!userToDelete || userToDelete.condo_id !== adminProfile.condo_id) {
-      return NextResponse.json({ error: 'Usuário não encontrado ou não pertence ao seu condomínio.' }, { status: 404 });
+    if (!userToDelete) {
+      return NextResponse.json({ error: 'Usuário não encontrado.' }, { status: 404 });
+    }
+
+    // Se não for Super Admin, validar se pertence ao condomínio do síndico
+    if (!isSuperAdmin && userToDelete.condo_id !== adminProfile?.condo_id) {
+      return NextResponse.json({ error: 'Usuário não pertence ao seu condomínio.' }, { status: 403 });
     }
 
     // Deletar o usuário do Auth (isso deve disparar exclusão em cascata nas profiles se houver fk configurada com ON DELETE CASCADE, caso contrário deletamos manualmente)
