@@ -93,8 +93,8 @@ export function KeyboardShortcuts() {
         return;
       }
 
-      // Atalhos de função e teclas rápidas fora de inputs
-      if (!isInput) {
+      // Atalhos de função e teclas rápidas fora de inputs - EXCLUSIVOS da tela operacional de Portaria
+      if (!isInput && pathname === '/portaria') {
         // F1 ou N: Nova Encomenda
         if (e.key === 'F1' || (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.altKey)) {
           e.preventDefault();
@@ -125,33 +125,31 @@ export function KeyboardShortcuts() {
         }
 
         // 1, 2, 3: Filtros da Portaria
-        if (pathname === '/portaria') {
-          if (e.key === '1') {
-            e.preventDefault();
-            window.dispatchEvent(new CustomEvent('condobox:set-filter', { detail: 'PENDING' }));
-            return;
-          }
-          if (e.key === '2') {
-            e.preventDefault();
-            window.dispatchEvent(new CustomEvent('condobox:set-filter', { detail: 'DELIVERED' }));
-            return;
-          }
-          if (e.key === '3') {
-            e.preventDefault();
-            window.dispatchEvent(new CustomEvent('condobox:set-filter', { detail: 'ALL' }));
-            return;
-          }
+        if (e.key === '1') {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('condobox:set-filter', { detail: 'PENDING' }));
+          return;
+        }
+        if (e.key === '2') {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('condobox:set-filter', { detail: 'DELIVERED' }));
+          return;
+        }
+        if (e.key === '3') {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('condobox:set-filter', { detail: 'ALL' }));
+          return;
         }
 
         // F5: Atualizar lista de encomendas
-        if (e.key === 'F5' && pathname === '/portaria') {
+        if (e.key === 'F5') {
           e.preventDefault();
           window.dispatchEvent(new CustomEvent('condobox:refresh-packages'));
           return;
         }
 
         // F9: Disparar WhatsApp
-        if (e.key === 'F9' && pathname === '/portaria') {
+        if (e.key === 'F9') {
           e.preventDefault();
           window.dispatchEvent(new CustomEvent('condobox:notify-pending'));
           return;

@@ -127,6 +127,43 @@ export default function AdminPage() {
   const [newResBlock, setNewResBlock] = useState('Bloco A');
   const [newResUnitNumber, setNewResUnitNumber] = useState('');
   const [isUnitDropdownOpen, setIsUnitDropdownOpen] = useState(false);
+  const unitDropdownRef = React.useRef<HTMLDivElement>(null);
+  const residentNameInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Foca automaticamente no campo Nome Completo ao abrir o modal de cadastro de morador
+  useEffect(() => {
+    if (isAddResidentModalOpen) {
+      const timer = setTimeout(() => {
+        residentNameInputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isAddResidentModalOpen]);
+
+  // Fecha o dropdown de unidades ao clicar fora (sem precisar de overlay em tela cheia)
+  useEffect(() => {
+    if (!isUnitDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (unitDropdownRef.current && !unitDropdownRef.current.contains(e.target as Node)) {
+        setIsUnitDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isUnitDropdownOpen]);
+
+  // Fecha modal de cadastro individual com ESC
+  useEffect(() => {
+    if (!isAddResidentModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAddResidentModalOpen(false);
+        setEditingResident(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAddResidentModalOpen]);
 
   // Modal de Perfil Completo do Morador
   const [selectedResidentProfile, setSelectedResidentProfile] = useState<Resident | null>(null);
@@ -3040,8 +3077,19 @@ export default function AdminPage() {
 
       {/* Modal de Cadastro Individual de Morador */}
       {isAddResidentModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl">
+        <div 
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsAddResidentModalOpen(false);
+              setEditingResident(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl relative"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-indigo-500/15 border border-indigo-500/30 rounded-xl text-indigo-400">
@@ -3064,7 +3112,8 @@ export default function AdminPage() {
                   setIsAddResidentModalOpen(false);
                   setEditingResident(null);
                 }}
-                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition"
+                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                title="Fechar janela"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3072,29 +3121,38 @@ export default function AdminPage() {
 
             <form onSubmit={handleAddResident} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome Completo *</label>
+                <label htmlFor="res-name" className="block text-slate-300 font-semibold mb-1 cursor-pointer">
+                  Nome Completo *
+                </label>
                 <input
+                  ref={residentNameInputRef}
+                  id="res-name"
                   type="text"
                   required
+                  autoFocus
+                  autoComplete="name"
                   value={newResName}
                   onChange={(e) => setNewResName(e.target.value)}
                   placeholder="Ex: Carlos Eduardo da Silva"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition select-text"
                 />
               </div>
 
               {/* Bloco e Apartamento Separados */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Bloco / Torre *</label>
+                  <label htmlFor="res-block" className="block text-slate-300 font-semibold mb-1 cursor-pointer">
+                    Bloco / Torre *
+                  </label>
                   <select
+                    id="res-block"
                     required
                     value={newResBlock}
                     onChange={(e) => {
                       setNewResBlock(e.target.value);
                       setNewResUnitNumber('');
                     }}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer transition"
                   >
                     {Array.from(new Set(units.map((u) => u.block || 'Bloco A'))).sort().map((blockName) => (
                       <option key={blockName} value={blockName}>
@@ -3107,12 +3165,16 @@ export default function AdminPage() {
                   </select>
                 </div>
 
-                <div className="relative">
-                  <label className="block text-slate-300 font-semibold mb-1">Apartamento *</label>
+                <div className="relative" ref={unitDropdownRef}>
+                  <label htmlFor="res-unit" className="block text-slate-300 font-semibold mb-1 cursor-pointer">
+                    Apartamento *
+                  </label>
                   <div className="relative">
                     <input
+                      id="res-unit"
                       type="text"
                       required
+                      autoComplete="off"
                       value={newResUnitNumber}
                       onFocus={() => setIsUnitDropdownOpen(true)}
                       onChange={(e) => {
@@ -3120,106 +3182,108 @@ export default function AdminPage() {
                         setIsUnitDropdownOpen(true);
                       }}
                       placeholder="Digite ou selecione o apto..."
-                      className="w-full pl-3.5 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold"
+                      className="w-full pl-3.5 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-bold transition select-text"
                     />
                     <button
                       type="button"
                       tabIndex={-1}
                       onClick={() => setIsUnitDropdownOpen((prev) => !prev)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 rounded-md transition cursor-pointer"
                       title="Ver todos os apartamentos"
                     >
                       <ChevronDown className={`w-4 h-4 transition-transform ${isUnitDropdownOpen ? 'rotate-180 text-indigo-400' : ''}`} />
                     </button>
                   </div>
 
-                  {/* Dropdown com filtragem em tempo real ao digitar */}
+                  {/* Dropdown com filtragem em tempo real ao digitar (SEM OVERLAY BLOQUEANTE) */}
                   {isUnitDropdownOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setIsUnitDropdownOpen(false)}
-                      />
-                      <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl py-1 text-slate-100 divide-y divide-slate-800/60 animate-fade-in">
-                        {Array.from(
-                          new Set(
-                            units
-                              .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
-                              .map((u) => u.unit_number)
-                          )
+                    <div className="absolute z-30 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl py-1 text-slate-100 divide-y divide-slate-800/60 animate-fade-in">
+                      {Array.from(
+                        new Set(
+                          units
+                            .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
+                            .map((u) => u.unit_number)
                         )
-                          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-                          .filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase()))
-                          .map((num) => (
+                      )
+                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                        .filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase()))
+                        .map((num) => (
+                          <button
+                            key={num}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setNewResUnitNumber(num);
+                              setIsUnitDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3.5 py-2 text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                              newResUnitNumber === num
+                                ? 'bg-indigo-600/30 text-indigo-300'
+                                : 'hover:bg-slate-800 text-slate-200'
+                            }`}
+                          >
+                            <span>Apto {num}</span>
+                            {newResUnitNumber === num && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                          </button>
+                        ))}
+
+                      {Array.from(
+                        new Set(
+                          units
+                            .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
+                            .map((u) => u.unit_number)
+                        )
+                      ).filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase())).length === 0 && (
+                        <div className="px-3.5 py-2.5 text-xs text-slate-400 text-center">
+                          {newResUnitNumber.trim() ? (
                             <button
-                              key={num}
                               type="button"
                               onMouseDown={(e) => {
                                 e.preventDefault();
-                                setNewResUnitNumber(num);
                                 setIsUnitDropdownOpen(false);
                               }}
-                              className={`w-full text-left px-3.5 py-2 text-xs font-bold transition flex items-center justify-between ${
-                                newResUnitNumber === num
-                                  ? 'bg-indigo-600/30 text-indigo-300'
-                                  : 'hover:bg-slate-800 text-slate-200'
-                              }`}
+                              className="text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
                             >
-                              <span>Apto {num}</span>
-                              {newResUnitNumber === num && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                              Usar &quot;Apto {newResUnitNumber}&quot; (Criará unidade)
                             </button>
-                          ))}
-
-                        {Array.from(
-                          new Set(
-                            units
-                              .filter((u) => (u.block || 'Bloco A').toUpperCase() === (newResBlock || 'Bloco A').toUpperCase())
-                              .map((u) => u.unit_number)
-                          )
-                        ).filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase())).length === 0 && (
-                          <div className="px-3.5 py-2.5 text-xs text-slate-400 text-center">
-                            {newResUnitNumber.trim() ? (
-                              <button
-                                type="button"
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  setIsUnitDropdownOpen(false);
-                                }}
-                                className="text-indigo-400 hover:text-indigo-300 font-bold"
-                              >
-                                Usar &quot;Apto {newResUnitNumber}&quot; (Criará unidade)
-                              </button>
-                            ) : (
-                              'Nenhum apartamento cadastrado neste bloco'
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </>
+                          ) : (
+                            'Nenhum apartamento cadastrado neste bloco'
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">WhatsApp para Notificações *</label>
+                <label htmlFor="res-phone" className="block text-slate-300 font-semibold mb-1 cursor-pointer">
+                  WhatsApp para Notificações *
+                </label>
                 <input
+                  id="res-phone"
                   type="text"
                   required
+                  autoComplete="tel"
                   value={newResPhone}
                   onChange={(e) => setNewResPhone(e.target.value)}
                   placeholder="Ex: 11988887777 ou 73981953741"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 font-mono transition select-text"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">E-mail (Opcional)</label>
+                <label htmlFor="res-email" className="block text-slate-300 font-semibold mb-1 cursor-pointer">
+                  E-mail (Opcional)
+                </label>
                 <input
+                  id="res-email"
                   type="email"
+                  autoComplete="email"
                   value={newResEmail}
                   onChange={(e) => setNewResEmail(e.target.value)}
                   placeholder="morador@exemplo.com"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition select-text"
                 />
               </div>
 
@@ -3230,13 +3294,13 @@ export default function AdminPage() {
                     setIsAddResidentModalOpen(false);
                     setEditingResident(null);
                   }}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition"
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow-lg shadow-indigo-950 flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition shadow-lg shadow-indigo-950 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {editingResident ? (
                     <>
