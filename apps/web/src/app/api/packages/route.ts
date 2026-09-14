@@ -18,7 +18,8 @@ export async function POST(request: NextRequest) {
       sendWhatsApp = true,
       residentPhone,
       residentName,
-      unitInfo
+      unitInfo,
+      deliveredToName
     } = body;
 
     if (!unitId || !carrier) {
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
         recipient_name_ocr: recipientNameOcr || null,
         label_image_path: labelImagePath || null,
         notes: notes || null,
+        delivered_to_name: deliveredToName || null,
         pickup_code: pickupCode,
         qr_token: qrToken,
         status: 'RECEIVED',

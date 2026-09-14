@@ -10,6 +10,7 @@ import {
   Package,
   Building2,
   User,
+  Users,
   Truck,
   Clock,
   CheckCircle2,
@@ -22,6 +23,7 @@ import {
   RefreshCw,
   QrCode,
   MessageSquare,
+  Share2,
   X
 } from 'lucide-react';
 
@@ -68,6 +70,26 @@ export default function PublicPackagePage() {
   const [confirmedToast, setConfirmedToast] = useState(false);
   const [connectedWhatsappPhone, setConnectedWhatsappPhone] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+
+  // Estados para liberação de terceiro antes do envio
+  const [pickupOption, setPickupOption] = useState<'SELF' | 'THIRD_PARTY'>('SELF');
+  const [thirdPartyName, setThirdPartyName] = useState('');
+  const [thirdPartyRelation, setThirdPartyRelation] = useState('Esposo(a)');
+  const [thirdPartyDoc, setThirdPartyDoc] = useState('');
+  const [thirdPartyError, setThirdPartyError] = useState<string | null>(null);
+  const [thirdPartySuccessInfo, setThirdPartySuccessInfo] = useState<{ name: string; relation?: string } | null>(null);
+
+  const parseThirdPartyFromNotes = (notes?: string | null) => {
+    if (!notes || !notes.includes('TERCEIRO_AUTORIZADO:')) return null;
+    const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|(]+)(?:\(([^)]+)\))?/);
+    if (match) {
+      return {
+        name: match[1].trim(),
+        relation: match[2]?.trim() || '',
+      };
+    }
+    return null;
+  };
 
   useEffect(() => {
     setIsMounted(true);
@@ -329,6 +351,16 @@ export default function PublicPackagePage() {
 
   const handleConfirmAndUnlock = async () => {
     if (!pkg) return;
+    setThirdPartyError(null);
+
+    const isThirdParty = pickupOption === 'THIRD_PARTY';
+    const cleanThirdName = thirdPartyName.trim();
+
+    if (isThirdParty && !cleanThirdName) {
+      setThirdPartyError('Por favor, informe o nome da pessoa que irá retirar.');
+      return;
+    }
+
     setConfirming(true);
 
     // 1. Libera imediatamente o QR Code e código na tela e salva no navegador do morador
@@ -337,7 +369,7 @@ export default function PublicPackagePage() {
       localStorage.setItem(`unlocked_${pkg.pickup_code}`, 'true');
     }
 
-    // 2. Monta a mensagem exata na voz do morador para a portaria
+    // 2. Monta a mensagem na voz do morador para a portaria (Pessoal vs. Terceiro Autorizado)
     const rawBlock = pkg.unit?.block || '';
     const blockText = rawBlock
       ? (rawBlock.toLowerCase().startsWith('bloco') ? rawBlock : `Bloco ${rawBlock}`)
@@ -347,12 +379,22 @@ export default function PublicPackagePage() {
     const residentName = pkg.recipient_name || pkg.resident?.name || 'Morador(a)';
     const carrier = pkg.carrier || 'Encomenda';
 
-    const message =
-      `👍 *CONFIRMAÇÃO DE CIÊNCIA - MORADOR*\n\n` +
-      `Olá, Portaria!\n` +
-      `Eu, *${residentName}* (${unitText}), confirmo que recebi o aviso e estou ciente da minha encomenda da *${carrier}*.\n\n` +
-      `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-      `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
+    const relationInfo = [thirdPartyRelation, thirdPartyDoc.trim()].filter(Boolean).join(' • ');
+    const relationLine = relationInfo ? `📄 *Relação / Doc:* ${relationInfo}\n` : '';
+
+    const message = isThirdParty
+      ? `🤝 *AUTORIZAÇÃO DE RETIRADA POR TERCEIRO*\n\n` +
+        `Olá, Portaria!\n` +
+        `Eu, *${residentName}* (${unitText}), autorizo a retirada da minha encomenda da *${carrier}*.\n\n` +
+        `👤 *Pessoa Autorizada:* *${cleanThirdName}*\n` +
+        relationLine +
+        `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+        `🏢 A pessoa autorizada apresentará este QR Code no balcão da portaria para retirada.`
+      : `👍 *CONFIRMAÇÃO DE CIÊNCIA - MORADOR*\n\n` +
+        `Olá, Portaria!\n` +
+        `Eu, *${residentName}* (${unitText}), confirmo que recebi o aviso e estou ciente da minha encomenda da *${carrier}*.\n\n` +
+        `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+        `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
 
     const destPhone = targetWhatsappPhone || '557398419901';
 
@@ -369,6 +411,8 @@ export default function PublicPackagePage() {
               phone: destPhone,
               message,
               packageId: pkg.id,
+              isThirdParty,
+              thirdPartyName: cleanThirdName,
             }
           }).catch(() => {});
           setTimeout(() => {
@@ -380,16 +424,28 @@ export default function PublicPackagePage() {
       console.warn('[Realtime Bridge] Erro ao transmitir:', err);
     }
 
-    // 4. Requisição POST para a Evolution API / Backend (sem abrir aplicativo no celular)
+    // 4. Requisição POST para a API (com suporte a terceiro)
     try {
       const cleanToken = encodeURIComponent((pkg.pickup_code || token).trim());
       const res = await fetch(`/api/package/${cleanToken}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: destPhone }),
+        body: JSON.stringify({
+          phone: destPhone,
+          isThirdParty,
+          thirdPartyName: cleanThirdName,
+          thirdPartyRelation,
+          thirdPartyDoc: thirdPartyDoc.trim(),
+        }),
       });
 
       if (res.ok) {
+        if (isThirdParty) {
+          setThirdPartySuccessInfo({
+            name: cleanThirdName,
+            relation: relationInfo
+          });
+        }
         setConfirmedToast(true);
         setTimeout(() => setConfirmedToast(false), 5000);
       }
@@ -512,11 +568,45 @@ export default function PublicPackagePage() {
 
             {/* CARD PRINCIPAL DO QR CODE E CÓDIGO */}
             {!isDelivered && (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-5 relative overflow-hidden">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl text-center space-y-4 relative overflow-hidden">
                 <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
               {/* Bloco de Conteúdo (Desfocado se não confirmado) */}
-              <div className={`transition-all duration-700 ${!isUnlocked && !isDelivered ? 'blur-md opacity-40 select-none pointer-events-none' : ''}`}>
+              <div className={`transition-all duration-700 ${!isUnlocked && !isDelivered ? 'blur-md opacity-35 select-none pointer-events-none' : ''}`}>
+                
+                {/* Badge de Terceiro Autorizado quando ativo */}
+                {(thirdPartySuccessInfo || parseThirdPartyFromNotes(pkg.notes)) && (
+                  <div className="mb-4 p-3 bg-gradient-to-r from-indigo-950/90 to-purple-950/90 border border-indigo-500/40 rounded-2xl flex items-center justify-between gap-2.5 text-left shadow-lg">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-sm shrink-0">
+                        🤝
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block">
+                          Retirada por Terceiro Autorizada
+                        </span>
+                        <span className="text-xs font-bold text-white truncate block">
+                          {(thirdPartySuccessInfo || parseThirdPartyFromNotes(pkg.notes))?.name}
+                          {((thirdPartySuccessInfo || parseThirdPartyFromNotes(pkg.notes))?.relation) && (
+                            <span className="text-indigo-300 font-normal"> • {((thirdPartySuccessInfo || parseThirdPartyFromNotes(pkg.notes))?.relation)}</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <a
+                      href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                        `Olá! 👋 Autorizei você a retirar minha encomenda da *${pkg.carrier || 'Transportadora'}* na portaria do condomínio.\n\n🔑 *Código de Retirada:* *${pkg.pickup_code}*\n📱 *Apresente este link/QR Code na portaria:*\n${typeof window !== 'undefined' ? window.location.href : ''}`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition shrink-0 flex items-center gap-1.5 text-xs font-bold shadow-md shadow-indigo-950 cursor-pointer active:scale-95"
+                      title="Encaminhar pelo WhatsApp"
+                    >
+                      <Share2 className="w-3.5 h-3.5" /> Enviar QR
+                    </a>
+                  </div>
+                )}
+
                 {/* QR Code Container */}
                 <div className="relative inline-block p-4 bg-white rounded-2xl shadow-xl shadow-slate-950/60 border border-slate-200">
                   <QRCodeSVG
@@ -529,7 +619,7 @@ export default function PublicPackagePage() {
                 </div>
 
                 {/* Código Numérico de 4 Dígitos */}
-                <div className="space-y-1.5 mt-5">
+                <div className="space-y-1.5 mt-4">
                   <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
                     Código de Retirada
                   </span>
@@ -556,31 +646,151 @@ export default function PublicPackagePage() {
                   )}
                 </div>
 
-                <p className="text-xs text-slate-400 px-4 leading-relaxed mt-5">
+                <p className="text-xs text-slate-400 px-4 leading-relaxed mt-4">
                   💡 O porteiro pode escanear o <strong>QR Code</strong> diretamente da tela do seu celular ou você pode apenas falar o código <strong>{pkg.pickup_code}</strong>.
                 </p>
               </div>
 
-              {/* OVERLAY DE BLOQUEIO / BOTÃO DE CONFIRMAÇÃO */}
+              {/* OVERLAY DE BLOQUEIO / SELEÇÃO ANTES DO ENVIO */}
               {!isUnlocked && !isDelivered && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/40 backdrop-blur-[2px] p-6 animate-fade-in">
-                  <div className="w-full">
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 backdrop-blur-[3px] p-4 sm:p-5 animate-fade-in">
+                  <div className="w-full bg-slate-900 border border-slate-700/80 rounded-3xl p-5 shadow-2xl space-y-3.5 max-w-sm">
+                    <div className="text-center">
+                      <span className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                        Liberação de Retirada
+                      </span>
+                      <h4 className="text-sm font-bold text-white mt-1">
+                        Quem irá retirar esta encomenda?
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Escolha antes de enviar a confirmação à portaria:
+                      </p>
+                    </div>
+
+                    {/* Seletor: Eu mesmo vs. Liberar para Terceiro */}
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950/80 border border-slate-800 rounded-2xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickupOption('SELF');
+                          setThirdPartyError(null);
+                        }}
+                        className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                          pickupOption === 'SELF'
+                            ? 'bg-emerald-600 text-white shadow-md'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <User className="w-3.5 h-3.5" /> Eu mesmo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickupOption('THIRD_PARTY');
+                          setThirdPartyError(null);
+                        }}
+                        className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                          pickupOption === 'THIRD_PARTY'
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Users className="w-3.5 h-3.5" /> Liberar Terceiro
+                      </button>
+                    </div>
+
+                    {/* Formulário do Terceiro quando selecionado */}
+                    {pickupOption === 'THIRD_PARTY' && (
+                      <div className="space-y-2.5 p-3 bg-slate-950/60 border border-indigo-500/30 rounded-2xl animate-fade-in text-left">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-indigo-300 block mb-1">
+                            Nome de quem vai retirar <span className="text-rose-400">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={thirdPartyName}
+                            onChange={(e) => {
+                              setThirdPartyName(e.target.value);
+                              setThirdPartyError(null);
+                            }}
+                            placeholder="Ex: Carla Silva, João (Filho)..."
+                            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400 font-medium"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                              Parentesco / Relação
+                            </label>
+                            <select
+                              value={thirdPartyRelation}
+                              onChange={(e) => setThirdPartyRelation(e.target.value)}
+                              className="w-full px-2 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-400 font-medium"
+                            >
+                              <option value="Esposo(a)">Esposo(a)</option>
+                              <option value="Filho(a)">Filho(a)</option>
+                              <option value="Familiar">Familiar</option>
+                              <option value="Diarista / Funcionário">Diarista / Func.</option>
+                              <option value="Amigo(a) / Vizinho">Amigo(a)/Vizinho</option>
+                              <option value="Outro">Outro</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                              Doc ou Tel (opcional)
+                            </label>
+                            <input
+                              type="text"
+                              value={thirdPartyDoc}
+                              onChange={(e) => setThirdPartyDoc(e.target.value)}
+                              placeholder="RG/CPF ou Tel"
+                              className="w-full px-2.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400 font-medium"
+                            />
+                          </div>
+                        </div>
+
+                        {thirdPartyError && (
+                          <p className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 shrink-0" /> {thirdPartyError}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Botão de Disparo / Confirmação */}
                     <button
                       type="button"
                       disabled={confirming}
                       onClick={handleConfirmAndUnlock}
-                      className="w-full py-4 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-sm font-bold flex flex-col items-center justify-center gap-2 shadow-[0_0_40px_rgba(16,185,129,0.4)] transition hover:scale-105 active:scale-95 border border-emerald-400/50 disabled:opacity-85"
+                      className={`w-full py-3.5 px-4 rounded-2xl text-xs sm:text-sm font-bold flex flex-col items-center justify-center gap-1 shadow-lg transition hover:scale-[1.02] active:scale-98 disabled:opacity-85 text-white cursor-pointer ${
+                        pickupOption === 'THIRD_PARTY'
+                          ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-950/60 border border-indigo-400/40'
+                          : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/60 border border-emerald-400/40'
+                      }`}
                     >
                       <div className="flex items-center gap-2">
                         {confirming ? (
-                          <RefreshCw className="w-5 h-5 text-emerald-100 animate-spin" />
+                          <RefreshCw className="w-4 h-4 text-white animate-spin" />
+                        ) : pickupOption === 'THIRD_PARTY' ? (
+                          <Users className="w-4 h-4 text-indigo-200" />
                         ) : (
-                          <MessageSquare className="w-5 h-5 text-emerald-100" />
+                          <MessageSquare className="w-4 h-4 text-emerald-200" />
                         )}
-                        <span>{confirming ? 'Enviando via Evolution API...' : 'Confirmar e Liberar QR Code'}</span>
+                        <span>
+                          {confirming
+                            ? 'Enviando à Portaria...'
+                            : pickupOption === 'THIRD_PARTY'
+                            ? 'Autorizar Terceiro e Liberar QR'
+                            : 'Confirmar e Liberar QR Code'}
+                        </span>
                       </div>
-                      <span className="text-[10px] font-normal text-emerald-100/80">
-                        {confirming ? 'Disparando confirmação na portaria...' : 'Disparo automático via API • Libera a etiqueta na hora'}
+                      <span className="text-[10px] font-normal opacity-85">
+                        {pickupOption === 'THIRD_PARTY'
+                          ? 'Notifica a portaria sobre o terceiro e libera o código'
+                          : 'Disparo automático via API • Libera a etiqueta na hora'}
                       </span>
                     </button>
                   </div>
@@ -742,7 +952,9 @@ export default function PublicPackagePage() {
             className="relative max-w-lg w-full my-auto max-h-[90vh] bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
           >
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/95 shrink-0">
-              <span className="text-xs font-bold text-slate-200">Foto da Etiqueta</span>
+              <span className="text-xs font-bold text-slate-200">
+                {modalImage === signatureUrl ? 'Assinatura Digital da Retirada' : 'Foto da Etiqueta'}
+              </span>
               <button
                 type="button"
                 onClick={() => setModalImage(null)}
@@ -755,8 +967,10 @@ export default function PublicPackagePage() {
             <div className="flex-1 min-h-0 p-3 sm:p-4 flex items-center justify-center bg-slate-950/70 overflow-hidden">
               <img
                 src={modalImage}
-                alt="Foto da Etiqueta"
-                className="max-h-[46vh] sm:max-h-[50vh] w-auto max-w-full object-contain rounded-2xl shadow-md border border-slate-800/80"
+                alt={modalImage === signatureUrl ? 'Assinatura' : 'Foto da Etiqueta'}
+                className={`max-h-[46vh] sm:max-h-[50vh] w-auto max-w-full object-contain rounded-2xl shadow-md border border-slate-800/80 ${
+                  modalImage === signatureUrl ? 'bg-white p-2' : ''
+                }`}
               />
             </div>
             <div className="p-3 border-t border-slate-800 bg-slate-900 flex justify-end shrink-0">

@@ -17,7 +17,8 @@ import {
   RefreshCw,
   Bell,
   Building,
-  AlertCircle
+  AlertCircle,
+  Users
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -192,11 +193,24 @@ export default function MoradorPage() {
             <p className="text-xs sm:text-sm text-slate-300 max-w-md">
               Mostre este QR Code ou informe o código numérico ao porteiro para retirar sua encomenda com segurança.
             </p>
-            <div className="flex items-center justify-center md:justify-start gap-3 pt-2">
-              <span className="text-xs text-slate-400">Código de Retirada:</span>
-              <span className="text-2xl font-black font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-4 py-1 rounded-xl tracking-widest">
-                {pendingPackages[0].pickup_code}
-              </span>
+            <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Código de Retirada:</span>
+                <span className="text-2xl font-black font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-4 py-1 rounded-xl tracking-widest">
+                  {pendingPackages[0].pickup_code}
+                </span>
+              </div>
+              <Link
+                href={`/p/${pendingPackages[0].qr_token || pendingPackages[0].pickup_code}`}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/40 text-purple-200 border border-purple-500/50 text-xs font-bold transition shadow-sm"
+              >
+                <Users className="w-3.5 h-3.5 text-purple-300" />
+                <span>
+                  {(pendingPackages[0] as any).notes?.includes('TERCEIRO_AUTORIZADO:')
+                    ? 'Ver / Alterar Terceiro'
+                    : 'Liberar para Terceiro'}
+                </span>
+              </Link>
             </div>
           </div>
 
@@ -247,7 +261,20 @@ export default function MoradorPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {pendingPackages.map((pkg) => (
-              <PackageCard key={pkg.id} pkg={pkg} showActions={false} />
+              <div key={pkg.id} className="space-y-2">
+                <PackageCard pkg={pkg} showActions={false} />
+                <Link
+                  href={`/p/${pkg.qr_token || pkg.pickup_code}`}
+                  className="flex items-center justify-center gap-2 py-2 px-3 bg-slate-900 hover:bg-purple-950/40 text-purple-300 hover:text-purple-200 border border-slate-800 hover:border-purple-500/40 rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  <Users className="w-3.5 h-3.5 text-purple-400" />
+                  <span>
+                    {(pkg as any).notes?.includes('TERCEIRO_AUTORIZADO:')
+                      ? 'Ver / Alterar Terceiro Autorizado'
+                      : 'Liberar Retirada para Terceiro'}
+                  </span>
+                </Link>
+              </div>
             ))}
           </div>
         )

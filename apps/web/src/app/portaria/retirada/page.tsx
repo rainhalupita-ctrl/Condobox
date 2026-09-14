@@ -18,7 +18,8 @@ import {
   Search,
   Package,
   ShieldCheck,
-  RefreshCw
+  RefreshCw,
+  Users
 } from 'lucide-react';
 
 export default function RetiradaPage() {
@@ -134,7 +135,20 @@ export default function RetiradaPage() {
       }
 
       setScannedPackage(found);
-      setDeliveredToName(found.resident?.name || found.recipient_name_ocr || '');
+
+      // Preenche com o terceiro autorizado (se houver) ou morador/destinatário
+      let initialDeliveredTo = found.resident?.name || found.recipient_name_ocr || '';
+      const notes = (found as any).notes || '';
+      if (notes.includes('TERCEIRO_AUTORIZADO:')) {
+        const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n(]+)/);
+        if (match && match[1]?.trim()) {
+          initialDeliveredTo = match[1].trim();
+        }
+      } else if ((found as any).delivered_to_name) {
+        initialDeliveredTo = (found as any).delivered_to_name;
+      }
+
+      setDeliveredToName(initialDeliveredTo);
       setStep('SIGN');
     } catch (err: any) {
       console.error('[handleScanCode] Unexpected error:', err);
@@ -371,6 +385,37 @@ export default function RetiradaPage() {
                 <span className="font-bold text-slate-100">{scannedPackage.carrier}</span>
               </div>
             </div>
+
+            {/* Informações de Terceiro Autorizado */}
+            {(() => {
+              const notes = (scannedPackage as any)?.notes || '';
+              const isTP = notes.includes('TERCEIRO_AUTORIZADO:') || Boolean((scannedPackage as any)?.delivered_to_name);
+              const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n]+)/);
+              const tpText = match ? match[1].trim() : ((scannedPackage as any)?.delivered_to_name || '');
+              if (!isTP || !tpText) return null;
+
+              return (
+                <div className="p-3.5 bg-purple-500/15 border border-purple-500/30 rounded-2xl flex items-start gap-3">
+                  <Users className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-purple-300">
+                        Retirada Autorizada para Terceiro
+                      </span>
+                      <span className="text-[10px] uppercase font-black bg-purple-500/30 text-purple-200 px-2 py-0.5 rounded-md">
+                        Autorizado
+                      </span>
+                    </div>
+                    <p className="text-white font-bold mt-1 text-sm">
+                      {tpText}
+                    </p>
+                    <p className="text-[11px] text-purple-300/80 mt-0.5">
+                      O morador confirmou previamente a liberação para esta pessoa retirar.
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">

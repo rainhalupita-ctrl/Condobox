@@ -32,7 +32,8 @@ import {
   ExternalLink,
   ChevronDown,
   UserCheck,
-  ShieldAlert
+  ShieldAlert,
+  Users
 } from 'lucide-react';
 
 export default function PortariaDashboardPage() {
@@ -415,7 +416,17 @@ export default function PortariaDashboardPage() {
 
   const handleStartDelivery = (pkg: PackageType) => {
     setSelectedForDelivery(pkg);
-    setDeliveredToName(pkg.resident?.name || pkg.recipient_name_ocr || '');
+    let initialName = pkg.resident?.name || pkg.recipient_name_ocr || '';
+    const notes = (pkg as any).notes || '';
+    if (notes.includes('TERCEIRO_AUTORIZADO:')) {
+      const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n(]+)/);
+      if (match && match[1]?.trim()) {
+        initialName = match[1].trim();
+      }
+    } else if ((pkg as any).delivered_to_name) {
+      initialName = (pkg as any).delivered_to_name;
+    }
+    setDeliveredToName(initialName);
   };
 
   const handleConfirmSignature = async (signatureDataUrl: string) => {
@@ -1108,6 +1119,37 @@ export default function PortariaDashboardPage() {
                       <p className="text-[11px] text-emerald-400/90 mt-0.5">
                         {otherPending.map(p => `${p.carrier || 'Encomenda'} (${p.pickup_code})`).join(', ')}.
                         {' '}As notificações de retirada serão <strong>agrupadas em uma única mensagem</strong> no WhatsApp.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Alerta de Terceiro Autorizado para Retirada */}
+              {(() => {
+                const notes = (selectedForDelivery as any)?.notes || '';
+                const isTP = notes.includes('TERCEIRO_AUTORIZADO:') || Boolean((selectedForDelivery as any)?.delivered_to_name);
+                const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n]+)/);
+                const tpText = match ? match[1].trim() : ((selectedForDelivery as any)?.delivered_to_name || '');
+                if (!isTP || !tpText) return null;
+
+                return (
+                  <div className="bg-purple-500/15 border border-purple-500/30 text-purple-200 text-xs px-3.5 py-2.5 rounded-2xl flex items-start gap-2.5 animate-fade-in">
+                    <Users className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                    <div className="leading-snug">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-purple-300">
+                          Retirada Autorizada para Terceiro
+                        </span>
+                        <span className="text-[10px] uppercase font-black bg-purple-500/30 text-purple-200 px-1.5 py-0.5 rounded">
+                          Autorizado
+                        </span>
+                      </div>
+                      <p className="text-white font-bold text-xs mt-1">
+                        {tpText}
+                      </p>
+                      <p className="text-[11px] text-purple-300/80 mt-0.5">
+                        O morador liberou previamente esta retirada na portaria.
                       </p>
                     </div>
                   </div>

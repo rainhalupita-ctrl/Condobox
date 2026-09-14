@@ -23,7 +23,8 @@ import {
   History,
   Check,
   Clock,
-  ChevronDown
+  ChevronDown,
+  Users
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '../../../contexts/auth-context';
@@ -60,6 +61,11 @@ export default function NovaEncomendaPage() {
   const [notes, setNotes] = useState<string>('');
   const [sendWhatsApp, setSendWhatsApp] = useState<boolean>(true);
   const [customPhone, setCustomPhone] = useState<string>('');
+
+  // Autorização para Retirada por Terceiro
+  const [isThirdPartyAuthorized, setIsThirdPartyAuthorized] = useState<boolean>(false);
+  const [thirdPartyName, setThirdPartyName] = useState<string>('');
+  const [thirdPartyRelation, setThirdPartyRelation] = useState<string>('');
 
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -521,10 +527,16 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
       const unitText = selectedUnit ? `Apto ${selectedUnit.unit_number} - ${selectedUnit.block}` : 'Unidade';
       const resName = selectedRes?.name || recipientNameOcr || 'Morador';
 
-      // Concatena nota fiscal nas notas caso preenchida
-      const finalNotes = invoiceNumber
+      // Concatena nota fiscal e terceiro autorizado nas notas caso preenchidos
+      let finalNotes: string | null = invoiceNumber
         ? `NF: ${invoiceNumber}${notes ? ` | ${notes}` : ''}`
-        : (notes || null);
+        : (notes || '');
+
+      if (isThirdPartyAuthorized && thirdPartyName.trim()) {
+        const tpNote = `TERCEIRO_AUTORIZADO: ${thirdPartyName.trim()}${thirdPartyRelation.trim() ? ` (${thirdPartyRelation.trim()})` : ''} registrado na portaria em ${new Date().toLocaleDateString('pt-BR')}`;
+        finalNotes = finalNotes ? `${finalNotes} | ${tpNote}` : tpNote;
+      }
+      finalNotes = finalNotes ? (finalNotes.trim() || null) : null;
 
       // Se o path da imagem ainda está vazio (modo ao vivo), faz o upload agora antes de salvar
       let labelImagePath = ocrData?.image?.path || null;
@@ -549,7 +561,8 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         sendWhatsApp: sendWhatsApp,
         residentPhone: customPhone || selectedRes?.phone || null,
         residentName: resName,
-        unitInfo: unitText
+        unitInfo: unitText,
+        deliveredToName: (isThirdPartyAuthorized && thirdPartyName.trim()) ? thirdPartyName.trim() : null
       });
 
       const pkgId = res.package?.id;
@@ -612,6 +625,9 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
     setRecipientNameOcr('');
     setNotes('');
     setCustomPhone('');
+    setIsThirdPartyAuthorized(false);
+    setThirdPartyName('');
+    setThirdPartyRelation('');
     setDuplicateWarning(null);
   };
 
@@ -1079,6 +1095,59 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
+            </div>
+
+            {/* Liberar Retirada para Terceiro (Opcional) */}
+            <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">Liberar Retirada para Terceiro</span>
+                    <span className="text-[11px] text-slate-400">
+                      Autoriza parente, amigo ou prestador a retirar na portaria.
+                    </span>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={isThirdPartyAuthorized}
+                  onChange={(e) => setIsThirdPartyAuthorized(e.target.checked)}
+                  className="w-5 h-5 accent-purple-600 rounded cursor-pointer"
+                />
+              </div>
+
+              {isThirdPartyAuthorized && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-800/80 animate-fade-in">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-purple-300 mb-1">
+                      Nome da Pessoa Autorizada: <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={thirdPartyName}
+                      onChange={(e) => setThirdPartyName(e.target.value)}
+                      placeholder="Ex: Maria da Silva"
+                      className="w-full px-3.5 py-2 bg-slate-900 border border-purple-500/40 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-purple-400"
+                      required={isThirdPartyAuthorized}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-purple-300 mb-1">
+                      Grau de Parentesco / Relação:
+                    </label>
+                    <input
+                      type="text"
+                      value={thirdPartyRelation}
+                      onChange={(e) => setThirdPartyRelation(e.target.value)}
+                      placeholder="Ex: Cônjuge, Filho, Amigo, Diarista"
+                      className="w-full px-3.5 py-2 bg-slate-900 border border-purple-500/40 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* WhatsApp para Notificação */}

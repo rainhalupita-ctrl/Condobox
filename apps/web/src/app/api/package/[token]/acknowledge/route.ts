@@ -217,6 +217,11 @@ export async function POST(
       body = await request.json();
     } catch {}
 
+    const isThirdParty = Boolean(body?.isThirdParty);
+    const thirdPartyName = (body?.thirdPartyName || '').trim();
+    const thirdPartyRelation = (body?.thirdPartyRelation || '').trim();
+    const thirdPartyDoc = (body?.thirdPartyDoc || '').trim();
+
     // 2. Identifica os telefones e dados para a mensagem
     let recipientPhone = pkg.resident?.phone || pkg.phone || body?.phone;
     if (!recipientPhone) {
@@ -248,13 +253,23 @@ export async function POST(
       '557398419901'
     ).replace(/\D/g, '');
 
-    // Monta o texto de confirmação de ciência na voz do morador para a portaria
-    const message =
-      `👍 *CONFIRMAÇÃO DE CIÊNCIA - MORADOR*\n\n` +
-      `Olá, Portaria!\n` +
-      `Eu, *${residentName}* (${unitText}), confirmo que recebi o aviso e estou ciente da minha encomenda da *${carrier}*.\n\n` +
-      `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
-      `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
+    // Monta o texto na voz do morador para a portaria (Pessoal vs. Terceiro Autorizado)
+    const relationInfo = [thirdPartyRelation, thirdPartyDoc].filter(Boolean).join(' • ');
+    const relationLine = relationInfo ? `📄 *Relação / Doc:* ${relationInfo}\n` : '';
+
+    const message = (isThirdParty && thirdPartyName)
+      ? `🤝 *AUTORIZAÇÃO DE RETIRADA POR TERCEIRO*\n\n` +
+        `Olá, Portaria!\n` +
+        `Eu, *${residentName}* (${unitText}), autorizo a retirada da minha encomenda da *${carrier}*.\n\n` +
+        `👤 *Pessoa Autorizada:* *${thirdPartyName}*\n` +
+        relationLine +
+        `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+        `🏢 A pessoa autorizada apresentará este QR Code no balcão da portaria para retirada.`
+      : `👍 *CONFIRMAÇÃO DE CIÊNCIA - MORADOR*\n\n` +
+        `Olá, Portaria!\n` +
+        `Eu, *${residentName}* (${unitText}), confirmo que recebi o aviso e estou ciente da minha encomenda da *${carrier}*.\n\n` +
+        `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+        `🏢 Apresentarei o QR Code no balcão da portaria para retirada.`;
 
     // 3. Dispara a mensagem para o WhatsApp cadastrado da portaria via Evolution API / Fila / Realtime
     let whatsappSent = false;
@@ -281,23 +296,59 @@ export async function POST(
       }).catch(() => {});
     }
 
-    // 4. Registra no banco de dados que o morador confirmou
+    // 4. Registra no banco de dados que o morador confirmou / autorizou terceiro
     const nowIso = new Date().toISOString();
     const existingNotes = pkg.notes ? `${pkg.notes} | ` : '';
+    const noteEntry = (isThirdParty && thirdPartyName)
+      ? `TERCEIRO_AUTORIZADO: ${thirdPartyName}${relationInfo ? ` (${relationInfo})` : ''} autorizado por ${residentName} em ${nowIso}`
+      : `Ciência confirmada pelo morador via web em ${nowIso}`;
+
+    const updatePayload: any = {
+      notes: `${existingNotes}${noteEntry}`,
+    };
+
+    if (isThirdParty && thirdPartyName) {
+      updatePayload.delivered_to_name = thirdPartyName;
+    }
+
     await supabase
       .from('packages')
-      .update({
-        notes: `${existingNotes}Ciência confirmada pelo morador via web em ${nowIso}`,
-      })
+      .update(updatePayload)
       .eq('id', pkg.id);
 
+    // Broadcast para atualizar telas abertas da portaria em tempo real
+    try {
+      const bridge = supabase.channel('packages-morador-live');
+      bridge.subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          bridge.send({
+            type: 'broadcast',
+            event: 'package-authorized',
+            payload: {
+              packageId: pkg.id,
+              pickupCode: pkg.pickup_code,
+              isThirdParty,
+              thirdPartyName,
+              notes: updatePayload.notes,
+            }
+          }).catch(() => {});
+          setTimeout(() => {
+            try { supabase.removeChannel(bridge); } catch {}
+          }, 1000);
+        }
+      });
+    } catch {}
 
     return NextResponse.json({
       success: true,
       pickup_code: pkg.pickup_code,
+      isThirdParty,
+      thirdPartyName: thirdPartyName || null,
       whatsappSent,
       method: dispatchMethod,
-      message: 'Confirmação de ciência registrada e enviada no WhatsApp!',
+      message: isThirdParty
+        ? `Autorização para ${thirdPartyName} registrada e enviada à portaria com sucesso!`
+        : 'Confirmação de ciência registrada e enviada no WhatsApp!',
     });
   } catch (err: any) {
     console.error('[Acknowledge Error]', err);

@@ -23,7 +23,8 @@ import {
   ExternalLink,
   User,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Users
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 
@@ -167,6 +168,9 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
 
   const isCiente = (pkg as any).notes?.includes('CIENTE');
   const isContested = Boolean((pkg as any).notes?.includes('CONTESTADO'));
+  const isThirdParty = Boolean((pkg as any).notes?.includes('TERCEIRO_AUTORIZADO:'));
+  const thirdPartyMatch = (pkg as any).notes ? (pkg as any).notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n]+)/) : null;
+  const thirdPartyText = thirdPartyMatch ? thirdPartyMatch[1].trim() : ((pkg as any).delivered_to_name || null);
 
   let contestReason: string | null = null;
   let isWithdrawalContested = false;
@@ -208,6 +212,14 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
       return (
         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
           <CheckCircle2 className="w-3.5 h-3.5" /> Entregue
+        </span>
+      );
+    }
+
+    if (isThirdParty) {
+      return (
+        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-purple-500/25 text-purple-300 border border-purple-500/40 shadow-sm">
+          <Users className="w-3.5 h-3.5 text-purple-400" /> Terceiro Autorizado
         </span>
       );
     }
@@ -369,6 +381,19 @@ export function PackageCard({ pkg, onSelectDeliver, onPackageUpdated, showAction
           <div className="col-span-2 pt-1 border-t border-slate-900">
             <span className="text-slate-500 text-[11px] font-medium">Rastreio: </span>
             <span className="font-mono text-slate-300 font-semibold">{pkg.tracking_code}</span>
+          </div>
+        )}
+        {isThirdParty && (
+          <div className="col-span-2 pt-1.5 border-t border-purple-900/40 flex items-center gap-1.5 text-xs text-purple-300">
+            <Users className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <span className="font-semibold text-purple-300">Liberado p/ terceiro:</span>
+            <span className="font-bold text-white truncate">{thirdPartyText}</span>
+          </div>
+        )}
+        {pkg.status === 'DELIVERED' && (pkg as any).delivered_to_name && (
+          <div className="col-span-2 pt-1 border-t border-slate-900 flex items-center gap-1.5 text-xs text-slate-400">
+            <span className="text-slate-500 text-[11px] font-medium">Entregue para:</span>
+            <span className="text-slate-200 font-semibold truncate">{(pkg as any).delivered_to_name}</span>
           </div>
         )}
       </div>

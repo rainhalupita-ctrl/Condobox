@@ -139,6 +139,7 @@ export class LocalApiClient {
     residentPhone?: string | null;
     residentName?: string | null;
     unitInfo?: string | null;
+    deliveredToName?: string | null;
   }) {
     const baseUrl = this.getBaseUrl();
 
