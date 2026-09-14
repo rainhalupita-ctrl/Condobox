@@ -106,15 +106,58 @@ function ModalPortal({ children }: { children: React.ReactNode }) {
   return createPortal(children, document.body);
 }
 
+// Cache Global em Memória (persiste entre trocas de abas e páginas sem tela roxa - 0ms)
+let globalAccountsCache: AccountItem[] | null = null;
+let globalMetricsCache: GlobalMetrics | null = null;
+let globalAdsCache: any[] | null = null;
+let globalStorageQuotaCache: any = null;
+let globalVersionConfigCache: any = null;
+
 export default function SuperAdminPage() {
   const { user, profile, isSuperAdmin, impersonateCondo, loading } = useAuth();
   const router = useRouter();
   const supabase = createClient();
 
   const [activeTab, setActiveTab] = useState<'ACCOUNTS' | 'FINANCIAL' | 'ADS' | 'VERSIONS'>('ACCOUNTS');
-  const [accounts, setAccounts] = useState<AccountItem[]>([]);
-  const [metrics, setMetrics] = useState<GlobalMetrics | null>(null);
-  const [loadingData, setLoadingData] = useState(true);
+  
+  // Inicialização com 0ms se já houver cache em memória ou sessionStorage
+  const [accounts, setAccounts] = useState<AccountItem[]>(() => {
+    if (globalAccountsCache && globalAccountsCache.length > 0) return globalAccountsCache;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem('condobox_master_accounts');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            globalAccountsCache = parsed;
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return [];
+  });
+
+  const [metrics, setMetrics] = useState<GlobalMetrics | null>(() => {
+    if (globalMetricsCache) return globalMetricsCache;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem('condobox_master_metrics');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          globalMetricsCache = parsed;
+          return parsed;
+        }
+      } catch {}
+    }
+    return null;
+  });
+
+  // Se já possui dados em cache, NÃO bloqueia a tela com o spinner roxo
+  const [loadingData, setLoadingData] = useState(() => {
+    return !globalAccountsCache || globalAccountsCache.length === 0;
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [planFilter, setPlanFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -239,7 +282,7 @@ export default function SuperAdminPage() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Anúncios
-  const [ads, setAds] = useState<any[]>([]);
+  const [ads, setAds] = useState<any[]>(() => globalAdsCache || []);
   const [adImage, setAdImage] = useState('');
   const [adLink, setAdLink] = useState('');
   const [adLoading, setAdLoading] = useState(false);
@@ -257,23 +300,37 @@ export default function SuperAdminPage() {
     lastChecked: string;
     antiBillingProtectionActive: boolean;
     message?: string;
-  } | null>(null);
+  } | null>(() => globalStorageQuotaCache || null);
   const [purgingStorage, setPurgingStorage] = useState(false);
   const [purgeResultMsg, setPurgeResultMsg] = useState<string | null>(null);
   const [purgeDaysSelect, setPurgeDaysSelect] = useState<number>(0);
 
   const initialLoadDoneRef = useRef(false);
 
+  // Trava de segurança: garante que a tela roxa NUNCA fique travada por mais de 2.5s em qualquer oscilação de rede
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoadingData(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     document.title = 'CondoBox SaaS Master - Painel do Proprietário';
     if (!loading) {
       if (!user) {
-        router.replace('/master/login');
+        // Checagem assíncrona robusta: evita redirecionamento em falso durante revalidação de token do Supabase
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (!session?.user) {
+            router.replace('/master/login');
+          }
+        });
       } else if (!initialLoadDoneRef.current) {
-        loadData(true);
+        initialLoadDoneRef.current = true;
+        loadData(accounts.length === 0);
       }
     }
-  }, [user?.id, loading, router]);
+  }, [user?.id, loading]);
 
   // Trava a rolagem do fundo no celular/desktop quando qualquer modal estiver aberto
   useEffect(() => {
@@ -367,16 +424,19 @@ export default function SuperAdminPage() {
     }
   };
 
-  const loadData = async (isInitial = false) => {
-    // Apenas ativa tela cheia de carregamento na inicialização se ainda não houver dados
-    if (isInitial && !initialLoadDoneRef.current && accounts.length === 0) {
+  const loadData = async (showLoadingScreen = false) => {
+    // Marca imediatamente como iniciado para evitar concorrência
+    initialLoadDoneRef.current = true;
+
+    // Apenas ativa tela cheia de carregamento na inicialização se ainda não houver dados em memória
+    if (showLoadingScreen && accounts.length === 0 && (!globalAccountsCache || globalAccountsCache.length === 0)) {
       setLoadingData(true);
     }
 
     try {
       const authHeaders = await getAuthHeaders();
 
-      // 1. Carregamento de Contas e Condomínios
+      // 1. CARREGAMENTO PRIORITÁRIO: Contas e Condomínios (libera a tela do usuário no primeiro instante)
       const accountsPromise = (async () => {
         let loadedFromApi = false;
         try {
@@ -385,8 +445,16 @@ export default function SuperAdminPage() {
           });
           if (res.ok) {
             const data = await res.json();
-            setAccounts(data.accounts || []);
-            setMetrics(data.metrics || null);
+            const accList = data.accounts || [];
+            const metData = data.metrics || null;
+            setAccounts(accList);
+            setMetrics(metData);
+            globalAccountsCache = accList;
+            globalMetricsCache = metData;
+            try {
+              sessionStorage.setItem('condobox_master_accounts', JSON.stringify(accList));
+              if (metData) sessionStorage.setItem('condobox_master_metrics', JSON.stringify(metData));
+            } catch {}
             loadedFromApi = true;
           }
         } catch (apiErr) {
@@ -395,98 +463,106 @@ export default function SuperAdminPage() {
 
         // Fallback direto via Supabase se a rota local estiver momentaneamente fora
         if (!loadedFromApi) {
-          const [
-            { data: condosData },
-            { data: licensesData },
-            { data: unitsData },
-            { data: residentsData },
-            { data: packagesData },
-          ] = await Promise.all([
-            supabase.from('condos').select('*').order('created_at', { ascending: false }),
-            supabase.from('licenses').select('*'),
-            supabase.from('units').select('id, condo_id'),
-            supabase.from('residents').select('id, unit_id'),
-            supabase.from('packages').select('id, condo_id, status'),
-          ]);
+          try {
+            const [
+              { data: condosData },
+              { data: licensesData },
+              { data: unitsData },
+              { data: residentsData },
+              { data: packagesData },
+            ] = await Promise.all([
+              supabase.from('condos').select('*').order('created_at', { ascending: false }),
+              supabase.from('licenses').select('*'),
+              supabase.from('units').select('id, condo_id'),
+              supabase.from('residents').select('id, unit_id'),
+              supabase.from('packages').select('id, condo_id, status'),
+            ]);
 
-          if (condosData) {
-            const unitCondoMap = new Map((unitsData || []).map(u => [u.id, u.condo_id]));
-            const mappedAccounts: AccountItem[] = condosData.map((c: any) => {
-              const lic = (licensesData || []).find((l: any) => l.condo_id === c.id) || null;
-              const cUnits = (unitsData || []).filter((u: any) => u.condo_id === c.id).length;
-              const cPkgs = (packagesData || []).filter((p: any) => p.condo_id === c.id);
-              const cRes = (residentsData || []).filter((r: any) => unitCondoMap.get(r.unit_id) === c.id).length;
-              return {
-                id: c.id,
-                name: c.name,
-                address: c.address || '',
-                phone: c.phone || '',
-                created_at: c.created_at,
-                license: lic ? {
-                  id: lic.id,
-                  plan: lic.plan,
-                  status: lic.status,
-                  expires_at: lic.expires_at,
-                  max_apartments: lic.max_apartments || 250,
-                  created_at: lic.created_at,
-                } : null,
-                syndic: null,
-                stats: {
-                  units_count: cUnits,
-                  max_units: lic?.max_apartments || 250,
-                  residents_count: cRes,
-                  packages_count: cPkgs.length,
-                  pending_packages: cPkgs.filter((p: any) => p.status === 'RECEIVED' || p.status === 'NOTIFIED').length,
-                  staff_count: 0,
-                }
-              };
-            });
-            setAccounts(mappedAccounts);
+            if (condosData) {
+              const unitCondoMap = new Map((unitsData || []).map(u => [u.id, u.condo_id]));
+              const mappedAccounts: AccountItem[] = condosData.map((c: any) => {
+                const lic = (licensesData || []).find((l: any) => l.condo_id === c.id) || null;
+                const cUnits = (unitsData || []).filter((u: any) => u.condo_id === c.id).length;
+                const cPkgs = (packagesData || []).filter((p: any) => p.condo_id === c.id);
+                const cRes = (residentsData || []).filter((r: any) => unitCondoMap.get(r.unit_id) === c.id).length;
+                return {
+                  id: c.id,
+                  name: c.name,
+                  address: c.address || '',
+                  phone: c.phone || '',
+                  created_at: c.created_at,
+                  license: lic ? {
+                    id: lic.id,
+                    plan: lic.plan,
+                    status: lic.status,
+                    expires_at: lic.expires_at,
+                    max_apartments: lic.max_apartments || 250,
+                    created_at: lic.created_at,
+                  } : null,
+                  syndic: null,
+                  stats: {
+                    units_count: cUnits,
+                    max_units: lic?.max_apartments || 250,
+                    residents_count: cRes,
+                    packages_count: cPkgs.length,
+                    pending_packages: cPkgs.filter((p: any) => p.status === 'RECEIVED' || p.status === 'NOTIFIED').length,
+                    staff_count: 0,
+                  }
+                };
+              });
+              setAccounts(mappedAccounts);
+              globalAccountsCache = mappedAccounts;
+              try {
+                sessionStorage.setItem('condobox_master_accounts', JSON.stringify(mappedAccounts));
+              } catch {}
+            }
+          } catch (fbErr) {
+            console.warn('Erro no fallback do Supabase:', fbErr);
           }
         }
+
+        // LIBERAÇÃO IMEDIATA: Assim que as contas chegam, encerra o spinner roxo!
+        setLoadingData(false);
       })();
 
-      // 2. Carregamento de Anúncios
-      const adsPromise = (async () => {
+      // 2. TAREFAS DE SEGUNDO PLANO: Executadas de forma assíncrona e desacoplada
+      const backgroundTasks = async () => {
+        // Anúncios
         try {
           const { data: adsData } = await supabase.from('ads').select('*').order('created_at', { ascending: false });
-          if (adsData) setAds(adsData);
-        } catch (adsErr) {
-          console.warn('Falha ao carregar anúncios:', adsErr);
-        }
-      })();
-
-      // 3. Versões OTA dos aplicativos
-      const versionsPromise = loadVersions();
-
-      // 4. Dados financeiros e assinaturas SaaS
-      const financialPromise = loadFinancialData(true);
-
-      // 5. Cota de armazenamento e trava anti-cobrança
-      const storagePromise = (async () => {
-        try {
-          const quotaRes = await fetch('/api/super-admin/storage-status', {
-            headers: { ...authHeaders },
-          });
-          if (quotaRes.ok) {
-            const qData = await quotaRes.json();
-            if (qData.quota) setStorageQuota(qData.quota);
+          if (adsData) {
+            setAds(adsData);
+            globalAdsCache = adsData;
           }
-        } catch (quotaErr) {
-          console.warn('Falha ao carregar status da trava anti-cobrança:', quotaErr);
-        }
-      })();
+        } catch {}
 
-      // Executa todas as buscas em paralelo para resposta instantânea (<300ms)
-      await Promise.allSettled([
-        accountsPromise,
-        adsPromise,
-        versionsPromise,
-        financialPromise,
-        storagePromise,
-      ]);
+        // Versões OTA
+        try {
+          await loadVersions();
+        } catch {}
 
-      initialLoadDoneRef.current = true;
+        // Gestão Financeira (silencioso)
+        try {
+          await loadFinancialData(true);
+        } catch {}
+
+        // Armazenamento em Nuvem e Trava Anti-Cobrança
+        try {
+          const res = await fetch('/api/super-admin/storage-status', { headers: { ...authHeaders } });
+          if (res.ok) {
+            const qData = await res.json();
+            if (qData?.quota) {
+              setStorageQuota(qData.quota);
+              globalStorageQuotaCache = qData.quota;
+            }
+          }
+        } catch {}
+      };
+
+      backgroundTasks();
+
+      // Aguarda apenas as contas para retorno do método
+      await accountsPromise;
     } catch (e) {
       console.error('Erro ao carregar dados:', e);
     } finally {
@@ -1021,7 +1097,8 @@ export default function SuperAdminPage() {
     return matchSearch && matchPlan && matchStatus;
   });
 
-  if (loading || (loadingData && accounts.length === 0)) {
+  // Nunca desaponta a tela se já houver contas carregadas em memória/cache
+  if (accounts.length === 0 && (loading || loadingData)) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3">
         <Loader2 className="animate-spin text-purple-500 w-9 h-9" />

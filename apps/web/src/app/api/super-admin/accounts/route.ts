@@ -81,31 +81,37 @@ export async function GET(request: Request) {
 
     const supabaseAdmin = getSupabaseAdmin();
 
-    // 1. Busca todos os condomínios
-    const { data: condos, error: cErr } = await supabaseAdmin
-      .from('condos')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // 1. Busca todos os dados necessários em paralelo no banco (tempo de resposta ultra-rápido)
+    const [
+      condosRes,
+      licensesRes,
+      profilesRes,
+      unitsRes,
+      packagesRes,
+      residentsRes,
+      authUsersRes,
+    ] = await Promise.all([
+      supabaseAdmin.from('condos').select('*').order('created_at', { ascending: false }),
+      supabaseAdmin.from('licenses').select('*'),
+      supabaseAdmin.from('profiles').select('*'),
+      supabaseAdmin.from('units').select('id, condo_id'),
+      supabaseAdmin.from('packages').select('id, condo_id, status'),
+      supabaseAdmin.from('residents').select('id, unit_id'),
+      supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }).catch(() => ({ data: { users: [] } })),
+    ]);
 
-    if (cErr) {
-      return NextResponse.json({ error: `Erro ao buscar condomínios: ${cErr.message}` }, { status: 500 });
+    if (condosRes.error) {
+      return NextResponse.json({ error: `Erro ao buscar condomínios: ${condosRes.error.message}` }, { status: 500 });
     }
 
-    // 2. Busca todas as licenças
-    const { data: licenses } = await supabaseAdmin.from('licenses').select('*');
-
-    // 3. Busca todos os perfis com seus respectivos usuários
-    const { data: profiles } = await supabaseAdmin.from('profiles').select('*');
-
-    // 4. Busca todos os usuários do Supabase Auth para obter e-mails
-    const { data: authUsersData } = await supabaseAdmin.auth.admin.listUsers();
-    const authUsers = authUsersData?.users || [];
-    const authUserMap = new Map(authUsers.map(u => [u.id, u.email]));
-
-    // 5. Conta unidades e encomendas por condomínio
-    const { data: units } = await supabaseAdmin.from('units').select('id, condo_id');
-    const { data: packages } = await supabaseAdmin.from('packages').select('id, condo_id, status');
-    const { data: residents } = await supabaseAdmin.from('residents').select('id, unit_id');
+    const condos = condosRes.data || [];
+    const licenses = licensesRes.data || [];
+    const profiles = profilesRes.data || [];
+    const units = unitsRes.data || [];
+    const packages = packagesRes.data || [];
+    const residents = residentsRes.data || [];
+    const authUsers = (authUsersRes as any)?.data?.users || [];
+    const authUserMap = new Map(authUsers.map((u: any) => [u.id, u.email]));
 
     // Mapa de unidades para condomínio
     const unitCondoMap = new Map((units || []).map(u => [u.id, u.condo_id]));
