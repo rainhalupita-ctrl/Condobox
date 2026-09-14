@@ -3,13 +3,15 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/auth-context';
 import { Building2, ShieldCheck, Lock, Mail, Eye, EyeOff, Loader2, ArrowRight, Home } from 'lucide-react';
 import Link from 'next/link';
 
 function SyndicLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect') || '/portaria';
+  const redirectTo = searchParams.get('redirect') || '/admin';
+  const { user, loading: authLoading } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,6 +24,22 @@ function SyndicLoginForm() {
   useEffect(() => {
     document.title = 'CondoBox Síndico — Administração do Condomínio';
   }, []);
+
+  // Se o usuário já estiver logado (ou impersonando), redireciona direto para a Administração
+  useEffect(() => {
+    if (!authLoading && user) {
+      router.replace(redirectTo);
+    }
+  }, [authLoading, user, redirectTo, router]);
+
+  if (authLoading || user) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-950 text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <p className="text-xs font-semibold">Acessando Portal da Administração...</p>
+      </div>
+    );
+  }
 
   const handleSyndicLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,8 +78,8 @@ function SyndicLoginForm() {
         .map(e => e.trim().toLowerCase());
       const isMasterOwner = (profile?.role === 'ADMIN' && (!profile?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
 
-      // Se for o dono do sistema, manda para o super-admin
-      if (isMasterOwner) {
+      // Se for o dono do sistema e não houver redirecionamento específico, manda para o super-admin
+      if (isMasterOwner && (!redirectTo || redirectTo === '/portaria')) {
         router.push('/super-admin');
         return;
       }

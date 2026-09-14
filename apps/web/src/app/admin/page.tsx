@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Unit, Resident, Package as PackageType } from '../../types/database';
 import { createClient } from '../../lib/supabase/client';
 import { LocalApiClient } from '../../lib/local-api';
@@ -54,7 +55,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function AdminPage() {
-  const { isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
+  const { user, isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
+  const router = useRouter();
   const [availableCondos, setAvailableCondos] = useState<{ id: string; name: string }[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [residents, setResidents] = useState<Resident[]>([]);
@@ -273,9 +275,10 @@ export default function AdminPage() {
     setLoading(true);
     const supabase = createClient();
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        window.location.href = '/admin/login?redirect=/admin';
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      if (!currentUser) {
+        router.replace('/admin/login?redirect=/admin');
         return;
       }
 

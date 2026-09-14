@@ -175,27 +175,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // O Dono do Sistema tem acesso Master apenas se for perfil de sistema ou estiver na lista de e-mails do proprietário
   const isSuperAdmin = (role === 'ADMIN' && (!profile?.condo_id || isMasterByEmail)) || isMasterByEmail;
-  const isPortaria = isSuperAdmin || role === 'SYNDIC' || role === 'GUARD';
-  const isAdmin = isSuperAdmin || role === 'SYNDIC';
-  const isMorador = isSuperAdmin || role === 'RESIDENT' || role === 'SYNDIC';
+  const isPortaria = isSuperAdmin || role === 'ADMIN' || role === 'SYNDIC' || role === 'GUARD';
+  const isAdmin = isSuperAdmin || role === 'ADMIN' || role === 'SYNDIC';
+  const isMorador = isSuperAdmin || role === 'ADMIN' || role === 'RESIDENT' || role === 'SYNDIC';
 
-  // Se não for super admin, NUNCA permite impersonação de outro condomínio.
-  // Cada síndico ou porteiro fica 100% isolado no seu próprio condomínio.
-  const effectiveCondoId = isSuperAdmin
+  // Administradores e Super Admins podem impersonar condomínios para suporte e gestão
+  const canImpersonate = isSuperAdmin || role === 'ADMIN';
+
+  // Se não for admin, cada síndico ou porteiro fica 100% isolado no seu próprio condomínio.
+  const effectiveCondoId = canImpersonate
     ? (impersonatedCondo?.id || profile?.condo_id || null)
     : (profile?.condo_id || null);
 
-  const isImpersonating = isSuperAdmin && !!impersonatedCondo;
+  const isImpersonating = canImpersonate && !!impersonatedCondo;
 
-  // Se o usuário logado não for super admin mas houver impersonação salva, limpa imediatamente
+  // Se o usuário logado não for admin mas houver impersonação salva, limpa imediatamente
   useEffect(() => {
-    if (!loading && profile && !isSuperAdmin && impersonatedCondo) {
+    if (!loading && profile && !canImpersonate && impersonatedCondo) {
       setImpersonatedCondo(null);
       try {
         localStorage.removeItem('condobox_impersonated_condo');
       } catch {}
     }
-  }, [loading, profile, isSuperAdmin, impersonatedCondo]);
+  }, [loading, profile, canImpersonate, impersonatedCondo]);
 
   return (
     <AuthContext.Provider

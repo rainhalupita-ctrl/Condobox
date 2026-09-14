@@ -83,7 +83,18 @@ export async function middleware(request: NextRequest) {
         .map(e => e.trim().toLowerCase());
       const isMasterOwner = (role === 'ADMIN' && (!profile.data?.condo_id || superAdminEmails.includes(userEmail))) || superAdminEmails.includes(userEmail);
 
-      const dest = isMasterOwner ? '/super-admin' : role === 'RESIDENT' ? '/morador' : '/portaria';
+      const redirectParam = request.nextUrl.searchParams.get('redirect');
+      if (redirectParam && redirectParam.startsWith('/') && !redirectParam.includes('login')) {
+        return NextResponse.redirect(new URL(redirectParam, request.url));
+      }
+
+      const dest = pathname === '/admin/login'
+        ? '/admin'
+        : isMasterOwner 
+        ? '/super-admin' 
+        : role === 'RESIDENT' 
+        ? '/morador' 
+        : '/portaria';
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
