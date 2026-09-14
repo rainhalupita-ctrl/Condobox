@@ -115,8 +115,8 @@ function createWindow() {
     `);
   });
 
-  // Carrega a URL da Portaria na nuvem
-  const primaryUrl = "https://web-eight-rust-97.vercel.app/portaria";
+  // Carrega a URL principal na nuvem (redireciona automaticamente por papel: Master -> /super-admin, Portaria -> /portaria)
+  const primaryUrl = "https://web-eight-rust-97.vercel.app/";
 
   mainWindow.loadURL(primaryUrl).catch((err) => {
     console.warn("⚠️ Falha ao carregar URL primária da Portaria:", err.message);

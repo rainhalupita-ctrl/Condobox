@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Package as PackageType } from '../../types/database';
 import { PackageCard } from '../../components/package-card';
 import { SignaturePad } from '../../components/signature-pad';
@@ -30,11 +31,23 @@ import {
   AlertTriangle,
   ExternalLink,
   ChevronDown,
-  UserCheck
+  UserCheck,
+  ShieldAlert
 } from 'lucide-react';
 
 export default function PortariaDashboardPage() {
-  const { effectiveCondoId, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const { effectiveCondoId, loading: authLoading, isSuperAdmin } = useAuth();
+
+  // Redireciona o Sócio Proprietário automaticamente para o Painel Master
+  // caso a portaria tenha sido aberta sem o parâmetro explícito de inspeção (?view=1)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (!authLoading && isSuperAdmin && params.get('view') !== '1') {
+      router.replace('/super-admin');
+    }
+  }, [authLoading, isSuperAdmin, router]);
   const alertChannelRef = useRef<any>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const userInteractedWithSearchRef = useRef(false);
@@ -692,6 +705,22 @@ export default function PortariaDashboardPage() {
             <button onClick={() => setSuccessToast(null)} className="hover:opacity-75">
               <X className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {/* Banner Indicativo de Modo Sócio Proprietário */}
+        {isSuperAdmin && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/10 to-amber-500/15 border border-amber-500/30 text-amber-300 text-xs shadow-lg shadow-amber-950/20">
+            <div className="flex items-center gap-2.5 font-medium">
+              <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+              <span><strong>Modo Sócio Proprietário:</strong> Você está visualizando a Portaria em modo de supervisão/teste.</span>
+            </div>
+            <Link
+              href="/super-admin"
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold transition-all text-xs shrink-0 flex items-center gap-1.5"
+            >
+              Voltar ao Painel Master →
+            </Link>
           </div>
         )}
 

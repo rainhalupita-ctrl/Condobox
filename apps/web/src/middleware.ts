@@ -85,6 +85,9 @@ export async function middleware(request: NextRequest) {
 
       const redirectParam = request.nextUrl.searchParams.get('redirect');
       if (redirectParam && redirectParam.startsWith('/') && !redirectParam.includes('login')) {
+        if (isMasterOwner && (redirectParam === '/portaria' || (redirectParam.startsWith('/portaria') && !redirectParam.includes('view=')))) {
+          return NextResponse.redirect(new URL('/super-admin', request.url));
+        }
         return NextResponse.redirect(new URL(redirectParam, request.url));
       }
 
@@ -160,6 +163,13 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
+  }
+
+  // Se for Dono do Sistema acessando /portaria sem parâmetro explícito (?view=),
+  // redireciona para a central Master dele (/super-admin). Garante que o app Desktop ou inicializações
+  // abram sempre no Painel Master para o Sócio Proprietário!
+  if (pathname === '/portaria' && isMasterOwner && !request.nextUrl.searchParams.has('view')) {
+    return NextResponse.redirect(new URL('/super-admin', request.url));
   }
 
   const role = (profile?.role as string) || 'RESIDENT';

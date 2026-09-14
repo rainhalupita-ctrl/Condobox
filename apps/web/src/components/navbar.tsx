@@ -20,16 +20,11 @@ export function Navbar() {
   const isMasterRoute = pathname.startsWith('/super-admin') || pathname.startsWith('/master');
 
   const navLinks = (isSuperAdmin || isMasterRoute)
-    ? (isImpersonating
-        ? [
-            { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
-            { href: '/admin', label: 'Administração', icon: LayoutDashboard },
-            { href: '/portaria', label: 'Portaria', icon: Shield },
-          ]
-        : [
-            { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
-          ]
-      )
+    ? [
+        { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
+        { href: '/admin', label: 'Administração', icon: LayoutDashboard },
+        { href: '/portaria?view=1', label: 'Portaria', icon: Shield },
+      ]
     : isAdmin
     ? [
         { href: '/portaria', label: 'Portaria', icon: Shield },
@@ -69,23 +64,27 @@ export function Navbar() {
 
           {/* Links de navegação no Desktop */}
           <div className="hidden sm:flex items-center gap-1">
-            {navLinks.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  pathname.startsWith(href)
-                    ? href === '/super-admin'
-                      ? 'bg-purple-600/25 text-purple-300 font-bold border border-purple-500/40 shadow-sm'
-                      : 'bg-emerald-600/20 text-emerald-400 font-bold border border-emerald-500/30'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              >
-                <Icon size={15} />
-                {label}
-              </Link>
-            ))}
+            {navLinks.map(({ href, label, icon: Icon }) => {
+              const baseHref = href.split('?')[0];
+              const isActive = pathname.startsWith(baseHref);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? baseHref === '/super-admin'
+                        ? 'bg-purple-600/25 text-purple-300 font-bold border border-purple-500/40 shadow-sm'
+                        : 'bg-emerald-600/20 text-emerald-400 font-bold border border-emerald-500/30'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                >
+                  <Icon size={15} />
+                  {label}
+                </Link>
+              );
+            })}
           </div>
 
           {/* Perfil do usuário */}
@@ -114,22 +113,42 @@ export function Navbar() {
               {menuOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-20 overflow-hidden animate-fade-in">
+                  <div className="absolute right-0 mt-2 w-60 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-20 overflow-hidden animate-fade-in">
                     <div className="px-4 py-3 border-b border-slate-800">
                       <p className="text-white text-sm font-bold truncate">{profile.name}</p>
                       <p className="text-slate-400 text-xs truncate mt-0.5">{profile.phone || 'Sem telefone'}</p>
                     </div>
 
                     {isSuperAdmin && (
-                      <Link
-                        href="/super-admin"
-                        onClick={() => setMenuOpen(false)}
-                        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-purple-300 hover:bg-purple-500/15 font-bold border-b border-slate-800/80 transition-colors"
-                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                      >
-                        <ShieldAlert size={14} className="text-purple-400" />
-                        Painel Master (SaaS)
-                      </Link>
+                      <>
+                        <Link
+                          href="/super-admin"
+                          onClick={() => setMenuOpen(false)}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-purple-300 hover:bg-purple-500/15 font-bold border-b border-slate-800/60 transition-colors"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <ShieldAlert size={14} className="text-purple-400" />
+                          Painel Master (SaaS)
+                        </Link>
+                        <Link
+                          href="/admin"
+                          onClick={() => setMenuOpen(false)}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-emerald-400 hover:bg-emerald-500/15 font-semibold border-b border-slate-800/60 transition-colors"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <LayoutDashboard size={14} className="text-emerald-400" />
+                          Administração do Condomínio
+                        </Link>
+                        <Link
+                          href="/portaria?view=1"
+                          onClick={() => setMenuOpen(false)}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-blue-400 hover:bg-blue-500/15 font-semibold border-b border-slate-800/60 transition-colors"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <Shield size={14} className="text-blue-400" />
+                          Portaria Operacional
+                        </Link>
+                      </>
                     )}
 
                     <button
@@ -158,18 +177,21 @@ export function Navbar() {
           }}
         >
           {navLinks.map(({ href, label, icon: Icon }) => {
-            const isActive = pathname.startsWith(href);
+            const baseHref = href.split('?')[0];
+            const isActive = pathname.startsWith(baseHref);
             return (
               <Link
                 key={href}
                 href={href}
                 className={`flex-1 flex flex-col items-center justify-center gap-1.5 py-2 px-2.5 rounded-2xl text-[11px] font-bold transition-all active:scale-95 ${
                   isActive
-                    ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-sm'
+                    ? baseHref === '/super-admin'
+                      ? 'text-purple-300 bg-purple-500/15 border border-purple-500/30 shadow-sm'
+                      : 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Icon size={20} className={isActive ? 'text-emerald-400' : 'text-slate-400'} />
+                <Icon size={20} className={isActive ? (baseHref === '/super-admin' ? 'text-purple-300' : 'text-emerald-400') : 'text-slate-400'} />
                 <span className="leading-tight text-center">{label}</span>
               </Link>
             );
