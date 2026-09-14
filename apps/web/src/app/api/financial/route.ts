@@ -93,10 +93,14 @@ export async function GET(request: Request) {
       .select('*')
       .order('created_at', { ascending: false });
 
-    // 2. Busca todas as licenças
-    const { data: licenses } = await supabaseAdmin
-      .from('licenses')
-      .select('*');
+    // 2. Busca todas as licenças e unidades
+    const [
+      { data: licenses },
+      { data: unitsData }
+    ] = await Promise.all([
+      supabaseAdmin.from('licenses').select('*'),
+      supabaseAdmin.from('units').select('id, condo_id')
+    ]);
 
     // 3. Tenta buscar pagamentos na tabela subscription_payments
     let payments: any[] = [];
@@ -188,6 +192,7 @@ export async function GET(request: Request) {
     // 6. Mapeamento consolidado dos condomínios como assinantes Netflix
     const subscribers = (condos || []).map(condo => {
       const lic = (licenses || []).find(l => l.condo_id === condo.id) || null;
+      const condoUnitsCount = (unitsData || []).filter(u => u.condo_id === condo.id).length;
       const customPriceData = customPriceMap.get(condo.id);
       
       const monthlyPrice = lic?.monthly_price 
@@ -217,9 +222,12 @@ export async function GET(request: Request) {
         subscriptionStatus = 'EXPIRED';
       } else if (lic?.status === 'TRIAL' || lic?.plan === 'TRIAL') {
         subscriptionStatus = 'TRIAL';
+      } else if (lic?.status === 'ACTIVE') {
+        subscriptionStatus = 'ACTIVE';
       }
 
       return {
+        // snake_case
         id: condo.id,
         name: condo.name,
         address: condo.address,
@@ -233,6 +241,16 @@ export async function GET(request: Request) {
         latest_payment: latestPayment,
         has_pending_receipt: Boolean(pendingReceipt),
         pending_receipt: pendingReceipt,
+        units_count: condoUnitsCount,
+        // camelCase
+        condoId: condo.id,
+        condoName: condo.name,
+        monthlyPrice: monthlyPrice,
+        billingDay: billingDay,
+        status: subscriptionStatus,
+        expiresAt: lic?.expires_at || null,
+        plan: lic?.plan || 'TRIAL',
+        unitsCount: condoUnitsCount,
       };
     });
 
@@ -258,6 +276,12 @@ export async function GET(request: Request) {
       total_received_month: totalReceivedMonth,
       pending_receipts_count: pendingReceipts.length,
       current_month: currentMonth,
+      // camelCase
+      totalMonthlyRecurring: realMRR,
+      totalReceivedThisMonth: totalReceivedMonth,
+      totalPending: overdueTotalAmount,
+      pendingReceiptsCount: pendingReceipts.length,
+      totalSubscribers: subscribers.length,
     };
 
     return NextResponse.json({
@@ -265,8 +289,11 @@ export async function GET(request: Request) {
       metrics: financialMetrics,
       subscribers,
       pending_receipts: pendingReceipts,
+      pendingReceipts,
       payments,
+      allReceipts: payments,
       billing_settings: billingSettings,
+      billingSettings,
     });
   } catch (error: any) {
     console.error('[Financial API] Erro ao carregar dados:', error);
@@ -289,7 +316,9 @@ export async function POST(request: Request) {
 
     // ─── AÇÃO 1: DEFINIR VALOR MENSAL E VENCIMENTO DO CONDOMÍNIO ──────────────
     if (action === 'SET_CONDO_PRICE') {
-      const { condoId, monthlyPrice, billingDay } = body;
+      const condoId = body.condoId || body.condo_id || body.id;
+      const monthlyPrice = body.monthlyPrice !== undefined ? body.monthlyPrice : body.monthly_price;
+      const billingDay = body.billingDay !== undefined ? body.billingDay : body.billing_day;
       if (!condoId || monthlyPrice === undefined) {
         return NextResponse.json({ error: 'Condomínio e valor mensal são obrigatórios.' }, { status: 400 });
       }

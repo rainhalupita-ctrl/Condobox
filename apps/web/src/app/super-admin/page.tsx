@@ -396,21 +396,105 @@ export default function SuperAdminPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        setFinancialMetrics(data.metrics || null);
-        setFinancialSubscribers(data.subscribers || []);
-        setPendingReceipts(data.pendingReceipts || []);
-        setAllReceipts(data.allReceipts || []);
-        if (data.billingSettings) {
-          setBillingSettings(data.billingSettings);
+        
+        // Normalização das métricas financeiras (camelCase + snake_case)
+        setFinancialMetrics({
+          totalMonthlyRecurring: data.metrics?.totalMonthlyRecurring ?? data.metrics?.real_mrr ?? 0,
+          totalReceivedThisMonth: data.metrics?.totalReceivedThisMonth ?? data.metrics?.total_received_month ?? 0,
+          totalPending: data.metrics?.totalPending ?? data.metrics?.overdue_total_amount ?? 0,
+          pendingReceiptsCount: data.metrics?.pendingReceiptsCount ?? data.metrics?.pending_receipts_count ?? 0,
+        });
+
+        // Normalização dos assinantes
+        const rawSubs = data.subscribers || [];
+        const normalizedSubs = rawSubs.map((s: any) => {
+          const condoId = s.condoId || s.id;
+          const matchedAcc = (accounts || []).find((a: any) => a.id === condoId);
+          const lic = s.license || matchedAcc?.license || null;
+          const condoName = s.condoName || s.name || matchedAcc?.name || 'Condomínio';
+          const monthlyPrice = s.monthlyPrice ?? s.monthly_price ?? ((lic as any)?.monthly_price ? Number((lic as any).monthly_price) : 149);
+          const billingDay = s.billingDay ?? s.billing_day ?? ((lic as any)?.billing_day ? Number((lic as any).billing_day) : 10);
+          const expiresAt = s.expiresAt || s.expires_at || lic?.expires_at || null;
+          const plan = s.plan || lic?.plan || 'TRIAL';
+          const unitsCount = s.unitsCount ?? s.units_count ?? matchedAcc?.stats?.units_count ?? 0;
+          
+          let isExpired = false;
+          if (expiresAt) {
+            isExpired = new Date(expiresAt).getTime() <= Date.now();
+          }
+
+          let status = s.status || s.subscription_status || lic?.status || 'ACTIVE';
+          if (status === 'EXPIRED' || isExpired) {
+            status = 'EXPIRED';
+          } else if (lic?.status === 'TRIAL' || plan === 'TRIAL') {
+            status = 'TRIAL';
+          } else if (lic?.status === 'ACTIVE') {
+            status = 'ACTIVE';
+          }
+
+          return {
+            ...s,
+            id: condoId,
+            condoId,
+            condoName,
+            name: condoName,
+            monthlyPrice,
+            monthly_price: monthlyPrice,
+            billingDay,
+            billing_day: billingDay,
+            status,
+            subscription_status: status,
+            expiresAt,
+            expires_at: expiresAt,
+            plan,
+            unitsCount,
+            units_count: unitsCount,
+            isExpired,
+            is_expired: isExpired,
+            license: lic,
+          };
+        });
+
+        if (normalizedSubs.length === 0 && accounts && accounts.length > 0) {
+          const derived = accounts.map(a => {
+            const exp = a.license?.expires_at || null;
+            const expDate = exp ? new Date(exp).getTime() : 0;
+            const isExp = expDate > 0 && expDate <= Date.now();
+            return {
+              id: a.id,
+              condoId: a.id,
+              condoName: a.name,
+              name: a.name,
+              monthlyPrice: (a.license as any)?.monthly_price ? Number((a.license as any).monthly_price) : 149,
+              billingDay: (a.license as any)?.billing_day ? Number((a.license as any).billing_day) : 10,
+              status: isExp ? 'EXPIRED' : a.license?.plan === 'TRIAL' ? 'TRIAL' : (a.license?.status || 'ACTIVE'),
+              expiresAt: exp,
+              plan: a.license?.plan || 'TRIAL',
+              unitsCount: a.stats?.units_count || 0,
+              license: a.license,
+            };
+          });
+          setFinancialSubscribers(derived);
+        } else {
+          setFinancialSubscribers(normalizedSubs);
+        }
+
+        setPendingReceipts(data.pendingReceipts || data.pending_receipts || []);
+        setAllReceipts(data.allReceipts || data.payments || []);
+        if (data.billingSettings || data.billing_settings) {
+          setBillingSettings(data.billingSettings || data.billing_settings);
         }
 
         // Inicializa o formulário de edição de preços com os valores atuais de cada condomínio
         const initialPriceMap: Record<string, { price: string; billingDay: string }> = {};
-        (data.subscribers || []).forEach((sub: any) => {
-          initialPriceMap[sub.condoId] = {
-            price: sub.monthlyPrice !== undefined ? String(sub.monthlyPrice) : '149',
-            billingDay: sub.billingDay !== undefined ? String(sub.billingDay) : '10'
-          };
+        (normalizedSubs.length > 0 ? normalizedSubs : accounts).forEach((sub: any) => {
+          const cId = sub.condoId || sub.id;
+          if (cId) {
+            initialPriceMap[cId] = {
+              price: (sub.monthlyPrice ?? sub.monthly_price) !== undefined ? String(sub.monthlyPrice ?? sub.monthly_price) : '149',
+              billingDay: (sub.billingDay ?? sub.billing_day) !== undefined ? String(sub.billingDay ?? sub.billing_day) : '10'
+            };
+          }
         });
         setCondoPriceEdits(prev => ({ ...initialPriceMap, ...prev }));
       } else {
@@ -1457,7 +1541,10 @@ export default function SuperAdminPage() {
 
         <button
           type="button"
-          onClick={() => setActiveTab('FINANCIAL')}
+          onClick={() => {
+            setActiveTab('FINANCIAL');
+            loadFinancialData();
+          }}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap relative ${
             activeTab === 'FINANCIAL'
               ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40'
@@ -2097,9 +2184,17 @@ export default function SuperAdminPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {financialSubscribers.map((sub: any) => {
-                    const editState = condoPriceEdits[sub.condoId] || {
-                      price: String(sub.monthlyPrice || 149),
-                      billingDay: String(sub.billingDay || 10)
+                    const condoId = sub.condoId || sub.id;
+                    const matchedAcc = (accounts || []).find((a: any) => a.id === condoId);
+                    const condoName = sub.condoName || sub.name || matchedAcc?.name || 'Condomínio';
+                    const plan = sub.plan || sub.license?.plan || matchedAcc?.license?.plan || 'TRIAL';
+                    const unitsCount = sub.unitsCount ?? sub.units_count ?? matchedAcc?.stats?.units_count ?? 0;
+                    const expiresAt = sub.expiresAt || sub.expires_at || sub.license?.expires_at || matchedAcc?.license?.expires_at;
+                    const rawStatus = sub.status || sub.subscription_status || matchedAcc?.license?.status || (sub.isExpired ? 'EXPIRED' : 'ACTIVE');
+
+                    const editState = condoPriceEdits[condoId] || condoPriceEdits[sub.id] || {
+                      price: String(sub.monthlyPrice ?? sub.monthly_price ?? 149),
+                      billingDay: String(sub.billingDay ?? sub.billing_day ?? 10)
                     };
 
                     const isSaving = Boolean(editState.saving);
@@ -2107,8 +2202,8 @@ export default function SuperAdminPage() {
                     // Formata a data de expiração
                     let expiryText = 'Não definida';
                     let isExpired = false;
-                    if (sub.expiresAt) {
-                      const expDate = new Date(sub.expiresAt);
+                    if (expiresAt) {
+                      const expDate = new Date(expiresAt);
                       const diffMs = expDate.getTime() - Date.now();
                       const diffDays = Math.ceil(diffMs / 86400000);
                       if (diffDays <= 0) {
@@ -2119,14 +2214,21 @@ export default function SuperAdminPage() {
                       }
                     }
 
+                    // Status consolidado com base na expiração e plano
+                    const effectiveStatus = (isExpired || rawStatus === 'EXPIRED')
+                      ? 'EXPIRED'
+                      : (rawStatus === 'TRIAL' || plan === 'TRIAL')
+                      ? 'TRIAL'
+                      : rawStatus;
+
                     return (
-                      <tr key={sub.condoId} className="hover:bg-slate-800/30 transition">
+                      <tr key={condoId || sub.id} className="hover:bg-slate-800/30 transition">
                         {/* Condomínio */}
                         <td className="p-3.5">
-                          <div className="font-bold text-white text-sm">{sub.condoName}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">ID: {sub.condoId}</div>
+                          <div className="font-bold text-white text-sm">{condoName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">ID: {condoId}</div>
                           <div className="text-[10px] text-purple-400 font-semibold mt-0.5">
-                            Plano: {sub.plan || 'TRIAL'} • {sub.unitsCount || 0} aptos
+                            Plano: {plan} • {unitsCount} aptos
                           </div>
                         </td>
 
@@ -2134,20 +2236,20 @@ export default function SuperAdminPage() {
                         <td className="p-3.5">
                           <span
                             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                              sub.status === 'ACTIVE'
+                              effectiveStatus === 'ACTIVE'
                                 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                                : sub.status === 'TRIAL'
+                                : effectiveStatus === 'TRIAL'
                                 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
-                                : sub.status === 'UNDER_REVIEW'
+                                : effectiveStatus === 'UNDER_REVIEW'
                                 ? 'bg-orange-500/15 border-orange-500/30 text-orange-300'
                                 : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
                             }`}
                           >
-                            {sub.status === 'ACTIVE'
+                            {effectiveStatus === 'ACTIVE'
                               ? '🟢 Em Dia / Ativo'
-                              : sub.status === 'TRIAL'
+                              : effectiveStatus === 'TRIAL'
                               ? '🟡 Em Teste'
-                              : sub.status === 'UNDER_REVIEW'
+                              : effectiveStatus === 'UNDER_REVIEW'
                               ? '🟠 Comprovante em Análise'
                               : '🔴 Expirado / Bloqueado'}
                           </span>
@@ -2171,8 +2273,8 @@ export default function SuperAdminPage() {
                                 const val = e.target.value;
                                 setCondoPriceEdits(prev => ({
                                   ...prev,
-                                  [sub.condoId]: {
-                                    ...prev[sub.condoId],
+                                  [condoId]: {
+                                    ...prev[condoId],
                                     price: val
                                   }
                                 }));
@@ -2191,8 +2293,8 @@ export default function SuperAdminPage() {
                               const val = e.target.value;
                               setCondoPriceEdits(prev => ({
                                 ...prev,
-                                [sub.condoId]: {
-                                  ...prev[sub.condoId],
+                                [condoId]: {
+                                  ...prev[condoId],
                                   billingDay: val
                                 }
                               }));
@@ -2211,7 +2313,7 @@ export default function SuperAdminPage() {
                         <td className="p-3.5 text-right space-x-2">
                           <button
                             type="button"
-                            onClick={() => handleSaveCondoPrice(sub.condoId)}
+                            onClick={() => handleSaveCondoPrice(condoId)}
                             disabled={isSaving}
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1 shadow-sm active:scale-95"
                           >
@@ -2226,7 +2328,7 @@ export default function SuperAdminPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              setManualCondoId(sub.condoId);
+                              setManualCondoId(condoId);
                               setManualAmount(editState.price || '149');
                               setIsManualReceiptModalOpen(true);
                             }}
