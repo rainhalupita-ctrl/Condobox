@@ -375,7 +375,7 @@ export async function POST(request: Request) {
   }
 }
 
-// DELETE: Exclui uma conta de condomínio
+// DELETE: Exclui uma conta de condomínio e todos os seus dados dependentes (cascata segura)
 export async function DELETE(request: Request) {
   try {
     const authCheck = await verifyAdminAuth(request);
@@ -391,13 +391,150 @@ export async function DELETE(request: Request) {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { error: dErr } = await supabaseAdmin.from('condos').delete().eq('id', condoId);
 
+    // 1. Obter informações básicas do condomínio para log e confirmação
+    const { data: condo, error: cFetchErr } = await supabaseAdmin
+      .from('condos')
+      .select('id, name')
+      .eq('id', condoId)
+      .maybeSingle();
+
+    if (cFetchErr) {
+      return NextResponse.json({ error: `Erro ao buscar condomínio: ${cFetchErr.message}` }, { status: 500 });
+    }
+
+    if (!condo) {
+      return NextResponse.json({ error: 'Condomínio não encontrado ou já foi excluído.' }, { status: 404 });
+    }
+
+    // 2. Buscar todas as unidades pertencentes a este condomínio
+    const { data: units } = await supabaseAdmin
+      .from('units')
+      .select('id')
+      .eq('condo_id', condoId);
+
+    const unitIds = (units || []).map((u) => u.id);
+
+    // 3. Buscar todas as encomendas deste condomínio (ou das suas unidades)
+    let packagesQuery = supabaseAdmin.from('packages').select('id, label_image_path, signature_image_path');
+    if (unitIds.length > 0) {
+      packagesQuery = packagesQuery.or(`condo_id.eq.${condoId},unit_id.in.(${unitIds.join(',')})`);
+    } else {
+      packagesQuery = packagesQuery.eq('condo_id', condoId);
+    }
+    const { data: packages } = await packagesQuery;
+
+    // 4. Limpar arquivos de fotos e assinaturas no Supabase Storage (bucket 'packages')
+    if (packages && packages.length > 0) {
+      const storageFiles: string[] = [];
+      for (const pkg of packages) {
+        if (pkg.label_image_path) storageFiles.push(pkg.label_image_path);
+        if (pkg.signature_image_path) storageFiles.push(pkg.signature_image_path);
+      }
+      if (storageFiles.length > 0) {
+        try {
+          await supabaseAdmin.storage.from('packages').remove(storageFiles);
+        } catch (storageErr) {
+          console.warn('[Super Admin API] Aviso ao remover fotos das encomendas no Storage:', storageErr);
+        }
+      }
+
+      // 5. Excluir todas as encomendas (remove o RESTRICT com units e cascateia notifications_log)
+      const pkgIds = packages.map((p) => p.id);
+      const { error: pErr } = await supabaseAdmin.from('packages').delete().in('id', pkgIds);
+      if (pErr) {
+        console.error('[Super Admin API] Erro ao excluir encomendas:', pErr);
+        return NextResponse.json(
+          { error: `Falha ao remover encomendas do condomínio: ${pErr.message}` },
+          { status: 500 }
+        );
+      }
+    }
+
+    // 6. Excluir moradores vinculados às unidades deste condomínio
+    if (unitIds.length > 0) {
+      const { error: resErr } = await supabaseAdmin
+        .from('residents')
+        .delete()
+        .in('unit_id', unitIds);
+      if (resErr) {
+        console.warn('[Super Admin API] Aviso ao excluir moradores:', resErr);
+      }
+
+      // 7. Excluir as unidades do condomínio
+      const { error: uErr } = await supabaseAdmin
+        .from('units')
+        .delete()
+        .eq('condo_id', condoId);
+      if (uErr) {
+        console.error('[Super Admin API] Erro ao excluir unidades:', uErr);
+        return NextResponse.json(
+          { error: `Falha ao remover unidades do condomínio: ${uErr.message}` },
+          { status: 500 }
+        );
+      }
+    }
+
+    // 8. Excluir pagamentos e comprovantes financeiros
+    try {
+      await supabaseAdmin.from('subscription_payments').delete().eq('condo_id', condoId);
+    } catch {}
+
+    // 9. Excluir assinaturas e licenças
+    try {
+      await supabaseAdmin.from('condo_subscriptions').delete().eq('condo_id', condoId);
+    } catch {}
+
+    try {
+      await supabaseAdmin.from('licenses').delete().eq('condo_id', condoId);
+    } catch {}
+
+    // 10. Tratar perfis de usuários e contas Auth
+    const { data: profiles } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role')
+      .eq('condo_id', condoId);
+
+    if (profiles && profiles.length > 0) {
+      for (const prof of profiles) {
+        if (prof.role !== 'SUPER_ADMIN') {
+          try {
+            await supabaseAdmin.from('profiles').delete().eq('id', prof.id);
+            await supabaseAdmin.auth.admin.deleteUser(prof.id);
+          } catch (authDelErr) {
+            console.warn(`[Super Admin API] Não foi possível remover usuário auth ${prof.id}:`, authDelErr);
+          }
+        } else {
+          // Se for SUPER_ADMIN, apenas desvincula do condomínio
+          await supabaseAdmin.from('profiles').update({ condo_id: null }).eq('id', prof.id);
+        }
+      }
+    }
+
+    // 11. Excluir o condomínio propriamente dito
+    const { error: dErr } = await supabaseAdmin.from('condos').delete().eq('id', condoId);
     if (dErr) {
       return NextResponse.json({ error: `Erro ao excluir condomínio: ${dErr.message}` }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: 'Condomínio excluído com sucesso.' });
+    // 12. Registrar no log de auditoria de segurança
+    try {
+      await supabaseAdmin.from('security_audit_logs').insert({
+        user_id: authCheck.user?.id || null,
+        action: 'CONDO_DELETED',
+        entity_type: 'condos',
+        entity_id: condoId,
+        details: {
+          name: condo.name,
+          deleted_by: authCheck.user?.email || 'Super Admin',
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (auditErr) {
+      console.warn('[Super Admin API] Aviso ao gravar security_audit_logs:', auditErr);
+    }
+
+    return NextResponse.json({ success: true, message: `Condomínio "${condo.name}" e seus dados foram excluídos com sucesso.` });
   } catch (error: any) {
     console.error('[Super Admin API] Erro ao excluir:', error);
     return NextResponse.json({ error: error.message || 'Erro interno.' }, { status: 500 });

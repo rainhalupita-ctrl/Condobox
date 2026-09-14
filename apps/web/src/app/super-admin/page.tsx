@@ -219,6 +219,12 @@ export default function SuperAdminPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [editMessage, setEditMessage] = useState<string | null>(null);
 
+  // Modal de Exclusão de Condomínio
+  const [condoToDelete, setCondoToDelete] = useState<AccountItem | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [deletingCondo, setDeletingCondo] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   // Modal de Cadastro de Nova Conta / Condomínio
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newCondoName, setNewCondoName] = useState('');
@@ -917,27 +923,49 @@ export default function SuperAdminPage() {
     router.push('/admin');
   };
 
-  // Excluir Conta
-  const handleDeleteAccount = async (account: AccountItem) => {
-    const confirmName = prompt(`Para excluir permanentemente o condomínio "${account.name}", digite o nome exato dele:`);
-    if (confirmName !== account.name) {
-      if (confirmName !== null) alert('Nome incorreto. Exclusão cancelada.');
+  // Abrir Modal de Exclusão de Condomínio
+  const handleDeleteAccount = (account: AccountItem) => {
+    setCondoToDelete(account);
+    setDeleteConfirmName('');
+    setDeleteError(null);
+  };
+
+  // Confirmar e Executar Exclusão Definitiva do Condomínio
+  const handleConfirmDeleteCondo = async () => {
+    if (!condoToDelete) return;
+
+    const typed = deleteConfirmName.trim().toLowerCase();
+    const expected = condoToDelete.name.trim().toLowerCase();
+
+    if (typed !== expected) {
+      setDeleteError(`O nome digitado não corresponde. Por favor, digite "${condoToDelete.name}".`);
       return;
     }
 
+    setDeletingCondo(true);
+    setDeleteError(null);
+
     try {
       const authHeaders = await getAuthHeaders();
-      const res = await fetch(`/api/super-admin/accounts?condoId=${account.id}`, {
+      const res = await fetch(`/api/super-admin/accounts?condoId=${condoToDelete.id}`, {
         method: 'DELETE',
         headers: {
           ...authHeaders,
         },
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      loadData();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erro ao excluir condomínio');
+      }
+
+      setCondoToDelete(null);
+      setDeleteConfirmName('');
+      await loadData();
     } catch (err: any) {
-      alert(`Erro ao excluir: ${err.message}`);
+      console.error('Erro ao excluir condomínio:', err);
+      setDeleteError(err.message || 'Erro ao processar exclusão.');
+    } finally {
+      setDeletingCondo(false);
     }
   };
 
@@ -3409,6 +3437,123 @@ export default function SuperAdminPage() {
         </div>
       </ModalPortal>
     )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE CONDOMÍNIO */}
+      {condoToDelete && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+            <div className="bg-slate-900 border border-rose-500/50 rounded-3xl p-5 sm:p-7 max-w-md w-full space-y-5 shadow-2xl relative my-auto max-h-[90vh] overflow-y-auto">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-rose-400">
+                    <Trash2 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Excluir Condomínio</h3>
+                    <p className="text-xs text-rose-400 font-medium">Ação irreversível e permanente</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!deletingCondo) {
+                      setCondoToDelete(null);
+                      setDeleteConfirmName('');
+                      setDeleteError(null);
+                    }
+                  }}
+                  disabled={deletingCondo}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition disabled:opacity-40"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {deleteError && (
+                <div className="p-3.5 rounded-2xl bg-rose-950/50 border border-rose-500/50 text-rose-300 text-xs font-semibold flex items-start gap-2.5">
+                  <AlertCircle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">{deleteError}</div>
+                </div>
+              )}
+
+              {/* Alerta de Impacto */}
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+                <div className="flex items-center gap-2 text-amber-400 text-xs font-bold">
+                  <AlertTriangle size={15} />
+                  <span>Atenção: Todos os dados serão apagados</span>
+                </div>
+                <ul className="text-[11px] text-slate-300 space-y-1 list-disc list-inside">
+                  <li>Todas as {condoToDelete.stats?.units_count || 0} unidades deste condomínio</li>
+                  <li>Todos os {condoToDelete.stats?.residents_count || 0} moradores e contatos vinculados</li>
+                  <li>Todas as {condoToDelete.stats?.packages_count || 0} encomendas e fotos arquivadas</li>
+                  <li>Contas de porteiros/síndicos associadas e histórico de licença</li>
+                </ul>
+              </div>
+
+              {/* Instrução de Confirmação */}
+              <div className="space-y-2">
+                <label className="block text-xs text-slate-300">
+                  Para confirmar a exclusão, digite exatamente o nome do condomínio:{' '}
+                  <strong className="text-white select-all font-mono bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                    {condoToDelete.name}
+                  </strong>
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  disabled={deletingCondo}
+                  value={deleteConfirmName}
+                  onChange={(e) => {
+                    setDeleteConfirmName(e.target.value);
+                    if (deleteError) setDeleteError(null);
+                  }}
+                  placeholder={`Digite "${condoToDelete.name}"`}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl text-xs text-white placeholder-slate-600 focus:outline-none transition font-medium"
+                />
+              </div>
+
+              {/* Botões */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  disabled={deletingCondo}
+                  onClick={() => {
+                    setCondoToDelete(null);
+                    setDeleteConfirmName('');
+                    setDeleteError(null);
+                  }}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    deletingCondo ||
+                    deleteConfirmName.trim().toLowerCase() !== condoToDelete.name.trim().toLowerCase()
+                  }
+                  onClick={handleConfirmDeleteCondo}
+                  className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-rose-950/40 active:scale-95"
+                >
+                  {deletingCondo ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Excluindo condomínio...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      <span>Excluir Definitivamente</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
     </div>
+
   );
 }
