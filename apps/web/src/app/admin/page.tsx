@@ -564,20 +564,39 @@ export default function AdminPage() {
 
   const handleGenerateQR = async (userId: string, userName: string) => {
     setStaffQrLoading(userId);
-    try {
-      const res = await fetch(`/api/staff/qr?userId=${userId}&condoId=${effectiveCondoId || ''}`);
-      const data = await res.json();
-      
-      if (!res.ok) {
-        alert(data.error || 'Erro ao gerar o QR Code de acesso.');
-      } else {
-        setStaffQrData({ link: data.actionLink, name: userName, otp: data.otp });
+    const targetCondo = effectiveCondoId || '';
+    const endpoint = `/api/staff/qr?userId=${userId}&condoId=${targetCondo}&_t=${Date.now()}`;
+
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(endpoint, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        });
+        const data = await res.json();
+        
+        if (!res.ok) {
+          alert(data.error || 'Erro ao gerar o QR Code de acesso.');
+        } else {
+          setStaffQrData({ link: data.actionLink, name: userName, otp: data.otp });
+        }
+        setStaffQrLoading(null);
+        return;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[StaffQR] Tentativa ${attempt} falhou:`, err);
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+        }
       }
-    } catch (err) {
-      alert('Erro de conexão ao gerar o QR Code.');
-    } finally {
-      setStaffQrLoading(null);
     }
+
+    alert(`Erro de conexão ao gerar o QR Code (${lastError?.message || 'Falha de rede/DNS'}). Por favor, verifique a conexão e tente novamente.`);
+    setStaffQrLoading(null);
   };
 
   // Funções da Aba Automações & Utilidades

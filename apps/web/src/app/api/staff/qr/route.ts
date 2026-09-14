@@ -20,19 +20,19 @@ function getSupabaseAdmin() {
 export async function GET(request: Request) {
   try {
     const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!session?.user) {
+    if (authError || !user) {
       return NextResponse.json({ error: 'Não autorizado. Você precisa estar logado.' }, { status: 401 });
     }
 
     const { data: adminProfile } = await supabase
       .from('profiles')
       .select('condo_id, role')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
 
-    const userEmail = (session.user.email || '').toLowerCase();
+    const userEmail = (user.email || '').toLowerCase();
     const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
       .split(',')
       .map(e => e.trim().toLowerCase());
