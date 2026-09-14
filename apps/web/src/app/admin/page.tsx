@@ -62,7 +62,7 @@ export default function AdminPage() {
   const [residents, setResidents] = useState<Resident[]>([]);
   const [packages, setPackages] = useState<PackageType[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'METRICS' | 'PACKAGES' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM' | 'AUTOMATIONS'>('METRICS');
+  const [activeTab, setActiveTab] = useState<'PACKAGES' | 'RESIDENTS' | 'UNITS' | 'STAFF' | 'SYSTEM' | 'AUTOMATIONS'>('PACKAGES');
   const [packageSearchQuery, setPackageSearchQuery] = useState('');
   const [packageStatusFilter, setPackageStatusFilter] = useState<'ALL' | 'PENDING' | 'DELIVERED' | 'RETURNED'>('ALL');
 
@@ -1079,16 +1079,6 @@ export default function AdminPage() {
 
         <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
           <button
-            onClick={() => setActiveTab('METRICS')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
-              activeTab === 'METRICS'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" /> Métricas
-          </button>
-          <button
             onClick={() => setActiveTab('PACKAGES')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold transition ${
               activeTab === 'PACKAGES'
@@ -1155,8 +1145,8 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* ABA 1 & 2: MÉTRICAS E ENCOMENDAS */}
-      {(activeTab === 'METRICS' || activeTab === 'PACKAGES') && (
+      {/* ABA ENCOMENDAS */}
+      {activeTab === 'PACKAGES' && (
         <div className="space-y-6 animate-fade-in">
           {/* Métricas do Condomínio (Cards Interativos com Filtro Rápido) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
