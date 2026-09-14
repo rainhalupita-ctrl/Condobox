@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -93,6 +94,16 @@ interface GlobalMetrics {
   total_residents: number;
   total_packages: number;
   total_users: number;
+}
+
+function ModalPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+  if (!mounted || typeof document === 'undefined') return null;
+  return createPortal(children, document.body);
 }
 
 export default function SuperAdminPage() {
@@ -257,6 +268,21 @@ export default function SuperAdminPage() {
       }
     }
   }, [user?.id, loading, router]);
+
+  // Trava a rolagem do fundo no celular/desktop quando qualquer modal estiver aberto
+  useEffect(() => {
+    const isAnyModalOpen = Boolean(editingAccount || isCreateModalOpen || selectedReceiptForReview || isManualReceiptModalOpen);
+    if (isAnyModalOpen) {
+      const originalBodyOverflow = document.body.style.overflow;
+      const originalHtmlOverflow = document.documentElement.style.overflow;
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalBodyOverflow;
+        document.documentElement.style.overflow = originalHtmlOverflow;
+      };
+    }
+  }, [editingAccount, isCreateModalOpen, selectedReceiptForReview, isManualReceiptModalOpen]);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     try {
@@ -2722,8 +2748,9 @@ export default function SuperAdminPage() {
 
       {/* MODAL: EDITAR PLANO E LIMITES */}
       {editingAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-5 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative my-auto max-h-[88vh] overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -2936,12 +2963,14 @@ export default function SuperAdminPage() {
             </form>
           </div>
         </div>
-      )}
+      </ModalPortal>
+    )}
 
       {/* MODAL: NOVA CONTA DE CONDOMÍNIO */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-5 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative my-auto max-h-[88vh] overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -3100,12 +3129,14 @@ export default function SuperAdminPage() {
             </form>
           </div>
         </div>
-      )}
+      </ModalPortal>
+    )}
 
       {/* MODAL: ANÁLISE E APROVAÇÃO DE COMPROVANTE (COM ZOOM) */}
       {selectedReceiptForReview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-2xl w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-5 sm:p-7 max-w-2xl w-full space-y-5 shadow-2xl relative my-auto max-h-[88vh] overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -3251,12 +3282,14 @@ export default function SuperAdminPage() {
             </div>
           </div>
         </div>
-      )}
+      </ModalPortal>
+    )}
 
       {/* MODAL: ANEXAÇÃO MANUAL DE COMPROVANTE PELO SÓCIO PROPRIETÁRIO */}
       {isManualReceiptModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-5 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative my-auto max-h-[88vh] overflow-y-auto">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -3281,10 +3314,10 @@ export default function SuperAdminPage() {
 
             {manualMsg && (
               <div
-                className={`p-3 rounded-xl text-xs font-semibold ${
+                className={`p-3 rounded-xl text-xs font-medium ${
                   manualMsg.startsWith('✅')
-                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
-                    : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
                 }`}
               >
                 {manualMsg}
@@ -3292,70 +3325,64 @@ export default function SuperAdminPage() {
             )}
 
             <form onSubmit={handleManualReceiptSubmit} className="space-y-4 text-xs">
-              {/* Seleção do Condomínio */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Selecione o Condomínio *</label>
                 <select
                   required
                   value={manualCondoId}
-                  onChange={e => {
-                    const cId = e.target.value;
-                    setManualCondoId(cId);
-                    const sub = financialSubscribers.find(s => s.condoId === cId);
-                    if (sub && sub.monthlyPrice) setManualAmount(String(sub.monthlyPrice));
-                  }}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-none focus:border-emerald-500"
+                  onChange={e => setManualCondoId(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-medium focus:outline-none focus:border-emerald-500"
                 >
-                  <option value="">Selecione um condomínio...</option>
+                  <option value="">-- Escolha um condomínio --</option>
                   {accounts.map(acc => (
                     <option key={acc.id} value={acc.id}>
-                      {acc.name} ({acc.license?.status || 'SEM STATUS'})
+                      {acc.name} ({acc.license?.status === 'ACTIVE' ? 'Ativo' : 'Expirado / Pendente'})
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Valor Pago e Extensão */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Valor Pago (R$) *</label>
                   <input
-                    type="text"
+                    type="number"
+                    step="0.01"
+                    min="0"
                     required
-                    placeholder="149,00"
+                    placeholder="149.00"
                     value={manualAmount}
                     onChange={e => setManualAmount(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono font-bold focus:outline-none focus:border-emerald-500"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold focus:outline-none focus:border-emerald-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Extensão de Vigência</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Extensão de Licença *</label>
                   <select
                     value={manualExtensionDays}
                     onChange={e => setManualExtensionDays(Number(e.target.value))}
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-none focus:border-emerald-500"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-medium focus:outline-none focus:border-emerald-500"
                   >
-                    <option value={30}>+30 Dias (1 Mês)</option>
-                    <option value={60}>+60 Dias (2 Meses)</option>
-                    <option value={90}>+90 Dias (Trimestral)</option>
-                    <option value={365}>+365 Dias (1 Ano)</option>
+                    <option value={30}>+30 dias (1 mês)</option>
+                    <option value={60}>+60 dias (2 meses)</option>
+                    <option value={90}>+90 dias (3 meses)</option>
+                    <option value={180}>+180 dias (6 meses)</option>
+                    <option value={365}>+365 dias (1 ano)</option>
                   </select>
                 </div>
               </div>
 
-              {/* Upload do Arquivo */}
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Foto ou PDF do Comprovante</label>
+                <label className="block text-slate-300 font-semibold mb-1">Arquivo do Comprovante (Opcional)</label>
                 <input
                   type="file"
                   accept="image/*,application/pdf"
                   onChange={e => setManualFile(e.target.files?.[0] || null)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-xs file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-500/20 file:text-emerald-300 hover:file:bg-emerald-500/30 cursor-pointer"
                 />
               </div>
 
-              {/* Observações */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Observações do Recebimento</label>
                 <input
@@ -3380,7 +3407,8 @@ export default function SuperAdminPage() {
             </form>
           </div>
         </div>
-      )}
+      </ModalPortal>
+    )}
     </div>
   );
 }
