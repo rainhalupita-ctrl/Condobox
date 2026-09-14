@@ -27,12 +27,12 @@ set "ELECTRON_EXE=%~dp0apps\desktop\node_modules\electron\dist\electron.exe"
 set "APP_DIR=%~dp0apps\desktop-master"
 
 REM 3. Inicia o aplicativo Desktop Master diretamente
+cd /d "%APP_DIR%"
 if exist "%ELECTRON_EXE%" (
-    start "" /d "%APP_DIR%" "%ELECTRON_EXE%" "%APP_DIR%"
+    start "" "%ELECTRON_EXE%" .
     exit
 )
 
-cd /d "%APP_DIR%"
 where electron >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     start "" electron .
