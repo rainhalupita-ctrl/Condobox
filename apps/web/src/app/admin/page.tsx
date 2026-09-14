@@ -264,20 +264,22 @@ export default function AdminPage() {
   }, [activeTab, whatsappQrCode]);
 
   useEffect(() => {
+    if (!authLoading && isSuperAdmin && !isImpersonating) {
+      router.replace('/super-admin');
+      return;
+    }
+
     if (isSuperAdmin) {
       const fetchCondos = async () => {
         const supabase = createClient();
         const { data } = await supabase.from('condos').select('id, name').order('name');
         if (data && data.length > 0) {
           setAvailableCondos(data);
-          if (!effectiveCondoId) {
-            impersonateCondo({ id: data[0].id, name: data[0].name });
-          }
         }
       };
       fetchCondos();
     }
-  }, [isSuperAdmin, effectiveCondoId]);
+  }, [isSuperAdmin, isImpersonating, authLoading, router]);
 
   useEffect(() => {
     const handleUnitsChanged = () => {

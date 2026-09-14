@@ -120,43 +120,36 @@ export default function SuperAdminPage() {
 
   const [activeTab, setActiveTab] = useState<'ACCOUNTS' | 'FINANCIAL' | 'ADS' | 'VERSIONS'>('ACCOUNTS');
   
-  // Inicialização com 0ms se já houver cache em memória ou sessionStorage
-  const [accounts, setAccounts] = useState<AccountItem[]>(() => {
-    if (globalAccountsCache && globalAccountsCache.length > 0) return globalAccountsCache;
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem('condobox_master_accounts');
-        if (saved) {
-          const parsed = JSON.parse(saved);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const [metrics, setMetrics] = useState<GlobalMetrics | null>(null);
+  const [loadingData, setLoadingData] = useState(true);
+
+  // Inicializa cache do sessionStorage após montagem segura no cliente (evita Hydration Error #418)
+  useEffect(() => {
+    try {
+      if (globalAccountsCache && globalAccountsCache.length > 0) {
+        setAccounts(globalAccountsCache);
+        if (globalMetricsCache) setMetrics(globalMetricsCache);
+        setLoadingData(false);
+      } else {
+        const savedAcc = sessionStorage.getItem('condobox_master_accounts');
+        const savedMet = sessionStorage.getItem('condobox_master_metrics');
+        if (savedAcc) {
+          const parsed = JSON.parse(savedAcc);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            setAccounts(parsed);
             globalAccountsCache = parsed;
-            return parsed;
+            setLoadingData(false);
           }
         }
-      } catch {}
-    }
-    return [];
-  });
-
-  const [metrics, setMetrics] = useState<GlobalMetrics | null>(() => {
-    if (globalMetricsCache) return globalMetricsCache;
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem('condobox_master_metrics');
-        if (saved) {
-          const parsed = JSON.parse(saved);
+        if (savedMet) {
+          const parsed = JSON.parse(savedMet);
+          setMetrics(parsed);
           globalMetricsCache = parsed;
-          return parsed;
         }
-      } catch {}
-    }
-    return null;
-  });
-
-  // Se já possui dados em cache, NÃO bloqueia a tela com o spinner roxo
-  const [loadingData, setLoadingData] = useState(() => {
-    return !globalAccountsCache || globalAccountsCache.length === 0;
-  });
+      }
+    } catch {}
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [planFilter, setPlanFilter] = useState('ALL');
@@ -611,12 +604,15 @@ export default function SuperAdminPage() {
 
       // 2. TAREFAS DE SEGUNDO PLANO: Executadas de forma assíncrona e desacoplada
       const backgroundTasks = async () => {
-        // Anúncios
+        // Anúncios via API segura
         try {
-          const { data: adsData } = await supabase.from('ads').select('*').order('created_at', { ascending: false });
-          if (adsData) {
-            setAds(adsData);
-            globalAdsCache = adsData;
+          const res = await fetch('/api/super-admin/ads');
+          if (res.ok) {
+            const adsData = await res.json();
+            if (Array.isArray(adsData)) {
+              setAds(adsData);
+              globalAdsCache = adsData;
+            }
           }
         } catch {}
 
@@ -1135,10 +1131,14 @@ export default function SuperAdminPage() {
     if (!adImage) return;
     setAdLoading(true);
     try {
-      await supabase.from('ads').insert({
-        image_url: adImage,
-        link_url: adLink,
-        active: true,
+      await fetch('/api/super-admin/ads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: adImage,
+          link_url: adLink,
+          active: true,
+        }),
       });
       setAdImage('');
       setAdLink('');
@@ -1149,13 +1149,19 @@ export default function SuperAdminPage() {
   };
 
   const handleToggleAd = async (id: string, active: boolean) => {
-    await supabase.from('ads').update({ active }).eq('id', id);
+    await fetch('/api/super-admin/ads', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, active }),
+    });
     loadData();
   };
 
   const handleDeleteAd = async (id: string) => {
     if (confirm('Deletar anúncio?')) {
-      await supabase.from('ads').delete().eq('id', id);
+      await fetch(`/api/super-admin/ads?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
       loadData();
     }
   };

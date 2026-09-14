@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '../lib/supabase/client';
 import { useAuth } from '../contexts/auth-context';
+import { LocalApiClient } from '@/lib/local-api';
 import { buildSupportWhatsAppUrl } from '@/lib/support-contacts';
 import { CondoReceiptUploader } from './CondoReceiptUploader';
 import {
@@ -81,25 +82,28 @@ export function SubscriptionGate({ children }: Props) {
         }
       } catch {}
 
-      const localApiUrl = effectiveCondoId
-        ? `http://localhost:3001/api/license/status?condoId=${encodeURIComponent(effectiveCondoId)}`
-        : 'http://localhost:3001/api/license/status';
+      const baseUrl = LocalApiClient.getBaseUrl();
+      if (baseUrl) {
+        const localApiUrl = effectiveCondoId
+          ? `${baseUrl}/api/license/status?condoId=${encodeURIComponent(effectiveCondoId)}`
+          : `${baseUrl}/api/license/status`;
 
-      const res = await fetch(localApiUrl).catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.subscription) {
-          // A quantidade real de unidades do condomínio ativo tem precedência absoluta
-          const currentCount = unitsFetched ? realUnitsCount : (data.unitsUsage?.current ?? realUnitsCount);
-          const maxUnits = license?.max_apartments || data.unitsUsage?.max || data.subscription.plan?.max_units || 250;
-          setSub(data.subscription);
-          setUnitsUsage({
-            current: currentCount,
-            max: maxUnits,
-            canAddMore: currentCount < maxUnits,
-            percentage: Math.min(100, Math.round((currentCount / maxUnits) * 100))
-          });
-          return;
+        const res = await fetch(localApiUrl).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data.subscription) {
+            // A quantidade real de unidades do condomínio ativo tem precedência absoluta
+            const currentCount = unitsFetched ? realUnitsCount : (data.unitsUsage?.current ?? realUnitsCount);
+            const maxUnits = license?.max_apartments || data.unitsUsage?.max || data.subscription.plan?.max_units || 250;
+            setSub(data.subscription);
+            setUnitsUsage({
+              current: currentCount,
+              max: maxUnits,
+              canAddMore: currentCount < maxUnits,
+              percentage: Math.min(100, Math.round((currentCount / maxUnits) * 100))
+            });
+            return;
+          }
         }
       }
 

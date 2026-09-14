@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Lock, PhoneCall, KeyRound, CheckCircle2, RefreshCw, Copy, Check, LogOut, MessageSquare } from 'lucide-react';
 import { buildSupportWhatsAppUrl, SUPPORT_CONTACTS } from '@/lib/support-contacts';
 import { useAuth } from '@/contexts/auth-context';
+import { LocalApiClient } from '@/lib/local-api';
 import { CondoReceiptUploader } from './CondoReceiptUploader';
 
 interface ExpiredAccountGateProps {
@@ -37,8 +38,18 @@ export function ExpiredAccountGate({ condoName, condoId }: ExpiredAccountGatePro
     setActivating(true);
     setActivationMsg(null);
 
+    const baseUrl = LocalApiClient.getBaseUrl();
+    if (!baseUrl) {
+      setActivationMsg({
+        type: 'error',
+        text: 'A ativação por chave é feita no aplicativo local da portaria. Para liberação na nuvem, envie o comprovante Pix abaixo.'
+      });
+      setActivating(false);
+      return;
+    }
+
     try {
-      const res = await fetch('http://localhost:3001/api/license/activate', {
+      const res = await fetch(`${baseUrl}/api/license/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

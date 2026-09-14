@@ -31,8 +31,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     license && (license.status === 'EXPIRED' || license.status === 'BLOCKED' || license.status === 'SUSPENDED' || isExpiredByDate)
   );
 
-  // Bloqueia telas operacionais caso o tempo tenha acabado
-  const shouldBlock = !isDeveloperMaster && isBlocked && (
+  // O Sócio Proprietário / Super Admin NUNCA é bloqueado por bloqueio de condomínio
+  const isMasterUser = isSuperAdmin || isDeveloperMaster;
+
+  // Bloqueia telas operacionais caso o tempo tenha acabado para condomínios
+  const shouldBlock = !isMasterUser && isBlocked && (
     pathname.startsWith('/portaria') || 
     pathname.startsWith('/morador') || 
     pathname.startsWith('/admin')

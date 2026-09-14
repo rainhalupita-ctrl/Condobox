@@ -22,6 +22,83 @@ function toUuid(id?: string | null): string | null {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   return uuidRegex.test(id) ? id : null;
 }
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const condoId = url.searchParams.get('condoId');
+    const supabaseAdmin = getSupabaseAdmin();
+
+    // 1. Busca configurações de PIX
+    let pixSettings = {
+      pixKey: '73998419901',
+      pixKeyType: 'PHONE',
+      pixName: 'CondoBox Tecnologia e Soluções',
+      pixBank: 'Banco Inter / NuBank',
+      instructions: 'Ao efetuar o Pix, anexe o comprovante no sistema para análise e liberação imediata.',
+    };
+
+    try {
+      const { data: bData } = await supabaseAdmin
+        .from('saas_billing_settings')
+        .select('*')
+        .limit(1)
+        .maybeSingle();
+
+      if (bData) {
+        pixSettings = {
+          pixKey: bData.pix_key || pixSettings.pixKey,
+          pixKeyType: bData.pix_key_type || pixSettings.pixKeyType,
+          pixName: bData.beneficiary_name || pixSettings.pixName,
+          pixBank: bData.bank_name || pixSettings.pixBank,
+          instructions: bData.instructions || pixSettings.instructions,
+        };
+      }
+    } catch {}
+
+    if (!condoId) {
+      return NextResponse.json({ latestReceipt: null, pixSettings });
+    }
+
+    // 2. Busca último comprovante / pagamento deste condomínio
+    let latestReceipt: any = null;
+    const { data: payData } = await supabaseAdmin
+      .from('subscription_payments')
+      .select('*')
+      .eq('condo_id', condoId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (payData) {
+      latestReceipt = payData;
+    } else {
+      const { data: auditData } = await supabaseAdmin
+        .from('security_audit_logs')
+        .select('*')
+        .eq('entity_type', 'subscription_payment')
+        .eq('entity_id', condoId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (auditData) {
+        latestReceipt = {
+          id: auditData.id,
+          condo_id: auditData.entity_id,
+          status: auditData.details?.status || 'PENDING',
+          amount: auditData.details?.amount || 149,
+          reference_month: auditData.details?.reference_month,
+          receipt_url: auditData.details?.receipt_url,
+          created_at: auditData.created_at,
+        };
+      }
+    }
+
+    return NextResponse.json({ latestReceipt, pixSettings });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Erro ao consultar comprovante' }, { status: 500 });
+  }
+}
 
 export async function POST(request: Request) {
   try {

@@ -19,11 +19,20 @@ export function Navbar() {
 
   const isMasterRoute = pathname.startsWith('/super-admin') || pathname.startsWith('/master');
 
-  const navLinks = (isSuperAdmin || isMasterRoute)
+  // O Sócio Proprietário (Super Admin) só vê as abas Administração e Portaria se estiver personificando um condomínio!
+  const navLinks = isSuperAdmin
+    ? isImpersonating
+      ? [
+          { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
+          { href: '/admin', label: 'Administração', icon: LayoutDashboard },
+          { href: '/portaria?view=1', label: 'Portaria', icon: Shield },
+        ]
+      : [
+          { href: '/super-admin', label: 'Painel Master (SaaS)', icon: ShieldAlert },
+        ]
+    : isMasterRoute
     ? [
         { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
-        { href: '/admin', label: 'Administração', icon: LayoutDashboard },
-        { href: '/portaria?view=1', label: 'Portaria', icon: Shield },
       ]
     : isAdmin
     ? [
@@ -130,24 +139,28 @@ export function Navbar() {
                           <ShieldAlert size={14} className="text-purple-400" />
                           Painel Master (SaaS)
                         </Link>
-                        <Link
-                          href="/admin"
-                          onClick={() => setMenuOpen(false)}
-                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-emerald-400 hover:bg-emerald-500/15 font-semibold border-b border-slate-800/60 transition-colors"
-                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                        >
-                          <LayoutDashboard size={14} className="text-emerald-400" />
-                          Administração do Condomínio
-                        </Link>
-                        <Link
-                          href="/portaria?view=1"
-                          onClick={() => setMenuOpen(false)}
-                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-blue-400 hover:bg-blue-500/15 font-semibold border-b border-slate-800/60 transition-colors"
-                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                        >
-                          <Shield size={14} className="text-blue-400" />
-                          Portaria Operacional
-                        </Link>
+                        {isImpersonating && (
+                          <>
+                            <Link
+                              href="/admin"
+                              onClick={() => setMenuOpen(false)}
+                              className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-emerald-400 hover:bg-emerald-500/15 font-semibold border-b border-slate-800/60 transition-colors"
+                              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                            >
+                              <LayoutDashboard size={14} className="text-emerald-400" />
+                              Administração do Condomínio
+                            </Link>
+                            <Link
+                              href="/portaria?view=1"
+                              onClick={() => setMenuOpen(false)}
+                              className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-blue-400 hover:bg-blue-500/15 font-semibold border-b border-slate-800/60 transition-colors"
+                              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                            >
+                              <Shield size={14} className="text-blue-400" />
+                              Portaria Operacional
+                            </Link>
+                          </>
+                        )}
                       </>
                     )}
 

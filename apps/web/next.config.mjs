@@ -13,6 +13,15 @@ const nextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: '/master-admin',
+        destination: '/super-admin',
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

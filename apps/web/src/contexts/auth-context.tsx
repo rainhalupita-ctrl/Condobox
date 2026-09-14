@@ -97,21 +97,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data) {
       setProfile(data as UserProfile);
 
-      // Se não houver condomínio impersonado, busca licença do condomínio do perfil
-      const targetCondoId = impersonatedCondo?.id || data.condo_id;
+      // Super Admin (Sócio Proprietário) só busca licença se estiver impersonando um condomínio
+      const isMasterRole = data.role === 'ADMIN';
+      const targetCondoId = impersonatedCondo?.id || (isMasterRole ? null : data.condo_id);
       if (targetCondoId) {
         fetchLicenseForCondo(targetCondoId);
+      } else {
+        setLicense(null);
       }
     }
   };
 
   // Se mudar o condomínio impersonado, atualiza a licença ativa
   useEffect(() => {
-    const targetCondoId = impersonatedCondo?.id || profile?.condo_id;
+    const isMasterRole = profile?.role === 'ADMIN' || (user?.email && superAdminEmails.includes(user.email.toLowerCase()));
+    const targetCondoId = impersonatedCondo?.id || (isMasterRole ? null : profile?.condo_id);
     if (targetCondoId) {
       fetchLicenseForCondo(targetCondoId);
+    } else {
+      setLicense(null);
     }
-  }, [impersonatedCondo, profile?.condo_id]);
+  }, [impersonatedCondo, profile?.condo_id, profile?.role, user?.email]);
 
   useEffect(() => {
     // Sessão inicial
@@ -165,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const role = profile?.role;
 
-  // Lista de e-mails de super administradores (Dono do Sistema / Proprietário do SaaS)
+  // Lista de e-mails de super administradores (Dono do Sistema / Sócio Proprietário do SaaS)
   const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
     .split(',')
     .map(e => e.trim().toLowerCase());
@@ -173,22 +179,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const userEmail = user?.email?.toLowerCase() || '';
   const isMasterByEmail = !!userEmail && superAdminEmails.includes(userEmail);
 
-  // O Dono do Sistema / Administrador tem acesso Master sempre que tiver perfil ADMIN ou estiver na lista de e-mails
+  // O Dono do Sistema / Sócio Proprietário tem acesso Master global (não pertence a condomínio algum)
   const isSuperAdmin = role === 'ADMIN' || isMasterByEmail;
-  const isPortaria = isSuperAdmin || role === 'SYNDIC' || role === 'GUARD';
-  const isAdmin = isSuperAdmin || role === 'SYNDIC';
-  const isMorador = isSuperAdmin || role === 'RESIDENT' || role === 'SYNDIC';
-
-  // Administradores e Super Admins podem impersonar condomínios para suporte e gestão
   const canImpersonate = isSuperAdmin;
 
-  // Se não for admin, cada síndico ou porteiro fica 100% isolado no seu próprio condomínio.
-  const effectiveCondoId = canImpersonate
-    ? (impersonatedCondo?.id || profile?.condo_id || null)
+  // Está impersonando se for Super Admin e tiver selecionado um condomínio para atuar
+  const isImpersonating = canImpersonate && !!impersonatedCondo;
+
+  // Se for Sócio Proprietário:
+  // - Sem personificação: NÃO tem condomínio vinculado (effectiveCondoId = null)
+  // - Com personificação: atua no condomínio personificado (effectiveCondoId = impersonatedCondo.id)
+  const effectiveCondoId = isSuperAdmin
+    ? (isImpersonating ? impersonatedCondo?.id || null : null)
     : (profile?.condo_id || null);
 
-  // Apenas considera impersonando se estiver operando em um condomínio diferente do seu condomínio padrão
-  const isImpersonating = canImpersonate && !!impersonatedCondo && impersonatedCondo.id !== profile?.condo_id;
+  // Sócio Proprietário só assume abas/permissões de Portaria ou Administração quando estiver personificando um condomínio!
+  const isPortaria = isSuperAdmin ? isImpersonating : (role === 'SYNDIC' || role === 'GUARD');
+  const isAdmin = isSuperAdmin ? isImpersonating : (role === 'SYNDIC');
+  const isMorador = !isSuperAdmin && (role === 'RESIDENT' || role === 'SYNDIC');
 
   // Se o usuário logado não for admin mas houver impersonação salva, limpa imediatamente
   useEffect(() => {
