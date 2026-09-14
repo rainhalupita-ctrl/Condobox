@@ -40,7 +40,15 @@ import {
   Laptop,
   Copy,
   Check,
-  MessageSquare
+  MessageSquare,
+  Receipt,
+  FileCheck,
+  UploadCloud,
+  FileText,
+  XCircle,
+  Maximize2,
+  Wallet,
+  QrCode
 } from 'lucide-react';
 import { buildSupportWhatsAppUrl, SUPPORT_CONTACTS } from '@/lib/support-contacts';
 
@@ -92,13 +100,68 @@ export default function SuperAdminPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [activeTab, setActiveTab] = useState<'ACCOUNTS' | 'ADS' | 'VERSIONS'>('ACCOUNTS');
+  const [activeTab, setActiveTab] = useState<'ACCOUNTS' | 'FINANCIAL' | 'ADS' | 'VERSIONS'>('ACCOUNTS');
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [planFilter, setPlanFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Gestão Financeira & Assinaturas SaaS (Modelo Netflix)
+  const [financialMetrics, setFinancialMetrics] = useState<{
+    totalMonthlyRecurring: number;
+    totalReceivedThisMonth: number;
+    totalPending: number;
+    pendingReceiptsCount: number;
+  } | null>(null);
+  const [financialSubscribers, setFinancialSubscribers] = useState<any[]>([]);
+  const [pendingReceipts, setPendingReceipts] = useState<any[]>([]);
+  const [allReceipts, setAllReceipts] = useState<any[]>([]);
+  const [loadingFinancial, setLoadingFinancial] = useState(false);
+  const [financialError, setFinancialError] = useState<string | null>(null);
+
+  // Edição de Preço Mensal e Dia de Vencimento por Condomínio
+  const [condoPriceEdits, setCondoPriceEdits] = useState<Record<string, {
+    price: string;
+    billingDay: string;
+    saving?: boolean;
+    msg?: string;
+  }>>({});
+
+  // Análise / Revisão de Comprovante pelo Sócio Proprietário
+  const [selectedReceiptForReview, setSelectedReceiptForReview] = useState<any | null>(null);
+  const [reviewExtensionDays, setReviewExtensionDays] = useState<number>(30);
+  const [reviewRejectionReason, setReviewRejectionReason] = useState<string>('');
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
+
+  // Anexação Manual de Comprovante pelo Sócio Proprietário
+  const [isManualReceiptModalOpen, setIsManualReceiptModalOpen] = useState(false);
+  const [manualCondoId, setManualCondoId] = useState('');
+  const [manualAmount, setManualAmount] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualFile, setManualFile] = useState<File | null>(null);
+  const [manualExtensionDays, setManualExtensionDays] = useState<number>(30);
+  const [manualUploading, setManualUploading] = useState(false);
+  const [manualMsg, setManualMsg] = useState<string | null>(null);
+
+  // Configurações de Cobrança & Chave Pix Oficial
+  const [billingSettings, setBillingSettings] = useState<{
+    pixKey: string;
+    pixKeyType: string;
+    holderName: string;
+    bankName: string;
+    instructions?: string;
+  }>({
+    pixKey: '73998419901',
+    pixKeyType: 'TELEFONE',
+    holderName: 'CondoBox Tecnologia & Gestão',
+    bankName: 'Banco Digital / Pix Oficial',
+    instructions: 'Envie o comprovante para análise do Sócio Proprietário'
+  });
+  const [savingBillingSettings, setSavingBillingSettings] = useState(false);
+  const [billingSettingsMsg, setBillingSettingsMsg] = useState<string | null>(null);
 
   // Gestão de Versões e Atualizações OTA
   const [versionConfig, setVersionConfig] = useState<{
@@ -284,7 +347,10 @@ export default function SuperAdminPage() {
       // 3. Carrega versões OTA dos aplicativos
       await loadVersions();
 
-      // 4. Carrega status de armazenamento e trava anti-cobrança
+      // 4. Carrega dados financeiros e assinantes Netflix
+      await loadFinancialData();
+
+      // 5. Carrega status de armazenamento e trava anti-cobrança
       try {
         const quotaRes = await fetch('/api/super-admin/storage-status', {
           headers: { ...authHeaders },
@@ -300,6 +366,235 @@ export default function SuperAdminPage() {
       console.error('Erro ao carregar dados:', e);
     } finally {
       setLoadingData(false);
+    }
+  };
+
+  // --- HANDLERS DA ABA FINANCEIRA & ASSINATURAS ---
+  const loadFinancialData = async () => {
+    setLoadingFinancial(true);
+    setFinancialError(null);
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/financial', {
+        headers: { ...authHeaders }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFinancialMetrics(data.metrics || null);
+        setFinancialSubscribers(data.subscribers || []);
+        setPendingReceipts(data.pendingReceipts || []);
+        setAllReceipts(data.allReceipts || []);
+        if (data.billingSettings) {
+          setBillingSettings(data.billingSettings);
+        }
+
+        // Inicializa o formulário de edição de preços com os valores atuais de cada condomínio
+        const initialPriceMap: Record<string, { price: string; billingDay: string }> = {};
+        (data.subscribers || []).forEach((sub: any) => {
+          initialPriceMap[sub.condoId] = {
+            price: sub.monthlyPrice !== undefined ? String(sub.monthlyPrice) : '149',
+            billingDay: sub.billingDay !== undefined ? String(sub.billingDay) : '10'
+          };
+        });
+        setCondoPriceEdits(prev => ({ ...initialPriceMap, ...prev }));
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setFinancialError(errData.error || 'Erro ao carregar dados financeiros.');
+      }
+    } catch (err: any) {
+      setFinancialError(err.message || 'Falha de conexão com a API financeira.');
+    } finally {
+      setLoadingFinancial(false);
+    }
+  };
+
+  const handleSaveCondoPrice = async (condoId: string) => {
+    const edit = condoPriceEdits[condoId];
+    if (!edit) return;
+
+    setCondoPriceEdits(prev => ({
+      ...prev,
+      [condoId]: { ...prev[condoId], saving: true, msg: undefined }
+    }));
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/financial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          action: 'SET_CONDO_PRICE',
+          condoId,
+          monthlyPrice: parseFloat(String(edit.price).replace(',', '.')) || 0,
+          billingDay: parseInt(String(edit.billingDay), 10) || 10
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar valor.');
+
+      setCondoPriceEdits(prev => ({
+        ...prev,
+        [condoId]: { ...prev[condoId], saving: false, msg: '✅ Salvo!' }
+      }));
+
+      // Atualiza métricas financeiras consolidadas
+      loadFinancialData();
+    } catch (err: any) {
+      setCondoPriceEdits(prev => ({
+        ...prev,
+        [condoId]: { ...prev[condoId], saving: false, msg: `❌ ${err.message}` }
+      }));
+    }
+  };
+
+  const handleReviewReceipt = async (action: 'APPROVE' | 'REJECT') => {
+    if (!selectedReceiptForReview) return;
+    setReviewLoading(true);
+    setReviewMessage(null);
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/financial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          action: 'REVIEW_RECEIPT',
+          paymentId: selectedReceiptForReview.id,
+          condoId: selectedReceiptForReview.condo_id,
+          reviewAction: action,
+          extensionDays: reviewExtensionDays,
+          rejectionReason: action === 'REJECT' ? reviewRejectionReason : undefined
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao processar comprovante.');
+
+      setReviewMessage(
+        action === 'APPROVE'
+          ? '✅ Comprovante aprovado e condomínio desbloqueado com sucesso!'
+          : '✅ Comprovante marcado como rejeitado.'
+      );
+
+      setTimeout(() => {
+        setSelectedReceiptForReview(null);
+        setReviewRejectionReason('');
+        setReviewMessage(null);
+        loadFinancialData();
+        loadData();
+      }, 1200);
+    } catch (err: any) {
+      setReviewMessage(`❌ ${err.message}`);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleManualReceiptSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCondoId) {
+      setManualMsg('❌ Selecione um condomínio.');
+      return;
+    }
+    setManualUploading(true);
+    setManualMsg(null);
+
+    try {
+      if (manualFile) {
+        const formData = new FormData();
+        formData.append('file', manualFile);
+        formData.append('condoId', manualCondoId);
+        if (manualAmount) formData.append('amount', manualAmount.replace(',', '.'));
+        if (manualNotes) formData.append('notes', manualNotes);
+
+        const uploadRes = await fetch('/api/financial/receipt', {
+          method: 'POST',
+          body: formData
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadData.error || 'Erro no upload do comprovante.');
+
+        // Se o upload foi feito pelo sócio, aprova e desbloqueia automaticamente
+        if (uploadData.paymentId) {
+          const authHeaders = await getAuthHeaders();
+          await fetch('/api/financial', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify({
+              action: 'REVIEW_RECEIPT',
+              paymentId: uploadData.paymentId,
+              condoId: manualCondoId,
+              reviewAction: 'APPROVE',
+              extensionDays: manualExtensionDays
+            })
+          });
+        }
+      } else {
+        // Registro sem anexo físico
+        const authHeaders = await getAuthHeaders();
+        const res = await fetch('/api/financial', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({
+            action: 'REVIEW_RECEIPT',
+            condoId: manualCondoId,
+            reviewAction: 'APPROVE',
+            extensionDays: manualExtensionDays,
+            notes: manualNotes || 'Pagamento registrado diretamente pelo Sócio Proprietário'
+          })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Erro ao registrar pagamento.');
+        }
+      }
+
+      setManualMsg('✅ Pagamento registrado, aprovado e condomínio desbloqueado/estendido com sucesso!');
+      setTimeout(() => {
+        setIsManualReceiptModalOpen(false);
+        setManualCondoId('');
+        setManualAmount('');
+        setManualNotes('');
+        setManualFile(null);
+        setManualMsg(null);
+        loadFinancialData();
+        loadData();
+      }, 1200);
+    } catch (err: any) {
+      setManualMsg(`❌ ${err.message}`);
+    } finally {
+      setManualUploading(false);
+    }
+  };
+
+  const handleSaveBillingSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingBillingSettings(true);
+    setBillingSettingsMsg(null);
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/financial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          action: 'UPDATE_BILLING_SETTINGS',
+          ...billingSettings
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar chave Pix.');
+
+      setBillingSettingsMsg('✅ Dados de cobrança e Chave Pix oficial salvos com sucesso!');
+      setTimeout(() => {
+        setBillingSettingsMsg(null);
+      }, 3500);
+    } catch (err: any) {
+      setBillingSettingsMsg(`❌ ${err.message}`);
+    } finally {
+      setSavingBillingSettings(false);
     }
   };
 
@@ -967,12 +1262,12 @@ export default function SuperAdminPage() {
         </div>
       )}
 
-      {/* Navegação entre Abas (Contas vs Anúncios) */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-1">
+      {/* Navegação entre Abas (Contas, Financeiro, Anúncios, Versões) */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-1 overflow-x-auto">
         <button
           type="button"
           onClick={() => setActiveTab('ACCOUNTS')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === 'ACCOUNTS'
               ? 'bg-purple-600 text-white shadow-md shadow-purple-950/40'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
@@ -984,8 +1279,29 @@ export default function SuperAdminPage() {
 
         <button
           type="button"
+          onClick={() => {
+            setActiveTab('FINANCIAL');
+            loadFinancialData();
+          }}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap relative ${
+            activeTab === 'FINANCIAL'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <DollarSign size={15} className={activeTab === 'FINANCIAL' ? 'text-white' : 'text-emerald-400'} />
+          <span>Gestão Financeira & Assinaturas</span>
+          {pendingReceipts.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[10px] animate-pulse">
+              {pendingReceipts.length} para aprovar
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('ADS')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === 'ADS'
               ? 'bg-purple-600 text-white shadow-md shadow-purple-950/40'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
@@ -998,7 +1314,7 @@ export default function SuperAdminPage() {
         <button
           type="button"
           onClick={() => setActiveTab('VERSIONS')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === 'VERSIONS'
               ? 'bg-purple-600 text-white shadow-md shadow-purple-950/40'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
@@ -1266,6 +1582,661 @@ export default function SuperAdminPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ABA: GESTÃO FINANCEIRA & ASSINATURAS (MODELO NETFLIX) */}
+      {activeTab === 'FINANCIAL' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Cabeçalho & Botões de Ação */}
+          <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900/90 to-slate-900/90 border border-emerald-500/30 rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl shrink-0">
+                <Wallet size={24} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-lg font-black text-white tracking-tight">
+                    Gestão Financeira & Assinaturas • Modelo Netflix
+                  </h2>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase">
+                    Cobrança Recorrente SaaS
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                  Cada condomínio é um assinante do seu sistema. Defina o valor mensal que você cobra de cada condomínio, o dia de vencimento, confira os comprovantes anexados para desbloqueio e anexe pagamentos externos.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsManualReceiptModalOpen(true)}
+                className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-emerald-950/40 active:scale-95"
+              >
+                <Plus size={15} />
+                <span>Anexar Comprovante Manualmente</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={loadFinancialData}
+                disabled={loadingFinancial}
+                className="p-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
+                title="Atualizar dados financeiros"
+              >
+                <RefreshCw size={15} className={loadingFinancial ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </div>
+
+          {financialError && (
+            <div className="p-3.5 rounded-2xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center justify-between">
+              <span>{financialError}</span>
+              <button type="button" onClick={() => setFinancialError(null)} className="text-rose-400 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* Cards de Métricas Financeiras Executivas */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 1. MRR Real Consolidado */}
+            <div className="bg-slate-900/90 border border-slate-800/90 hover:border-emerald-500/40 rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  MRR Real Consolidado
+                </span>
+                <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20 group-hover:scale-110 transition-transform">
+                  <DollarSign size={20} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl sm:text-3xl font-black text-emerald-400 tracking-tight block">
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                    financialMetrics?.totalMonthlyRecurring || 0
+                  )}
+                </span>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Soma dos valores fixados por condomínio
+                </span>
+              </div>
+            </div>
+
+            {/* 2. Total Recebido no Mês */}
+            <div className="bg-slate-900/90 border border-slate-800/90 hover:border-blue-500/40 rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Total Recebido (Mês Atual)
+                </span>
+                <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-2xl border border-blue-500/20 group-hover:scale-110 transition-transform">
+                  <CheckCircle2 size={20} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl sm:text-3xl font-black text-blue-400 tracking-tight block">
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                    financialMetrics?.totalReceivedThisMonth || 0
+                  )}
+                </span>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Pagamentos aprovados e confirmados
+                </span>
+              </div>
+            </div>
+
+            {/* 3. Total Pendente / Atrasado */}
+            <div className="bg-slate-900/90 border border-slate-800/90 hover:border-rose-500/40 rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Total Pendente / Atrasado
+                </span>
+                <div className="p-2.5 bg-rose-500/10 text-rose-400 rounded-2xl border border-rose-500/20 group-hover:scale-110 transition-transform">
+                  <AlertTriangle size={20} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl sm:text-3xl font-black text-rose-400 tracking-tight block">
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                    financialMetrics?.totalPending || 0
+                  )}
+                </span>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Condomínios com acesso bloqueado
+                </span>
+              </div>
+            </div>
+
+            {/* 4. Comprovantes Aguardando Sua Aprovação */}
+            <div className={`border rounded-3xl p-5 shadow-xl transition-all relative overflow-hidden group ${
+              (financialMetrics?.pendingReceiptsCount || 0) > 0
+                ? 'bg-amber-950/25 border-amber-500/50 ring-2 ring-amber-500/20 animate-pulse'
+                : 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Aguardando Sua Aprovação
+                </span>
+                <div className={`p-2.5 rounded-2xl border ${
+                  (financialMetrics?.pendingReceiptsCount || 0) > 0
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  <FileCheck size={20} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className={`text-2xl sm:text-3xl font-black tracking-tight block ${
+                  (financialMetrics?.pendingReceiptsCount || 0) > 0 ? 'text-amber-400' : 'text-slate-300'
+                }`}>
+                  {financialMetrics?.pendingReceiptsCount || 0} {financialMetrics?.pendingReceiptsCount === 1 ? 'comprovante' : 'comprovantes'}
+                </span>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  {(financialMetrics?.pendingReceiptsCount || 0) > 0
+                    ? 'Clique para analisar e desbloquear'
+                    : 'Tudo em dia! Nenhum pendente'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* SEÇÃO 1: COMPROVANTES AGUARDANDO APROVAÇÃO (DESTAQUE) */}
+          <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-xl">
+                  <FileCheck size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                    <span>Comprovantes de Pagamento Aguardando Aprovação</span>
+                    {pendingReceipts.length > 0 && (
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold">
+                        {pendingReceipts.length} PENDENTE(S)
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    O condomínio só é desbloqueado após você conferir e clicar em Aprovar.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {pendingReceipts.length === 0 ? (
+              <div className="p-8 text-center bg-slate-950/60 border border-slate-800/80 rounded-2xl space-y-2">
+                <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
+                <p className="text-sm font-bold text-slate-200">
+                  Nenhum comprovante aguardando conferência no momento.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Quando um condomínio enviar um comprovante pela tela de bloqueio, ele aparecerá aqui com foto em alta resolução para sua liberação.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {pendingReceipts.map((receipt: any) => (
+                  <div
+                    key={receipt.id}
+                    className="p-4 bg-slate-950 border border-amber-500/40 rounded-2xl space-y-3.5 shadow-lg relative overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
+                          Comprovante Recebido • Aguarda Desbloqueio
+                        </span>
+                        <h4 className="text-sm font-black text-white mt-0.5">
+                          {receipt.condo_name || receipt.condoId || 'Condomínio'}
+                        </h4>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          ID: {receipt.condo_id}
+                        </p>
+                      </div>
+
+                      <span className="text-xs font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-xl">
+                        {receipt.amount ? `R$ ${Number(receipt.amount).toFixed(2)}` : 'Valor não informado'}
+                      </span>
+                    </div>
+
+                    {/* Preview do Comprovante (Miniatura Clicável com Zoom) */}
+                    <div className="flex items-center gap-3 bg-slate-900/90 border border-slate-800 rounded-xl p-3">
+                      {receipt.receipt_url ? (
+                        receipt.receipt_url.toLowerCase().endsWith('.pdf') ? (
+                          <a
+                            href={receipt.receipt_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-16 h-16 bg-slate-800 rounded-lg flex flex-col items-center justify-center text-rose-400 border border-slate-700 hover:border-purple-500 transition shrink-0 group"
+                            title="Abrir PDF em nova aba"
+                          >
+                            <FileText size={24} />
+                            <span className="text-[9px] font-bold text-slate-300 mt-1">PDF</span>
+                          </a>
+                        ) : (
+                          <div
+                            onClick={() => setSelectedReceiptForReview(receipt)}
+                            className="w-16 h-16 rounded-lg border border-slate-700 hover:border-emerald-500 cursor-pointer overflow-hidden shrink-0 relative group"
+                            title="Clique para ampliar em tela cheia"
+                          >
+                            <img
+                              src={receipt.receipt_url}
+                              alt="Comprovante"
+                              className="w-full h-full object-cover group-hover:scale-110 transition duration-300"
+                            />
+                            <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                              <Maximize2 size={14} className="text-white" />
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div className="w-16 h-16 bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
+                          <Receipt size={24} />
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1 space-y-1 text-xs">
+                        <p className="text-slate-300 font-semibold truncate">
+                          {receipt.notes || 'Sem observações adicionais'}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Enviado em: {new Date(receipt.created_at).toLocaleString('pt-BR')}
+                        </p>
+                        {receipt.receipt_url && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedReceiptForReview(receipt)}
+                            className="text-[11px] text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 transition"
+                          >
+                            <Eye size={12} />
+                            <span>Visualizar Comprovante & Analisar</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Botões de Ação Imediata */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedReceiptForReview(receipt);
+                          setReviewExtensionDays(30);
+                        }}
+                        className="flex-1 py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/40 active:scale-95"
+                      >
+                        <CheckCircle2 size={14} />
+                        <span>Aprovar & Desbloquear</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedReceiptForReview(receipt);
+                          setReviewRejectionReason('Comprovante não identificado ou valor divergente');
+                        }}
+                        className="py-2 px-3 bg-slate-900 hover:bg-rose-950/50 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/40 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1"
+                        title="Rejeitar comprovante"
+                      >
+                        <XCircle size={14} />
+                        <span>Rejeitar</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* SEÇÃO 2: TABELA DE ASSINANTES (MODELO NETFLIX) & DEFINIÇÃO DE VALORES */}
+          <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                  <Building2 size={18} className="text-purple-400" />
+                  <span>Assinantes (Condomínios) • Definição de Valores Cobrados</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Defina o valor em R$ cobrado de cada condomínio e o dia do vencimento. Os valores são salvos individualmente.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">
+                  Total de Assinantes: <strong className="text-white">{financialSubscribers.length}</strong>
+                </span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950/70 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="p-3.5 font-bold">Condomínio</th>
+                    <th className="p-3.5 font-bold">Status da Assinatura</th>
+                    <th className="p-3.5 font-bold">Vigência / Vencimento</th>
+                    <th className="p-3.5 font-bold">Valor Cobrado Mensal (R$)</th>
+                    <th className="p-3.5 font-bold">Dia Vencimento</th>
+                    <th className="p-3.5 font-bold text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {financialSubscribers.map((sub: any) => {
+                    const editState = condoPriceEdits[sub.condoId] || {
+                      price: String(sub.monthlyPrice || 149),
+                      billingDay: String(sub.billingDay || 10)
+                    };
+
+                    const isSaving = Boolean(editState.saving);
+
+                    // Formata a data de expiração
+                    let expiryText = 'Não definida';
+                    let isExpired = false;
+                    if (sub.expiresAt) {
+                      const expDate = new Date(sub.expiresAt);
+                      const diffMs = expDate.getTime() - Date.now();
+                      const diffDays = Math.ceil(diffMs / 86400000);
+                      if (diffDays <= 0) {
+                        expiryText = `Expirado (${expDate.toLocaleDateString('pt-BR')})`;
+                        isExpired = true;
+                      } else {
+                        expiryText = `${expDate.toLocaleDateString('pt-BR')} (em ${diffDays}d)`;
+                      }
+                    }
+
+                    return (
+                      <tr key={sub.condoId} className="hover:bg-slate-800/30 transition">
+                        {/* Condomínio */}
+                        <td className="p-3.5">
+                          <div className="font-bold text-white text-sm">{sub.condoName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">ID: {sub.condoId}</div>
+                          <div className="text-[10px] text-purple-400 font-semibold mt-0.5">
+                            Plano: {sub.plan || 'TRIAL'} • {sub.unitsCount || 0} aptos
+                          </div>
+                        </td>
+
+                        {/* Status */}
+                        <td className="p-3.5">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                              sub.status === 'ACTIVE'
+                                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                : sub.status === 'TRIAL'
+                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                                : sub.status === 'UNDER_REVIEW'
+                                ? 'bg-orange-500/15 border-orange-500/30 text-orange-300'
+                                : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                            }`}
+                          >
+                            {sub.status === 'ACTIVE'
+                              ? '🟢 Em Dia / Ativo'
+                              : sub.status === 'TRIAL'
+                              ? '🟡 Em Teste'
+                              : sub.status === 'UNDER_REVIEW'
+                              ? '🟠 Comprovante em Análise'
+                              : '🔴 Expirado / Bloqueado'}
+                          </span>
+                        </td>
+
+                        {/* Vigência / Vencimento */}
+                        <td className="p-3.5">
+                          <span className={`font-mono text-xs ${isExpired ? 'text-rose-400 font-bold' : 'text-slate-300'}`}>
+                            {expiryText}
+                          </span>
+                        </td>
+
+                        {/* Campo Definido: Valor Cobrado Mensal (R$) */}
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-1.5 w-32">
+                            <span className="text-slate-400 text-xs font-bold">R$</span>
+                            <input
+                              type="text"
+                              value={editState.price}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setCondoPriceEdits(prev => ({
+                                  ...prev,
+                                  [sub.condoId]: {
+                                    ...prev[sub.condoId],
+                                    price: val
+                                  }
+                                }));
+                              }}
+                              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg text-white font-mono text-xs font-bold focus:outline-none"
+                              placeholder="149,00"
+                            />
+                          </div>
+                        </td>
+
+                        {/* Campo Definido: Dia de Vencimento */}
+                        <td className="p-3.5">
+                          <select
+                            value={editState.billingDay}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setCondoPriceEdits(prev => ({
+                                ...prev,
+                                [sub.condoId]: {
+                                  ...prev[sub.condoId],
+                                  billingDay: val
+                                }
+                              }));
+                            }}
+                            className="px-2.5 py-1.5 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg text-slate-200 font-mono text-xs focus:outline-none"
+                          >
+                            {[5, 10, 15, 20, 25, 30].map(day => (
+                              <option key={day} value={day}>
+                                Dia {day < 10 ? `0${day}` : day}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Ações */}
+                        <td className="p-3.5 text-right space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveCondoPrice(sub.condoId)}
+                            disabled={isSaving}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1 shadow-sm active:scale-95"
+                          >
+                            {isSaving ? (
+                              <RefreshCw size={12} className="animate-spin" />
+                            ) : (
+                              <Check size={12} />
+                            )}
+                            <span>{editState.msg || 'Salvar Valor'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualCondoId(sub.condoId);
+                              setManualAmount(editState.price || '149');
+                              setIsManualReceiptModalOpen(true);
+                            }}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold border border-slate-700 transition inline-flex items-center gap-1"
+                            title="Anexar comprovante para este condomínio"
+                          >
+                            <Receipt size={12} />
+                            <span>Anexar</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {financialSubscribers.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-500 text-xs">
+                        Nenhum condomínio cadastrado no momento.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* SEÇÃO 3: CONFIGURAÇÕES DA CHAVE PIX OFICIAL DO SAAS */}
+          <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
+              <div className="p-2 bg-purple-500/15 text-purple-400 border border-purple-500/30 rounded-xl">
+                <QrCode size={18} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Chave Pix Oficial para Recebimento das Mensalidades
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Esta é a chave Pix exibida para os condomínios na tela de pagamento e bloqueio.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveBillingSettings} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Tipo da Chave Pix *</label>
+                  <select
+                    value={billingSettings.pixKeyType}
+                    onChange={e => setBillingSettings(prev => ({ ...prev, pixKeyType: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="TELEFONE">Telefone / Celular</option>
+                    <option value="CNPJ">CNPJ</option>
+                    <option value="CPF">CPF</option>
+                    <option value="EMAIL">E-mail</option>
+                    <option value="ALEATORIA">Chave Aleatória (EVP)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Chave Pix *</label>
+                  <input
+                    type="text"
+                    required
+                    value={billingSettings.pixKey}
+                    onChange={e => setBillingSettings(prev => ({ ...prev, pixKey: e.target.value }))}
+                    placeholder="Ex: 73998419901"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Nome do Titular / Razão Social</label>
+                  <input
+                    type="text"
+                    value={billingSettings.holderName}
+                    onChange={e => setBillingSettings(prev => ({ ...prev, holderName: e.target.value }))}
+                    placeholder="Ex: CondoBox Tecnologia Ltda"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Banco / Instituição</label>
+                  <input
+                    type="text"
+                    value={billingSettings.bankName}
+                    onChange={e => setBillingSettings(prev => ({ ...prev, bankName: e.target.value }))}
+                    placeholder="Ex: Nubank / Inter / Itaú"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                {billingSettingsMsg && (
+                  <span className="text-xs font-semibold text-emerald-400">
+                    {billingSettingsMsg}
+                  </span>
+                )}
+                <div className="ml-auto">
+                  <button
+                    type="submit"
+                    disabled={savingBillingSettings}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl font-bold transition flex items-center gap-1.5 shadow-md shadow-purple-950/50"
+                  >
+                    {savingBillingSettings ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                    <span>Salvar Chave Pix Oficial</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* SEÇÃO 4: HISTÓRICO GERAL DE COMPROVANTES & PAGAMENTOS */}
+          {allReceipts.length > 0 && (
+            <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                  <Receipt size={18} className="text-slate-400" />
+                  <span>Histórico Geral de Comprovantes & Pagamentos ({allReceipts.length})</span>
+                </h3>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/70 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                    <tr>
+                      <th className="p-3">Data</th>
+                      <th className="p-3">Condomínio</th>
+                      <th className="p-3">Valor</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Comprovante</th>
+                      <th className="p-3">Observações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {allReceipts.map((r: any) => (
+                      <tr key={r.id} className="hover:bg-slate-800/30 transition text-xs">
+                        <td className="p-3 text-slate-400">
+                          {new Date(r.created_at).toLocaleDateString('pt-BR')}
+                        </td>
+                        <td className="p-3 font-sans font-bold text-white">
+                          {r.condo_name || r.condo_id}
+                        </td>
+                        <td className="p-3 text-emerald-400 font-bold">
+                          {r.amount ? `R$ ${Number(r.amount).toFixed(2)}` : '-'}
+                        </td>
+                        <td className="p-3 font-sans">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                              r.status === 'PAID'
+                                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                : r.status === 'UNDER_REVIEW'
+                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                                : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                            }`}
+                          >
+                            {r.status === 'PAID' ? 'Aprovado' : r.status === 'UNDER_REVIEW' ? 'Em Análise' : 'Rejeitado'}
+                          </span>
+                        </td>
+                        <td className="p-3 font-sans">
+                          {r.receipt_url ? (
+                            <a
+                              href={r.receipt_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-purple-400 hover:underline flex items-center gap-1"
+                            >
+                              <Eye size={12} />
+                              <span>Ver anexo</span>
+                            </a>
+                          ) : (
+                            <span className="text-slate-600">Sem anexo</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-slate-400 font-sans max-w-xs truncate">
+                          {r.notes || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2080,6 +3051,286 @@ export default function SuperAdminPage() {
                 >
                   {createLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                   Criar Condomínio
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ANÁLISE E APROVAÇÃO DE COMPROVANTE (COM ZOOM) */}
+      {selectedReceiptForReview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-2xl w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                  <FileCheck size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Analisar Comprovante de Pagamento</h3>
+                  <p className="text-xs text-slate-400">
+                    Condomínio: <strong className="text-slate-200">{selectedReceiptForReview.condo_name || selectedReceiptForReview.condo_id}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedReceiptForReview(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {reviewMessage && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold ${
+                  reviewMessage.startsWith('✅')
+                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                }`}
+              >
+                {reviewMessage}
+              </div>
+            )}
+
+            {/* Imagem do Comprovante com Zoom */}
+            {selectedReceiptForReview.receipt_url ? (
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-2 flex items-center justify-center max-h-96 overflow-hidden relative group">
+                <img
+                  src={selectedReceiptForReview.receipt_url}
+                  alt="Comprovante de Pagamento"
+                  className="max-h-88 w-auto object-contain rounded-xl shadow-md"
+                />
+                <a
+                  href={selectedReceiptForReview.receipt_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="absolute bottom-4 right-4 px-3 py-1.5 bg-slate-900/90 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-700 shadow-lg backdrop-blur-sm transition"
+                >
+                  <ExternalLink size={13} />
+                  <span>Abrir Original em Nova Aba</span>
+                </a>
+              </div>
+            ) : (
+              <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800 text-slate-500 text-xs">
+                Nenhuma imagem anexada a este registro.
+              </div>
+            )}
+
+            {/* Detalhes do Pagamento */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold uppercase block">Valor Informado:</span>
+                <span className="text-sm font-bold text-emerald-400">
+                  {selectedReceiptForReview.amount ? `R$ ${Number(selectedReceiptForReview.amount).toFixed(2)}` : 'Não especificado'}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold uppercase block">Data de Envio:</span>
+                <span className="text-xs text-slate-200">
+                  {new Date(selectedReceiptForReview.created_at).toLocaleString('pt-BR')}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold uppercase block">Observações:</span>
+                <span className="text-xs text-slate-300 truncate block">
+                  {selectedReceiptForReview.notes || 'Nenhuma'}
+                </span>
+              </div>
+            </div>
+
+            {/* Seletor do Prazo de Extensão ao Aprovar */}
+            <div className="space-y-2">
+              <label className="block text-slate-300 font-bold text-xs">
+                Estender Vigência da Assinatura por:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { days: 30, label: '+30 Dias (1 Mês)' },
+                  { days: 60, label: '+60 Dias (2 Meses)' },
+                  { days: 90, label: '+90 Dias (Trimestral)' },
+                  { days: 365, label: '+365 Dias (1 Ano)' }
+                ].map(opt => (
+                  <button
+                    key={opt.days}
+                    type="button"
+                    onClick={() => setReviewExtensionDays(opt.days)}
+                    className={`p-2.5 rounded-xl border text-xs font-bold transition text-center ${
+                      reviewExtensionDays === opt.days
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-950/40'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Campo Opcional para Motivo de Rejeição */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-400 text-[11px]">
+                Motivo (caso deseje rejeitar o comprovante):
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Valor não identificado no extrato / Comprovante sem autenticação"
+                value={reviewRejectionReason}
+                onChange={e => setReviewRejectionReason(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            {/* Botões de Ação */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={reviewLoading}
+                onClick={() => handleReviewReceipt('APPROVE')}
+                className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 active:scale-95"
+              >
+                {reviewLoading ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                <span>Aprovar Pagamento e Desbloquear (+{reviewExtensionDays} dias)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={reviewLoading}
+                onClick={() => handleReviewReceipt('REJECT')}
+                className="py-3 px-4 bg-slate-950 hover:bg-rose-950/50 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 rounded-xl text-xs font-bold transition"
+              >
+                Rejeitar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ANEXAÇÃO MANUAL DE COMPROVANTE PELO SÓCIO PROPRIETÁRIO */}
+      {isManualReceiptModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                  <UploadCloud size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Anexar Comprovante Manualmente</h3>
+                  <p className="text-xs text-slate-400">
+                    Registre e aprove pagamentos recebidos externamente (WhatsApp/Banco)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsManualReceiptModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {manualMsg && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold ${
+                  manualMsg.startsWith('✅')
+                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                }`}
+              >
+                {manualMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleManualReceiptSubmit} className="space-y-4 text-xs">
+              {/* Seleção do Condomínio */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Selecione o Condomínio *</label>
+                <select
+                  required
+                  value={manualCondoId}
+                  onChange={e => {
+                    const cId = e.target.value;
+                    setManualCondoId(cId);
+                    const sub = financialSubscribers.find(s => s.condoId === cId);
+                    if (sub && sub.monthlyPrice) setManualAmount(String(sub.monthlyPrice));
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">Selecione um condomínio...</option>
+                  {accounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.license?.status || 'SEM STATUS'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Valor Pago e Extensão */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Valor Pago (R$) *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="149,00"
+                    value={manualAmount}
+                    onChange={e => setManualAmount(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Extensão de Vigência</label>
+                  <select
+                    value={manualExtensionDays}
+                    onChange={e => setManualExtensionDays(Number(e.target.value))}
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value={30}>+30 Dias (1 Mês)</option>
+                    <option value={60}>+60 Dias (2 Meses)</option>
+                    <option value={90}>+90 Dias (Trimestral)</option>
+                    <option value={365}>+365 Dias (1 Ano)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Upload do Arquivo */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Foto ou PDF do Comprovante</label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={e => setManualFile(e.target.files?.[0] || null)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-xs file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Observações */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Observações do Recebimento</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Recebido via Pix Banco Inter / Confirmado no extrato"
+                  value={manualNotes}
+                  onChange={e => setManualNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={manualUploading}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 active:scale-95"
+                >
+                  {manualUploading ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                  <span>Salvar, Aprovar e Desbloquear Condomínio</span>
                 </button>
               </div>
             </form>

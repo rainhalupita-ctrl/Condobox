@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createClient } from '../lib/supabase/client';
 import { useAuth } from '../contexts/auth-context';
 import { buildSupportWhatsAppUrl } from '@/lib/support-contacts';
+import { CondoReceiptUploader } from './CondoReceiptUploader';
 import {
   Lock,
   KeyRound,
@@ -210,8 +211,13 @@ export function SubscriptionGate({ children }: Props) {
             </p>
           </div>
 
-          {/* NÚMEROS DO SUPORTE PARA DESBLOQUEIO */}
-          <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-3 text-left">
+        {/* ENVIO DE COMPROVANTE & PIX OFICIAL */}
+        <CondoReceiptUploader
+          condoId={effectiveCondoId || undefined}
+        />
+
+        {/* NÚMEROS DO SUPORTE PARA DESBLOQUEIO */}
+        <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-3 text-left">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
               Contatos de Suporte para Desbloqueio:
             </span>

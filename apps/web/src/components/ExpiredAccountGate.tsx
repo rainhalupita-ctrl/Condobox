@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Lock, PhoneCall, KeyRound, CheckCircle2, RefreshCw, Copy, Check, LogOut, MessageSquare } from 'lucide-react';
 import { buildSupportWhatsAppUrl, SUPPORT_CONTACTS } from '@/lib/support-contacts';
 import { useAuth } from '@/contexts/auth-context';
+import { CondoReceiptUploader } from './CondoReceiptUploader';
 
 interface ExpiredAccountGateProps {
   condoName?: string;
@@ -95,6 +96,12 @@ export function ExpiredAccountGate({ condoName, condoId }: ExpiredAccountGatePro
             O tempo de vigência da sua assinatura ou período de testes no <strong>CondoBox</strong> encerrou. Para liberar o acesso à portaria, encomendas e ao painel, <strong>efetue o pagamento</strong> ou <strong>entre em contato com o suporte para desbloqueio da conta</strong> nos números abaixo:
           </p>
         </div>
+
+        {/* ENVIO DE COMPROVANTE & PIX OFICIAL */}
+        <CondoReceiptUploader
+          condoId={activeCondoId}
+          condoName={condoName}
+        />
 
         {/* CARDS DOS NÚMEROS DE SUPORTE OFICIAIS */}
         <div className="space-y-3 pt-1">
