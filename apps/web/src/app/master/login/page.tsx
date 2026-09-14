@@ -3,24 +3,46 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/auth-context';
 import { ShieldAlert, Lock, Mail, Eye, EyeOff, Loader2, KeyRound, ArrowRight } from 'lucide-react';
 
 function MasterLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/super-admin';
+  const { user, isSuperAdmin, loading: authLoading } = useAuth();
 
   useEffect(() => {
     document.title = 'CondoBox Master - Acesso Exclusivo do Proprietário';
   }, []);
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('klebervenancio2002@icloud.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const supabase = createClient();
+
+  useEffect(() => {
+    if (!authLoading && user && isSuperAdmin) {
+      router.replace(redirectTo || '/super-admin');
+    }
+  }, [authLoading, user, isSuperAdmin, redirectTo, router]);
+
+  if (authLoading || (user && isSuperAdmin)) {
+    return (
+      <div 
+        className="min-h-screen flex flex-col items-center justify-center p-4 text-purple-300 gap-3 select-none"
+        style={{
+          background: 'radial-gradient(ellipse at top, #1e1b4b 0%, #090d16 60%, #020617 100%)',
+        }}
+      >
+        <Loader2 className="w-9 h-9 animate-spin text-purple-500" />
+        <p className="text-xs font-bold text-slate-300">Conectando ao Painel Master...</p>
+      </div>
+    );
+  }
 
   const handleMasterLogin = async (e: React.FormEvent) => {
     e.preventDefault();

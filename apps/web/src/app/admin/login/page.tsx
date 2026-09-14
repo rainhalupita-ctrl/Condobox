@@ -84,8 +84,8 @@ function SyndicLoginForm() {
         return;
       }
 
-      // 2. Validação estrita: Este portal é apenas para Síndicos / Administradores
-      const isSyndicRole = profile?.role === 'SYNDIC' || (profile?.role === 'ADMIN' && profile?.condo_id);
+      // 2. Validação: Este portal é para Síndicos, Administradores e Sócios Proprietários
+      const isSyndicRole = profile?.role === 'SYNDIC' || profile?.role === 'ADMIN' || isMasterOwner;
 
       if (!isSyndicRole) {
         await supabase.auth.signOut();
