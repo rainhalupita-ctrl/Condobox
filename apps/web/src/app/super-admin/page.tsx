@@ -243,6 +243,7 @@ export default function SuperAdminPage() {
   } | null>(null);
   const [purgingStorage, setPurgingStorage] = useState(false);
   const [purgeResultMsg, setPurgeResultMsg] = useState<string | null>(null);
+  const [purgeDaysSelect, setPurgeDaysSelect] = useState<number>(0);
 
   useEffect(() => {
     document.title = 'CondoBox SaaS Master - Painel do Proprietário';
@@ -598,8 +599,12 @@ export default function SuperAdminPage() {
     }
   };
 
-  const handlePurgeStorage = async (days = 30) => {
-    if (!confirm(`Deseja limpar fotos antigas (+${days} dias) do armazenamento em nuvem para garantir custo zero permanente? As encomendas e histórico continuarão 100% salvos no banco.`)) {
+  const handlePurgeStorage = async (days = 0) => {
+    const confirmText = days === 0
+      ? `Deseja realmente apagar TODAS as fotos (${storageQuota?.fileCount || 0} fotos, ${storageQuota?.usedMB || 0} MB) do armazenamento em nuvem para ZERAR o espaço e o contador? As encomendas e o histórico de moradores continuarão 100% salvos no banco.`
+      : `Deseja limpar fotos antigas (+${days} dias) do armazenamento em nuvem para liberar espaço? As encomendas e o histórico continuarão 100% salvos no banco.`;
+
+    if (!confirm(confirmText)) {
       return;
     }
     setPurgingStorage(true);
@@ -1207,20 +1212,35 @@ export default function SuperAdminPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-start md:self-center">
+            <div className="flex items-center gap-2 flex-wrap self-start md:self-center">
+              <select
+                value={purgeDaysSelect}
+                onChange={e => setPurgeDaysSelect(Number(e.target.value))}
+                className="px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 font-semibold focus:outline-none focus:border-rose-500"
+              >
+                <option value={0}>🗑️ Todas as Fotos (Zerar Armazenamento)</option>
+                <option value={7}>Fotos com mais de 7 dias</option>
+                <option value={15}>Fotos com mais de 15 dias</option>
+                <option value={30}>Fotos com mais de 30 dias</option>
+              </select>
+
               <button
                 type="button"
-                onClick={() => handlePurgeStorage(30)}
+                onClick={() => handlePurgeStorage(purgeDaysSelect)}
                 disabled={purgingStorage}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center gap-2 shadow-sm"
-                title="Remove fotos de encomendas entregues criadas há mais de 30 dias para liberar espaço"
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 ${
+                  purgeDaysSelect === 0
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/50'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                }`}
+                title="Executar limpeza do armazenamento em nuvem"
               >
                 {purgingStorage ? (
-                  <Loader2 size={14} className="animate-spin text-purple-400" />
+                  <Loader2 size={14} className="animate-spin text-white" />
                 ) : (
-                  <Trash2 size={14} className="text-rose-400" />
+                  <Trash2 size={14} className={purgeDaysSelect === 0 ? 'text-white' : 'text-rose-400'} />
                 )}
-                <span>Limpar Fotos (+30 dias)</span>
+                <span>{purgeDaysSelect === 0 ? 'Zerar Armazenamento Agora' : 'Limpar Fotos'}</span>
               </button>
             </div>
           </div>

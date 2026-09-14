@@ -39,6 +39,55 @@ function getSupabaseAdmin() {
 }
 
 /**
+ * Lista todos os arquivos recursivamente em um bucket do Supabase Storage.
+ */
+async function listAllStorageFilesRecursive(
+  supabase: any,
+  bucket: string,
+  path = ''
+): Promise<{ fullPath: string; name: string; size: number; createdAt: number }[]> {
+  const result: { fullPath: string; name: string; size: number; createdAt: number }[] = [];
+
+  try {
+    const { data: files, error } = await supabase.storage.from(bucket).list(path, {
+      limit: 1000,
+      sortBy: { column: 'created_at', order: 'asc' },
+    });
+
+    if (error || !files) {
+      if (error) console.warn(`[STORAGE-GUARD] Erro ao listar pasta '${path}' no bucket '${bucket}':`, error.message);
+      return result;
+    }
+
+    for (const f of files) {
+      const fullPath = path ? `${path}/${f.name}` : f.name;
+      // Se id for null ou não tiver metadata.size, trata-se de um diretório/pasta
+      if (f.id === null || !f.metadata) {
+        const subFiles = await listAllStorageFilesRecursive(supabase, bucket, fullPath);
+        result.push(...subFiles);
+      } else {
+        const createdAt = f.created_at
+          ? new Date(f.created_at).getTime()
+          : f.metadata?.lastModified
+          ? new Date(f.metadata.lastModified).getTime()
+          : 0;
+
+        result.push({
+          fullPath,
+          name: f.name,
+          size: Number(f.metadata?.size || 0),
+          createdAt,
+        });
+      }
+    }
+  } catch (err: any) {
+    console.error(`[STORAGE-GUARD] Exceção na listagem recursiva de '${path}':`, err);
+  }
+
+  return result;
+}
+
+/**
  * Consulta a cota atual do bucket 'labels' com verificação da Trava Anti-Cobrança.
  */
 export async function checkStorageGuard(forceRefresh = false): Promise<StorageQuotaStatus> {
@@ -50,35 +99,11 @@ export async function checkStorageGuard(forceRefresh = false): Promise<StorageQu
   const supabase = getSupabaseAdmin();
 
   try {
-    const { data: files, error } = await supabase.storage.from('labels').list('', {
-      limit: 1000,
-      sortBy: { column: 'created_at', order: 'asc' },
-    });
-
-    if (error) {
-      console.warn('[STORAGE-GUARD] Aviso ao listar arquivos do storage:', error.message);
-      // Se der erro ao listar, mantém permissão para não interromper a portaria
-      const fallback: StorageQuotaStatus = {
-        allowed: true,
-        status: 'SAFE',
-        usedBytes: 0,
-        usedMB: 0,
-        limitMB: STORAGE_FREE_LIMIT_MB,
-        percentUsed: 0,
-        fileCount: 0,
-        provider: 'Supabase Storage (labels)',
-        lastChecked: new Date().toISOString(),
-        antiBillingProtectionActive: true,
-        message: 'Não foi possível ler cota exata; operação liberada sob monitoramento.',
-      };
-      return fallback;
-    }
+    const allFiles = await listAllStorageFilesRecursive(supabase, 'labels', '');
 
     let totalBytes = 0;
-    for (const file of files || []) {
-      if (file.metadata?.size) {
-        totalBytes += file.metadata.size;
-      }
+    for (const file of allFiles) {
+      totalBytes += file.size;
     }
 
     const usedMB = Number((totalBytes / (1024 * 1024)).toFixed(2));
@@ -115,7 +140,7 @@ export async function checkStorageGuard(forceRefresh = false): Promise<StorageQu
       usedMB,
       limitMB: STORAGE_FREE_LIMIT_MB,
       percentUsed,
-      fileCount: files?.length || 0,
+      fileCount: allFiles.length,
       provider: 'Supabase Storage (labels)',
       lastChecked: new Date().toISOString(),
       antiBillingProtectionActive: true,
@@ -145,7 +170,7 @@ export async function checkStorageGuard(forceRefresh = false): Promise<StorageQu
 /**
  * Remove fotos de etiquetas antigas do bucket de nuvem para liberar espaço e garantir custo zero permanente.
  * As encomendas continuam cadastradas com todos os dados e histórico intactos no banco!
- * @param maxAgeDays Idade máxima em dias (padrão 30 dias)
+ * @param maxAgeDays Idade máxima em dias (0 = apagar TODAS as fotos / zerar armazenamento)
  */
 export async function purgeOldDeliveredPhotos(maxAgeDays = 30): Promise<{
   purgedCount: number;
@@ -154,33 +179,33 @@ export async function purgeOldDeliveredPhotos(maxAgeDays = 30): Promise<{
   errors: string[];
 }> {
   const supabase = getSupabaseAdmin();
-  const cutoffTime = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   const errors: string[] = [];
 
   // Invalida cache de cota para atualização em tempo real
   cachedQuota = null;
 
   try {
-    // 1. Lista arquivos no bucket 'labels'
-    const { data: files, error: listErr } = await supabase.storage.from('labels').list('', {
-      limit: 1000,
-      sortBy: { column: 'created_at', order: 'asc' },
-    });
+    // 1. Lista todos os arquivos recursivamente no bucket 'labels'
+    const allFiles = await listAllStorageFilesRecursive(supabase, 'labels', '');
 
-    if (listErr || !files) {
-      return { purgedCount: 0, freedBytes: 0, freedMB: 0, errors: [listErr?.message || 'Falha ao listar arquivos'] };
+    if (allFiles.length === 0) {
+      return { purgedCount: 0, freedBytes: 0, freedMB: 0, errors: [] };
     }
 
-    // 2. Filtra arquivos criados há mais de `maxAgeDays` dias
-    const filesToPurge: { name: string; size: number }[] = [];
-    for (const f of files) {
-      if (!f.created_at) continue;
-      const fileCreatedAt = new Date(f.created_at).getTime();
-      if (fileCreatedAt < cutoffTime) {
-        filesToPurge.push({
-          name: f.name,
-          size: f.metadata?.size || 0,
-        });
+    // 2. Filtra arquivos: se maxAgeDays <= 0, seleciona TODAS as fotos para zerar o storage!
+    let filesToPurge: { fullPath: string; size: number }[] = [];
+
+    if (maxAgeDays <= 0) {
+      filesToPurge = allFiles.map(f => ({ fullPath: f.fullPath, size: f.size }));
+    } else {
+      const cutoffTime = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+      for (const f of allFiles) {
+        if (!f.createdAt || f.createdAt < cutoffTime) {
+          filesToPurge.push({
+            fullPath: f.fullPath,
+            size: f.size,
+          });
+        }
       }
     }
 
@@ -188,19 +213,19 @@ export async function purgeOldDeliveredPhotos(maxAgeDays = 30): Promise<{
       return { purgedCount: 0, freedBytes: 0, freedMB: 0, errors: [] };
     }
 
-    // Deleta em lotes de até 100 arquivos
+    // 3. Deleta em lotes de até 100 arquivos usando o caminho relativo completo
     const batchSize = 100;
     let totalPurged = 0;
     let totalFreedBytes = 0;
 
     for (let i = 0; i < filesToPurge.length; i += batchSize) {
       const batch = filesToPurge.slice(i, i + batchSize);
-      const fileNames = batch.map(b => b.name);
+      const filePaths = batch.map(b => b.fullPath);
       const batchBytes = batch.reduce((sum, b) => sum + b.size, 0);
 
-      const { error: removeErr } = await supabase.storage.from('labels').remove(fileNames);
+      const { error: removeErr } = await supabase.storage.from('labels').remove(filePaths);
       if (removeErr) {
-        console.warn('[STORAGE-GUARD] Erro ao deletar lote de fotos antigas:', removeErr.message);
+        console.warn('[STORAGE-GUARD] Erro ao deletar lote de fotos:', removeErr.message);
         errors.push(removeErr.message);
       } else {
         totalPurged += batch.length;
@@ -209,9 +234,10 @@ export async function purgeOldDeliveredPhotos(maxAgeDays = 30): Promise<{
     }
 
     const freedMB = Number((totalFreedBytes / (1024 * 1024)).toFixed(2));
-    console.log(`[STORAGE-GUARD] 🧹 Rotação/Expurgo concluído: ${totalPurged} fotos removidas (${freedMB} MB liberados).`);
+    console.log(`[STORAGE-GUARD] 🧹 Expurgo/Limpeza concluído: ${totalPurged} fotos removidas (${freedMB} MB liberados).`);
 
-    // Atualiza cota pós-expurgo
+    // Invalida cache e recomputa a cota em tempo real
+    cachedQuota = null;
     await checkStorageGuard(true);
 
     return {

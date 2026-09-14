@@ -101,13 +101,17 @@ export async function POST(request: Request) {
     let days = 30;
     try {
       const body = await request.json();
-      if (body.days && typeof body.days === 'number' && body.days >= 1) {
+      if (typeof body.days === 'number' && body.days >= 0) {
         days = body.days;
       }
     } catch {}
 
     const purgeResult = await purgeOldDeliveredPhotos(days);
     const updatedQuota = await checkStorageGuard(true);
+
+    const messageText = days === 0
+      ? `Limpeza concluída com sucesso: ${purgeResult.purgedCount} fotos removidas (armazenamento zerado), liberando ${purgeResult.freedMB} MB.`
+      : `Expurgo concluído com sucesso: ${purgeResult.purgedCount} fotos antigas (+${days} dias) removidas, liberando ${purgeResult.freedMB} MB.`;
 
     return NextResponse.json({
       success: true,
@@ -116,7 +120,7 @@ export async function POST(request: Request) {
       freedMB: purgeResult.freedMB,
       errors: purgeResult.errors,
       quota: updatedQuota,
-      message: `Expurgo concluído com sucesso: ${purgeResult.purgedCount} fotos antigas (+${days} dias) removidas, liberando ${purgeResult.freedMB} MB.`,
+      message: messageText,
     });
   } catch (error: any) {
     console.error('[STORAGE-STATUS API] Erro ao expurgar fotos:', error);
