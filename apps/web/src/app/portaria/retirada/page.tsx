@@ -443,9 +443,52 @@ export default function RetiradaPage() {
             })()}
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Nome da Pessoa que está Retirando:
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Nome da Pessoa que está Retirando:
+                </label>
+              </div>
+
+              {/* Botões de Seleção Rápida: Morador Titular vs. Terceiro Autorizado */}
+              {(() => {
+                const residentName = scannedPackage.resident?.name || scannedPackage.recipient_name_ocr || '';
+                const notes = (scannedPackage as any)?.notes || '';
+                const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n]+)/);
+                const thirdPartyName = match ? match[1].trim() : ((scannedPackage as any)?.delivered_to_name && (scannedPackage as any)?.delivered_to_name !== residentName ? (scannedPackage as any)?.delivered_to_name : '');
+
+                if (!thirdPartyName) return null;
+
+                return (
+                  <div className="flex items-center gap-1.5 mb-2.5 flex-wrap">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase mr-1">Selecionar:</span>
+                    <button
+                      type="button"
+                      onClick={() => setDeliveredToName(residentName)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer border ${
+                        deliveredToName === residentName
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
+                          : 'bg-slate-800 text-slate-300 hover:text-white border-slate-700'
+                      }`}
+                    >
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{residentName} (Próprio Morador)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeliveredToName(thirdPartyName)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer border ${
+                        deliveredToName === thirdPartyName
+                          ? 'bg-purple-600 text-white border-purple-500 shadow-md'
+                          : 'bg-slate-800 text-slate-300 hover:text-white border-slate-700'
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5 text-purple-400" />
+                      <span>{thirdPartyName} (Terceiro)</span>
+                    </button>
+                  </div>
+                );
+              })()}
+
               <input
                 type="text"
                 value={deliveredToName}
