@@ -1125,31 +1125,55 @@ export default function PortariaDashboardPage() {
                 );
               })()}
 
-              {/* Alerta de Terceiro Autorizado para Retirada */}
+              {/* Indicador Claro de Quem Irá Retirar (Próprio Morador vs. Terceiro Autorizado) */}
               {(() => {
                 const notes = (selectedForDelivery as any)?.notes || '';
-                const isTP = notes.includes('TERCEIRO_AUTORIZADO:') || Boolean((selectedForDelivery as any)?.delivered_to_name);
                 const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n]+)/);
+                const residentName = selectedForDelivery.resident?.name || selectedForDelivery.recipient_name_ocr || 'Morador Titular';
+                const isTP = notes.includes('TERCEIRO_AUTORIZADO:') || (Boolean((selectedForDelivery as any)?.delivered_to_name) && (selectedForDelivery as any)?.delivered_to_name !== residentName);
                 const tpText = match ? match[1].trim() : ((selectedForDelivery as any)?.delivered_to_name || '');
-                if (!isTP || !tpText) return null;
+
+                if (isTP && tpText) {
+                  return (
+                    <div className="bg-gradient-to-r from-purple-950/70 to-indigo-950/70 border border-purple-500/40 text-purple-200 text-xs px-3.5 py-2.5 rounded-2xl flex items-start gap-2.5 shadow-lg shadow-purple-950/40 animate-fade-in">
+                      <Users className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                      <div className="leading-snug">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-purple-300">
+                            Retirada por Terceiro Autorizado
+                          </span>
+                          <span className="text-[10px] uppercase font-black bg-purple-500/30 text-purple-200 px-1.5 py-0.5 rounded border border-purple-400/30">
+                            Autorizado
+                          </span>
+                        </div>
+                        <p className="text-white font-black text-sm mt-1">
+                          {tpText}
+                        </p>
+                        <p className="text-[11px] text-purple-300/80 mt-0.5">
+                          O morador autorizou previamente esta pessoa via WhatsApp/Link para retirar esta encomenda.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
-                  <div className="bg-purple-500/15 border border-purple-500/30 text-purple-200 text-xs px-3.5 py-2.5 rounded-2xl flex items-start gap-2.5 animate-fade-in">
-                    <Users className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+                  <div className="bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/30 text-emerald-200 text-xs px-3.5 py-2.5 rounded-2xl flex items-start gap-2.5 shadow-lg shadow-emerald-950/20 animate-fade-in">
+                    <UserCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                     <div className="leading-snug">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-purple-300">
-                          Retirada Autorizada para Terceiro
+                        <span className="font-bold text-emerald-300">
+                          Retirada pelo Próprio Morador
                         </span>
-                        <span className="text-[10px] uppercase font-black bg-purple-500/30 text-purple-200 px-1.5 py-0.5 rounded">
-                          Autorizado
+                        <span className="text-[10px] uppercase font-black bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                          Titular
                         </span>
                       </div>
-                      <p className="text-white font-bold text-xs mt-1">
-                        {tpText}
+                      <p className="text-white font-black text-sm mt-1">
+                        {residentName}
                       </p>
-                      <p className="text-[11px] text-purple-300/80 mt-0.5">
-                        O morador liberou previamente esta retirada na portaria.
+                      <p className="text-[11px] text-emerald-300/80 mt-0.5">
+                        Morador titular cadastrado na unidade.
                       </p>
                     </div>
                   </div>

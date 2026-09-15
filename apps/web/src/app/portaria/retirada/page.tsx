@@ -19,7 +19,8 @@ import {
   Package,
   ShieldCheck,
   RefreshCw,
-  Users
+  Users,
+  UserCheck
 } from 'lucide-react';
 
 export default function RetiradaPage() {
@@ -386,31 +387,55 @@ export default function RetiradaPage() {
               </div>
             </div>
 
-            {/* Informações de Terceiro Autorizado */}
+            {/* Indicador Claro de Quem Irá Retirar (Próprio Morador vs. Terceiro Autorizado) */}
             {(() => {
               const notes = (scannedPackage as any)?.notes || '';
-              const isTP = notes.includes('TERCEIRO_AUTORIZADO:') || Boolean((scannedPackage as any)?.delivered_to_name);
               const match = notes.match(/TERCEIRO_AUTORIZADO:\s*([^|;\n]+)/);
+              const residentName = scannedPackage.resident?.name || scannedPackage.recipient_name_ocr || 'Morador Titular';
+              const isTP = notes.includes('TERCEIRO_AUTORIZADO:') || (Boolean((scannedPackage as any)?.delivered_to_name) && (scannedPackage as any)?.delivered_to_name !== residentName);
               const tpText = match ? match[1].trim() : ((scannedPackage as any)?.delivered_to_name || '');
-              if (!isTP || !tpText) return null;
+
+              if (isTP && tpText) {
+                return (
+                  <div className="p-3.5 bg-gradient-to-r from-purple-950/70 to-indigo-950/70 border border-purple-500/40 rounded-2xl flex items-start gap-3 shadow-lg shadow-purple-950/40 animate-fade-in">
+                    <Users className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-purple-300">
+                          Retirada por Terceiro Autorizado
+                        </span>
+                        <span className="text-[10px] uppercase font-black bg-purple-500/30 text-purple-200 px-2 py-0.5 rounded-md border border-purple-400/30">
+                          Autorizado
+                        </span>
+                      </div>
+                      <p className="text-white font-black mt-1 text-sm">
+                        {tpText}
+                      </p>
+                      <p className="text-[11px] text-purple-300/80 mt-0.5">
+                        O morador autorizou previamente esta pessoa via WhatsApp/Link para retirar esta encomenda.
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
 
               return (
-                <div className="p-3.5 bg-purple-500/15 border border-purple-500/30 rounded-2xl flex items-start gap-3">
-                  <Users className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+                <div className="p-3.5 bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/30 rounded-2xl flex items-start gap-3 shadow-lg shadow-emerald-950/20 animate-fade-in">
+                  <UserCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
                   <div className="text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-purple-300">
-                        Retirada Autorizada para Terceiro
+                      <span className="font-bold text-emerald-300">
+                        Retirada pelo Próprio Morador
                       </span>
-                      <span className="text-[10px] uppercase font-black bg-purple-500/30 text-purple-200 px-2 py-0.5 rounded-md">
-                        Autorizado
+                      <span className="text-[10px] uppercase font-black bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                        Titular
                       </span>
                     </div>
-                    <p className="text-white font-bold mt-1 text-sm">
-                      {tpText}
+                    <p className="text-white font-black mt-1 text-sm">
+                      {residentName}
                     </p>
-                    <p className="text-[11px] text-purple-300/80 mt-0.5">
-                      O morador confirmou previamente a liberação para esta pessoa retirar.
+                    <p className="text-[11px] text-emerald-300/80 mt-0.5">
+                      Morador titular cadastrado na unidade.
                     </p>
                   </div>
                 </div>
