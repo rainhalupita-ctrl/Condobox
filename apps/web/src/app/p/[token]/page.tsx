@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { LocalApiClient } from '../../../lib/local-api';
 import { createClient } from '../../../lib/supabase/client';
+import { openWhatsApp } from '../../../lib/whatsapp-open';
 import {
   Package,
   Building2,
@@ -87,6 +88,19 @@ export default function PublicPackagePage() {
         name: match[1].trim(),
         relation: match[2]?.trim() || '',
       };
+    }
+    return null;
+  };
+
+  const getThirdPartyPhone = () => {
+    const docDigits = (thirdPartyDoc || '').replace(/\D/g, '');
+    if (docDigits.length >= 10) return docDigits;
+    if (pkg?.notes) {
+      const match = pkg.notes.match(/TERCEIRO_AUTORIZADO:.*?\(Doc\/Tel:\s*([^)]+)\)/i);
+      if (match) {
+        const matchDigits = match[1].replace(/\D/g, '');
+        if (matchDigits.length >= 10) return matchDigits;
+      }
     }
     return null;
   };
@@ -593,17 +607,24 @@ export default function PublicPackagePage() {
                         </span>
                       </div>
                     </div>
-                    <a
-                      href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                        `Olá! 👋 Autorizei você a retirar minha encomenda da *${pkg.carrier || 'Transportadora'}* na portaria do condomínio.\n\n🔑 *Código de Retirada:* *${pkg.pickup_code}*\n📱 *Apresente este link/QR Code na portaria:*\n${typeof window !== 'undefined' ? window.location.href : ''}`
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const shareText =
+                          `Olá! 👋 Autorizei você a retirar minha encomenda da *${pkg.carrier || 'Transportadora'}* na portaria do condomínio.\n\n` +
+                          `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n` +
+                          `📱 *Apresente este link/QR Code na portaria:*\n` +
+                          `${typeof window !== 'undefined' ? window.location.href : ''}`;
+                        openWhatsApp({
+                          phone: getThirdPartyPhone(),
+                          text: shareText
+                        });
+                      }}
                       className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition shrink-0 flex items-center gap-1.5 text-xs font-bold shadow-md shadow-indigo-950 cursor-pointer active:scale-95"
                       title="Encaminhar pelo WhatsApp"
                     >
                       <Share2 className="w-3.5 h-3.5" /> Enviar QR
-                    </a>
+                    </button>
                   </div>
                 )}
 
@@ -901,6 +922,39 @@ export default function PublicPackagePage() {
               )}
             </div>
 
+            {/* Botão de contestação caso a encomenda NÃO seja do morador (antes da retirada) */}
+            {!isDelivered && (
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!targetWhatsappPhone) {
+                      alert('A portaria ainda não conectou o WhatsApp via QR Code no sistema.');
+                      return;
+                    }
+                    const rawBlock = pkg.unit?.block || '';
+                    const blockText = rawBlock
+                      ? (rawBlock.toLowerCase().startsWith('bloco') ? rawBlock : `Bloco ${rawBlock}`)
+                      : '';
+                    const aptoText = pkg.unit?.unit_number ? `Apto ${pkg.unit.unit_number}` : '';
+                    const unitText = [blockText, aptoText].filter(Boolean).join(' - ') || 'Minha Unidade';
+                    const contestText =
+                      `⚠️ *NÃO RECONHEÇO ESTA ENCOMENDA*\n\n` +
+                      `Olá, recebi a notificação da encomenda da *${pkg?.carrier || 'encomenda'}* (Código: *${pkg?.pickup_code}*, Destinatário: *${pkg?.recipient_name}*, Unidade: *${unitText}*), mas *NÃO RECONHEÇO ESSA ENCOMENDA / NÃO PEDI NADA*!\n\n` +
+                      `Por favor, peço conferir na portaria.`;
+                    openWhatsApp({
+                      phone: targetWhatsappPhone,
+                      text: contestText
+                    });
+                  }}
+                  className="text-xs text-rose-400/85 hover:text-rose-300 underline underline-offset-4 transition py-1 px-3 inline-flex items-center gap-1.5 cursor-pointer font-medium"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Não reconhece esta encomenda? Avise a portaria</span>
+                </button>
+              </div>
+            )}
+
             {/* Botões de Ação quando Entregue - Conforme solicitado pelo usuário */}
             {isDelivered && (
               <div className="flex flex-col gap-3 mt-4 w-full animate-fade-in">
@@ -914,22 +968,26 @@ export default function PublicPackagePage() {
                 </button>
                 
                 {/* Botão Não fiz a retirada - Fundo Vermelho Vibrante, Texto Branco */}
-                <a
-                  href={targetWhatsappPhone ? `https://wa.me/${targetWhatsappPhone}?text=${encodeURIComponent(
-                    `⚠️ *CONTESTAÇÃO DE RETIRADA*\n\nOlá, consta no sistema que a minha encomenda de *${pkg?.carrier || 'encomenda'}* (Código: *${pkg?.pickup_code}*, Destinatário: *${pkg?.recipient_name}*, Unidade: *${pkg?.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'minha unidade'}*) foi registrada como retirada, mas eu *NÃO FIZ A RETIRADA*!\n\nSolicito verificar na portaria com urgência.`
-                  )}` : '#'}
-                  onClick={(e) => {
+                <button
+                  type="button"
+                  onClick={() => {
                     if (!targetWhatsappPhone) {
-                      e.preventDefault();
                       alert('A portaria ainda não conectou o WhatsApp via QR Code no sistema.');
+                      return;
                     }
+                    const contestText =
+                      `⚠️ *CONTESTAÇÃO DE RETIRADA*\n\n` +
+                      `Olá, consta no sistema que a minha encomenda de *${pkg?.carrier || 'encomenda'}* (Código: *${pkg?.pickup_code}*, Destinatário: *${pkg?.recipient_name}*, Unidade: *${pkg?.unit ? `${pkg.unit.block} - Apto ${pkg.unit.unit_number}` : 'minha unidade'}*) foi registrada como retirada, mas eu *NÃO FIZ A RETIRADA*!\n\n` +
+                      `Solicito verificar na portaria com urgência.`;
+                    openWhatsApp({
+                      phone: targetWhatsappPhone,
+                      text: contestText
+                    });
                   }}
-                  target={targetWhatsappPhone ? '_blank' : undefined}
-                  rel="noopener noreferrer"
                   className="w-full flex items-center justify-center py-4 px-6 bg-[#EF4444] hover:bg-[#DC2626] active:scale-[0.98] text-white rounded-2xl font-black text-base transition-all shadow-xl shadow-red-500/25 tracking-wide cursor-pointer"
                 >
                   Não fiz a retirada
-                </a>
+                </button>
               </div>
             )}
 
