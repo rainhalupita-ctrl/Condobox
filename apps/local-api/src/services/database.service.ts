@@ -674,6 +674,119 @@ export class DatabaseService {
     };
   }
 
+  public async authorizeThirdPartyByPhone(
+    phone: string,
+    thirdPartyName: string,
+    thirdPartyRelation?: string | null,
+    mentionedCode?: string | null
+  ): Promise<{ pkg?: any; pkgs: any[]; alreadyAuthorized?: boolean } | null> {
+    const clean = phone.replace(/\D/g, '');
+    const pendingDelivery = await this.getPendingPackagesForPhone(clean, mentionedCode);
+
+    if (pendingDelivery.length === 0) {
+      console.log(`ℹ️ [DatabaseService] Nenhuma encomenda pendente encontrada para autorizar terceiro (${clean}).`);
+      return null;
+    }
+
+    let targetPkgs: any[] = [];
+    if (mentionedCode) {
+      const matched = pendingDelivery.find(p => p.pickup_code === mentionedCode || p.pickup_code?.toUpperCase() === mentionedCode.toUpperCase());
+      if (!matched) return null;
+      targetPkgs = [matched];
+    } else {
+      targetPkgs = pendingDelivery;
+    }
+
+    const nowIso = new Date().toISOString();
+    const relationPart = thirdPartyRelation ? ` (${thirdPartyRelation})` : '';
+    const noteEntry = `TERCEIRO_AUTORIZADO: ${thirdPartyName}${relationPart} via WhatsApp em ${nowIso}`;
+
+    for (const row of targetPkgs) {
+      let updatedNotes = row.notes || '';
+      updatedNotes = updatedNotes ? `${updatedNotes} | ${noteEntry}` : noteEntry;
+      if (!updatedNotes.includes('CIENTE:')) {
+        updatedNotes = `${updatedNotes};CIENTE:${nowIso}`;
+      }
+      row.notes = updatedNotes;
+      row.delivered_to_name = thirdPartyName;
+
+      // 1. Atualiza SQLite local
+      try {
+        this.db.prepare(`
+          UPDATE packages
+          SET status = CASE WHEN status = 'RECEIVED' THEN 'NOTIFIED' ELSE status END,
+              notes = ?,
+              delivered_to_name = ?,
+              sync_status = 'PENDING'
+          WHERE id = ?
+        `).run(updatedNotes, thirdPartyName, row.id);
+      } catch {}
+
+      // 2. Sincroniza com Supabase e Realtime
+      try {
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          const client = supabaseService.getClient();
+          await client
+            .from('packages')
+            .update({
+              notes: updatedNotes,
+              delivered_to_name: thirdPartyName,
+              status: row.status === 'RECEIVED' ? 'NOTIFIED' : row.status
+            })
+            .eq('id', row.id);
+
+          // Broadcast para atualizar telas abertas da portaria instantaneamente
+          try {
+            const bridge = client.channel('packages-morador-live');
+            bridge.subscribe((status: string) => {
+              if (status === 'SUBSCRIBED') {
+                bridge.send({
+                  type: 'broadcast',
+                  event: 'package-authorized',
+                  payload: {
+                    packageId: row.id,
+                    pickupCode: row.pickup_code,
+                    isThirdParty: true,
+                    thirdPartyName,
+                    notes: updatedNotes
+                  }
+                }).catch(() => {});
+                setTimeout(() => {
+                  try { client.removeChannel(bridge); } catch {}
+                }, 1000);
+              }
+            });
+          } catch {}
+        }
+      } catch (err: any) {
+        console.warn('[DatabaseService] Erro ao sincronizar autorização de terceiro no Supabase:', err.message);
+      }
+    }
+
+    const finalPkgs = targetPkgs.map(row => {
+      const local = this.getPackageById(row.id);
+      if (local) return local;
+      return {
+        id: row.id,
+        pickup_code: row.pickup_code,
+        qr_token: row.qr_token || row.pickup_code,
+        carrier: row.carrier,
+        recipient_name_ocr: row.recipient_name_ocr || row.resident?.name,
+        notes: row.notes,
+        delivered_to_name: thirdPartyName,
+        status: 'NOTIFIED',
+        resident: row.resident
+      };
+    });
+
+    return {
+      pkg: finalPkgs[0],
+      pkgs: finalPkgs,
+      alreadyAuthorized: false
+    };
+  }
+
   public async contestPackageByPhone(
     phone: string,
     reason: string,

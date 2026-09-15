@@ -269,7 +269,11 @@ export class QueueConsumerService {
       ``,
       `Uma encomenda da *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitInfo}*).`,
       ``,
-      `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*`,
+      `💬 *Por favor, responda quem irá retirar:*`,
+      `• Se for você mesmo: responda *"Eu mesmo"* ou *"OK"*`,
+      `• Se for outra pessoa: responda ex: *"Quem vai buscar é minha esposa Maria"* ou *"Pode entregar para o Carlos"*`,
+      ``,
+      `Assim que você responder, seu Código e QR Code de Retirada serão liberados automaticamente! 🔑`,
       ``,
       `🏢 Portaria do Condomínio`
     ].join('\n');

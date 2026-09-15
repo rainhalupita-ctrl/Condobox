@@ -69,7 +69,10 @@ export async function POST(
       const messageText = `📦 *NOVA ENCOMENDA CHEGOU NA PORTARIA!*\n\n` +
         `Olá, *${name}*! 👋\n\n` +
         `Uma encomenda da *${pkg.carrier || 'Transportadora'}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
-        `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar e liberar seu QR Code de Retirada.*\n\n` +
+        `💬 *Por favor, responda quem irá retirar:*\n` +
+        `• Se for você mesmo: responda *"Eu mesmo"* ou *"OK"*\n` +
+        `• Se for outra pessoa: responda ex: *"Quem vai buscar é minha esposa Maria"* ou *"Pode entregar para o Carlos"*\n\n` +
+        `Assim que você responder, seu Código e QR Code de Retirada serão liberados automaticamente! 🔑\n\n` +
         `🏢 Portaria do Condomínio`;
 
       const evoRes = await fetch(`${evolutionUrl.replace(/\/$/, '')}/message/sendText/${instance}`, {

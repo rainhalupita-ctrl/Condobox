@@ -608,7 +608,10 @@ export class WhatsAppEngineService {
       `Olá, *${params.residentName}*! 👋\n\n` +
       `Uma encomenda da *${params.carrier}* acabou de ser recebida na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
       `📸 *Foto da etiqueta anexada acima.*\n\n` +
-      `💬 *Por favor, responda esta mensagem (ex: "OK" ou "Ciente") para confirmar que você tem ciência dessa encomenda e liberar seu Código e QR Code de Retirada.*\n\n` +
+      `💬 *Por favor, responda quem irá retirar:*\n` +
+      `• Se for você mesmo: responda *"Eu mesmo"* ou *"OK"*\n` +
+      `• Se for outra pessoa: responda ex: *"Quem vai buscar é minha esposa Maria"* ou *"Pode entregar para o Carlos"*\n\n` +
+      `Assim que você responder, seu Código e QR Code de Retirada serão liberados automaticamente! 🔑\n\n` +
       `🏢 Portaria do Condomínio${adFooter}`;
 
     // Simulação humanizada de digitação ("digitando...")
@@ -1160,7 +1163,74 @@ export class WhatsAppEngineService {
       return;
     }
 
-    // 👍 CASO 3: CONFIRMAÇÃO DE CIÊNCIA
+    // 🤝 CASO 3: AUTORIZAÇÃO DE RETIRADA POR TERCEIRO ("Quem vai buscar é minha esposa Maria", "Pode entregar pro Carlos")
+    if (aiResult.intent === 'AUTHORIZE_THIRD_PARTY') {
+      const thirdPartyName = aiResult.thirdPartyName || 'Pessoa Autorizada';
+      const thirdPartyRelation = aiResult.thirdPartyRelation || null;
+
+      const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
+      if (!aiResult.extractedCode && !codeFromText && Date.now() - lastAck < 15000) {
+        this.logToFile(`⏳ Ignorando autorização de terceiro duplicada em rajada de ${cleanPhone} (<15s).`);
+        return;
+      }
+
+      this.logToFile(`Processando autorização de terceiro (${thirdPartyName}) para ${cleanPhone}...`);
+      const result = await databaseService.authorizeThirdPartyByPhone(
+        cleanPhone,
+        thirdPartyName,
+        thirdPartyRelation,
+        aiResult.extractedCode || codeFromText
+      );
+
+      const pkgs: any[] = result?.pkgs && result.pkgs.length > 0
+        ? result.pkgs
+        : (result?.pkg ? [result.pkg] : (pendingPkgs || []));
+
+      if (pkgs.length > 0) {
+        this.acknowledgmentCooldown.set(cleanPhone, Date.now());
+
+        const relationLabel = thirdPartyRelation ? ` (${thirdPartyRelation})` : '';
+        let replyText = '';
+
+        if (pkgs.length === 1) {
+          const pkg = pkgs[0];
+          const token = pkg.qr_token || pkg.pickup_code;
+          const pickupUrl = `${webBaseUrl}/p/${token}`;
+          const carrierName = pkg.carrier || 'Encomenda';
+
+          replyText =
+            `🤝 *RETIRADA POR TERCEIRO AUTORIZADA!*\n\n` +
+            `Olá, *${residentName}*! 👋\n\n` +
+            `Registramos no sistema da portaria que *${thirdPartyName}*${relationLabel} está autorizado(a) a retirar sua encomenda da *${carrierName}*.\n\n` +
+            `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
+            `📱 *Link do QR Code para repassar ao terceiro:*\n${pickupUrl}\n\n` +
+            `🏢 A pessoa autorizada só precisa apresentar este código ou QR Code no balcão da portaria.`;
+        } else {
+          const listItems = pkgs.map((pkg, idx) => {
+            const token = pkg.qr_token || pkg.pickup_code;
+            const pickupUrl = `${webBaseUrl}/p/${token}`;
+            const carrier = pkg.carrier || 'Encomenda';
+            return `📦 *${idx + 1}. ${carrier}*\n🔑 *Código:* *${pkg.pickup_code}*\n📱 *QR Code:* ${pickupUrl}`;
+          }).join('\n\n');
+
+          replyText =
+            `🤝 *RETIRADA POR TERCEIRO AUTORIZADA!*\n\n` +
+            `Olá, *${residentName}*! 👋\n\n` +
+            `Registramos no sistema da portaria que *${thirdPartyName}*${relationLabel} está autorizado(a) a retirar suas *${pkgs.length} encomendas*.\n\n` +
+            `Aqui estão os dados e links para você repassar à pessoa autorizada:\n\n` +
+            `${listItems}\n\n` +
+            `🏢 A pessoa autorizada só precisa apresentar os códigos ou QR Codes na portaria para retirar.`;
+        }
+
+        await this.sendWhatsAppReply(remoteJid, cleanPhone, replyText);
+        this.logToFile(`✅ Autorização de terceiro (${thirdPartyName}) registrada e enviada para ${cleanPhone}.`);
+      } else {
+        this.logToFile(`ℹ️ [Silenciado] Nenhuma encomenda pendente para autorizar terceiro de ${cleanPhone}.`);
+      }
+      return;
+    }
+
+    // 👍 CASO 4: CONFIRMAÇÃO DE CIÊNCIA (RETIRADA PESSOAL / OK / JÁ VOU BUSCAR)
     if (aiResult.intent === 'CONFIRM_SCIENCE') {
       const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
       // Cooldown de 15s apenas para evitar envios duplicados em rajada acidental

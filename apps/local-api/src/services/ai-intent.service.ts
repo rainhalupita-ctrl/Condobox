@@ -2,13 +2,15 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env.js';
 import { databaseService } from './database.service.js';
 
-export type AIIntentCategory = 'CONFIRM_SCIENCE' | 'CONTEST_PACKAGE' | 'REQUEST_CODE' | 'UNRELATED';
+export type AIIntentCategory = 'CONFIRM_SCIENCE' | 'AUTHORIZE_THIRD_PARTY' | 'CONTEST_PACKAGE' | 'REQUEST_CODE' | 'UNRELATED';
 
 export interface AIIntentResult {
   intent: AIIntentCategory;
   confidence: number;
   reasoning: string;
   extractedCode: string | null;
+  thirdPartyName?: string | null;
+  thirdPartyRelation?: string | null;
   conciergeAlert?: string | null;
   source: 'groq' | 'gemini' | 'nvidia' | 'heuristic' | 'learned_cache';
 }
@@ -29,34 +31,53 @@ interface LearnedPatternItem {
 }
 
 const SYSTEM_PROMPT = `Você é o classificador de inteligência artificial da portaria inteligente CondoBox.
-Sua função é analisar as mensagens enviadas por moradores pelo WhatsApp após serem notificados sobre encomendas na portaria.
+Sua função é analisar as mensagens enviadas por moradores pelo WhatsApp após serem notificados sobre encomendas na portaria e perguntados sobre QUEM irá retirar o pacote.
 
-Classifique a mensagem do morador ESTRITAMENTE em uma destas 4 categorias:
+Classifique a mensagem do morador ESTRITAMENTE em uma destas 5 categorias:
 
 1. "CONFIRM_SCIENCE":
-   O morador confirma ciência, agradece, informa que vai retirar ou recebeu a notificação.
-   Exemplos: "ok", "obrigado", "obrigada", "ciente", "estou ciente", "valeu", "vlw", "já vou buscar", "tô descendo", "vou pegar mais tarde", "show", "beleza", "blz", "👍", "confirmado", "sim", "entendido".
+   O morador confirma ciência e informa que ELE MESMO vai retirar ("eu mesmo", "eu mesma", "vou buscar pessoalmente"), ou envia confirmação/agradecimento simples.
+   Exemplos: "eu mesmo", "eu mesma", "vou eu", "eu que vou buscar", "ok", "obrigado", "obrigada", "ciente", "estou ciente", "valeu", "vlw", "já vou buscar", "tô descendo", "vou pegar mais tarde", "show", "beleza", "blz", "👍", "confirmado", "sim", "entendido".
 
-2. "CONTEST_PACKAGE":
+2. "AUTHORIZE_THIRD_PARTY":
+   O morador informa que OUTRA PESSOA (esposa, marido, filho, filha, mãe, pai, irmão, vizinho, amigo, diarista, funcionário ou terceiro) vai buscar/retirar a encomenda, ou autoriza a entrega para outra pessoa.
+   Exemplos:
+   - "Quem vai buscar é minha esposa Maria"
+   - "Pode entregar para o Carlos"
+   - "Meu filho João vai retirar"
+   - "Minha diarista Solange vai pegar hoje à tarde"
+   - "Vou pedir pro meu irmão Pedro buscar"
+   - "Liberado para o Lucas"
+   - "Autorizo a Mariana a retirar"
+   - "Minha vizinha do 402 vai pegar pra mim"
+   - "Pode entregar pro meu marido"
+   Para AUTHORIZE_THIRD_PARTY, você DEVE extrair:
+   - "thirdPartyName": Nome próprio da pessoa indicada (ex: "Maria", "Carlos", "João", "Solange", "Pedro"). Se o morador não informar o nome próprio, use a relação com a primeira letra maiúscula (ex: "Esposa", "Marido", "Filho").
+   - "thirdPartyRelation": Grau de parentesco ou vínculo se mencionado (ex: "esposa", "marido", "filho", "filha", "mãe", "pai", "irmão", "amigo", "vizinho", "diarista"), ou null se não houver.
+
+3. "CONTEST_PACKAGE":
    O morador afirma que NÃO tem ciência, NÃO pediu nada, NÃO reconhece o pacote, que não é dele, que veio errado, que houve engano, que não comprou nada, OU afirma que NÃO realizou a retirada ("não fiz a retirada", "não retirei", "não fui eu quem retirou", etc.).
    Exemplos: "não tenho ciência disso", "não é meu", "não é minha", "não pedi nada", "encomenda errada", "deve ser engano", "estou fora e não comprei nada", "veio errado", "não sou eu", "não reconheço esse pacote", "número errado", "não fiz a retirada", "não retirei", "consta como retirada mas não fui eu", "contestação de retirada".
 
-3. "REQUEST_CODE":
+4. "REQUEST_CODE":
    O morador pede o código de retirada, link do QR Code ou como retirar.
    Exemplos: "qual meu código?", "manda o qr code", "perdi o código", "onde vejo o código?", "como retiro?".
 
-4. "UNRELATED":
-   A mensagem NÃO é sobre ciência da encomenda nem contestação. Trata de outros assuntos condominiais (garagem, vaga, portão, interfone, síndico, boleto, visita, diarista, ou saudação isolada como "bom dia", "olá").
-   Exemplos: "Tem vaga de visitante?", "O portão abriu?", "Bom dia", "Autorizo a diarista", "Qual o ramal do síndico?".
+5. "UNRELATED":
+   A mensagem NÃO é sobre ciência da encomenda nem contestação. Trata de outros assuntos condominiais (garagem, vaga, portão, interfone, síndico, boleto, visita ou saudação isolada como "bom dia", "olá").
+   Exemplos: "Tem vaga de visitante?", "O portão abriu?", "Bom dia", "Qual o ramal do síndico?".
 
 IMPORTANTE:
+- Se for "AUTHORIZE_THIRD_PARTY", extraia rigorosamente "thirdPartyName" e "thirdPartyRelation".
 - Se for "CONTEST_PACKAGE", formule um resumo claro no campo "conciergeAlert" para alertar o porteiro (ex: "Morador alega que não reconhece o pacote e não pediu nada").
 - Retorne EXCLUSIVAMENTE um objeto JSON válido, sem formatação markdown em volta:
 {
-  "intent": "CONFIRM_SCIENCE" | "CONTEST_PACKAGE" | "REQUEST_CODE" | "UNRELATED",
+  "intent": "CONFIRM_SCIENCE" | "AUTHORIZE_THIRD_PARTY" | "CONTEST_PACKAGE" | "REQUEST_CODE" | "UNRELATED",
   "confidence": 0.0 a 1.0,
   "reasoning": "breve explicação",
   "extractedCode": "código alfanumérico se o morador digitou, ou null",
+  "thirdPartyName": "Nome da pessoa se for AUTHORIZE_THIRD_PARTY, ou null",
+  "thirdPartyRelation": "Grau de parentesco ou vínculo se houver, ou null",
   "conciergeAlert": "resumo do alerta se for contestação, ou null"
 }`;
 
@@ -209,9 +230,16 @@ export class AIIntentService {
       { key: 'passo ai mais tarde', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
       { key: 'passo ai', intent: 'CONFIRM_SCIENCE', reasoning: 'Ciência com retirada posterior' },
       { key: 'pode deixar', intent: 'CONFIRM_SCIENCE', reasoning: 'Afirmação de responsabilidade de retirada' },
-      { key: 'minha esposa vai retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
-      { key: 'meu marido vai retirar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
-      { key: 'meu filho vai buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'eu mesmo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador confirma retirada pessoal' },
+      { key: 'eu mesma', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador confirma retirada pessoal' },
+      { key: 'eu mesmo vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador confirma retirada pessoal' },
+      { key: 'eu que vou buscar', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador confirma retirada pessoal' },
+      { key: 'vou eu mesmo', intent: 'CONFIRM_SCIENCE', reasoning: 'Morador confirma retirada pessoal' },
+      { key: 'minha esposa vai retirar', intent: 'AUTHORIZE_THIRD_PARTY', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'meu marido vai retirar', intent: 'AUTHORIZE_THIRD_PARTY', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'meu filho vai buscar', intent: 'AUTHORIZE_THIRD_PARTY', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'minha filha vai buscar', intent: 'AUTHORIZE_THIRD_PARTY', reasoning: 'Terceiro autorizado para retirada' },
+      { key: 'pode entregar para terceiro', intent: 'AUTHORIZE_THIRD_PARTY', reasoning: 'Terceiro autorizado para retirada' },
       { key: 'emoji_positivo', intent: 'CONFIRM_SCIENCE', reasoning: 'Emoji positivo de confirmação de ciência' },
 
       // 2. Contestação de Encomenda / Não Ciência ("não", "não é meu", "não reconheço")
@@ -290,12 +318,13 @@ export class AIIntentService {
 
     for (const seed of seeds) {
       const normKey = AIIntentService.normalize(seed.key);
-      if (!this.memoryCache.has(normKey)) {
+      const existing = this.memoryCache.get(normKey);
+      if (!existing || existing.intent !== seed.intent) {
         this.memoryCache.set(normKey, {
           intent: seed.intent,
           confidence: 0.98,
           reasoning: seed.reasoning,
-          hits: 1
+          hits: existing?.hits || 1
         });
         databaseService.saveLearnedPattern(normKey, seed.intent, 0.98, seed.reasoning, 'system_seed');
       }
@@ -330,11 +359,14 @@ export class AIIntentService {
     const cached = this.checkLearnedCache(normalized, trimmed);
     if (cached) {
       console.log(`⚡ [AIIntent: CACHE] Padrão "${normalized}" já aprendido! [${cached.intent}] (Hits: ${cached.hits})`);
+      const extractedThirdParty = cached.intent === 'AUTHORIZE_THIRD_PARTY' ? this.extractThirdParty(trimmed, normalized) : null;
       return {
         intent: cached.intent,
         confidence: cached.confidence,
         reasoning: `Padrão aprendido previamente (${cached.reasoning})`,
         extractedCode: extractedCode || null,
+        thirdPartyName: extractedThirdParty?.name || null,
+        thirdPartyRelation: extractedThirdParty?.relation || null,
         conciergeAlert:
           cached.intent === 'CONTEST_PACKAGE'
             ? `Morador informou no WhatsApp: "${trimmed}"`
@@ -368,6 +400,15 @@ export class AIIntentService {
         }
 
         if (result) {
+          // Garante extração de nome do terceiro caso a LLM não tenha retornado o campo
+          if (result.intent === 'AUTHORIZE_THIRD_PARTY' && !result.thirdPartyName) {
+            const fallbackThird = this.extractThirdParty(trimmed, normalized);
+            if (fallbackThird) {
+              result.thirdPartyName = fallbackThird.name;
+              result.thirdPartyRelation = fallbackThird.relation || result.thirdPartyRelation;
+            }
+          }
+
           // Se a IA classificou com alta confiança e a mensagem é concisa, aprende o padrão
           if (result.confidence >= 0.8 && normalized.length <= 120) {
             this.learnPattern(normalized, result.intent, result.confidence, result.reasoning);
@@ -387,11 +428,14 @@ export class AIIntentService {
     const learnedFallback = this.findLearnedPatternFlexible(normalized);
     if (learnedFallback) {
       console.log(`🧠 [AIIntent: APRENDIZADO IA OFFLINE] Intenção identificada via aprendizado prévio das IAs: "${learnedFallback.matchedKey}" -> ${learnedFallback.item.intent} (Hits: ${learnedFallback.item.hits})`);
+      const extractedThirdParty = learnedFallback.item.intent === 'AUTHORIZE_THIRD_PARTY' ? this.extractThirdParty(trimmed, normalized) : null;
       return {
         intent: learnedFallback.item.intent,
         confidence: Math.max(learnedFallback.item.confidence, 0.94),
         reasoning: `[Aprendizado Prévio das IAs] Reconhecido padrão "${learnedFallback.matchedKey}" (${learnedFallback.item.reasoning})`,
         extractedCode: extractedCode || null,
+        thirdPartyName: extractedThirdParty?.name || null,
+        thirdPartyRelation: extractedThirdParty?.relation || null,
         conciergeAlert:
           learnedFallback.item.intent === 'CONTEST_PACKAGE'
             ? `Morador informou no WhatsApp: "${trimmed}"`
@@ -457,12 +501,14 @@ export class AIIntentService {
     // 2. Agrupa os padrões aprendidos por intenção
     const contestationPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
     const requestCodePatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
+    const thirdPartyPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
     const confirmPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
     const unrelatedPatterns: Array<{ key: string; item: LearnedPatternItem }> = [];
 
     for (const [key, item] of this.memoryCache.entries()) {
       if (item.intent === 'CONTEST_PACKAGE') contestationPatterns.push({ key, item });
       else if (item.intent === 'REQUEST_CODE') requestCodePatterns.push({ key, item });
+      else if (item.intent === 'AUTHORIZE_THIRD_PARTY') thirdPartyPatterns.push({ key, item });
       else if (item.intent === 'CONFIRM_SCIENCE') confirmPatterns.push({ key, item });
       else if (item.intent === 'UNRELATED') unrelatedPatterns.push({ key, item });
     }
@@ -498,10 +544,19 @@ export class AIIntentService {
       }
     }
 
-    // 2.3 PRIORIDADE 3: CONFIRMAÇÃO DE CIÊNCIA / PRONTIDÃO
+    // 2.3 PRIORIDADE 3: AUTORIZAÇÃO DE TERCEIRO / CONFIRMAÇÃO DE CIÊNCIA
     // Se a mensagem contiver negações suspeitas (ex: "nao e meu ok"), NÃO casa como confirmação
     const hasSuspectNegation = /\b(nao|não|nem|nunca|errado|engano|rejeit|recus)\b/i.test(normalized);
     if (!hasSuspectNegation) {
+      thirdPartyPatterns.sort((a, b) => b.key.length - a.key.length);
+      for (const p of thirdPartyPatterns) {
+        if (matchesPattern(p.key)) {
+          p.item.hits += 1;
+          databaseService.incrementPatternHits(p.key);
+          return { matchedKey: p.key, item: p.item };
+        }
+      }
+
       confirmPatterns.sort((a, b) => b.key.length - a.key.length);
       for (const p of confirmPatterns) {
         if (matchesPattern(p.key)) {
@@ -712,12 +767,166 @@ export class AIIntentService {
   }
 
   /**
+   * Extrai com alta precisão o nome e o grau de parentesco / relação
+   * de frases em português que indicam a retirada por terceiro.
+   */
+  public extractThirdParty(rawText: string, normalizedText?: string): { name: string; relation: string | null } | null {
+    const raw = rawText.trim();
+    const norm = (normalizedText || AIIntentService.normalize(raw)).trim();
+
+    // Se o morador disse expressamente que é ele mesmo, não é terceiro
+    if (/\b(eu mesmo|eu mesma|eu proprio|eu propria|vou eu|eu que vou|eu quem vou|pessoalmente)\b/i.test(norm)) {
+      return null;
+    }
+
+    const relationKeywords = [
+      'esposa', 'esposo', 'marido', 'filho', 'filha', 'mae', 'mãe', 'pai',
+      'irmao', 'irmão', 'irma', 'irmã', 'sobrinho', 'sobrinha', 'primo', 'prima',
+      'tio', 'tia', 'namorado', 'namorada', 'noivo', 'noiva', 'sogro', 'sogra',
+      'cunhado', 'cunhada', 'diarista', 'secretaria', 'secretária', 'vizinho',
+      'vizinha', 'amigo', 'amiga', 'porteiro', 'zelador', 'faxineira', 'terceiro'
+    ];
+
+    const cleanName = (str: string): string => {
+      let cleaned = str
+        .replace(/^(?:o|a|os|as|meu|minha|o meu|a minha|um|uma|sr|sra|dona|seu)\s+/i, '')
+        .replace(/\b(?:vai|que vai|pode|pra|para|buscar|retirar|pegar|hoje|depois|mais tarde|a tarde|amanha|amanhã|ok|obrigado|obrigada|valeu|por favor)\b.*/gi, '')
+        .replace(/[^\w\sÀ-ÿ]/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return cleaned
+        .split(' ')
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+    };
+
+    // Padrão 1: "Quem vai buscar é minha esposa Maria" / "Quem vai pegar é o Carlos"
+    const quemVaiRegex = /\bquem vai (?:buscar|retirar|pegar|descer)\s+(?:e|eh|é)\s+(?:o|a|meu|minha|o meu|a minha)?\s*([a-zA-ZÀ-ÿ\s]+)/i;
+    const matchQuem = raw.match(quemVaiRegex);
+    if (matchQuem && matchQuem[1]) {
+      let captured = matchQuem[1].trim();
+      let foundRelation: string | null = null;
+      let nameCandidate = captured;
+
+      for (const rel of relationKeywords) {
+        const relRegex = new RegExp(`^${rel}\\s+`, 'i');
+        if (relRegex.test(nameCandidate)) {
+          foundRelation = rel.toLowerCase();
+          nameCandidate = nameCandidate.replace(relRegex, '');
+          break;
+        } else if (new RegExp(`^${rel}$`, 'i').test(nameCandidate)) {
+          foundRelation = rel.toLowerCase();
+          nameCandidate = rel.charAt(0).toUpperCase() + rel.slice(1).toLowerCase();
+          break;
+        }
+      }
+
+      const finalName = cleanName(nameCandidate);
+      if (finalName && finalName.length >= 2) {
+        return {
+          name: finalName,
+          relation: foundRelation
+        };
+      }
+    }
+
+    // Padrão 2: "Pode entregar para o Carlos" / "Pode liberar pro João da Silva" / "Autorizo a Maria"
+    const entregaParaRegex = /\b(?:pode entregar|entrega|pode liberar|libera|liberado|autorizo|autorizado|autoriza)\s+(?:para|pro|pra|ao|a)?\s+(?:o|a|meu|minha)?\s*([a-zA-ZÀ-ÿ\s]+)/i;
+    const matchEntrega = raw.match(entregaParaRegex);
+    if (matchEntrega && matchEntrega[1]) {
+      let captured = matchEntrega[1].trim();
+      let foundRelation: string | null = null;
+
+      for (const rel of relationKeywords) {
+        const relRegex = new RegExp(`^${rel}\\s+`, 'i');
+        if (relRegex.test(captured)) {
+          foundRelation = rel.toLowerCase();
+          captured = captured.replace(relRegex, '');
+          break;
+        } else if (new RegExp(`^${rel}$`, 'i').test(captured)) {
+          foundRelation = rel.toLowerCase();
+          captured = rel.charAt(0).toUpperCase() + rel.slice(1).toLowerCase();
+          break;
+        }
+      }
+
+      const finalName = cleanName(captured);
+      if (finalName && finalName.length >= 2) {
+        return {
+          name: finalName,
+          relation: foundRelation || 'autorizado'
+        };
+      }
+    }
+
+    // Padrão 3: "Minha esposa Maria vai buscar" / "Meu filho Pedro vai retirar" / "A diarista Solange vai pegar"
+    const relacaoVaiRegex = new RegExp(
+      `\\b(?:meu|minha|o|a)?\\s*(${relationKeywords.join('|')})\\s+([a-zA-ZÀ-ÿ\\s]+?)\\s+(?:vai|que vai|pode)\\s+(?:buscar|retirar|pegar)`,
+      'i'
+    );
+    const matchRelacao = raw.match(relacaoVaiRegex);
+    if (matchRelacao && matchRelacao[1] && matchRelacao[2]) {
+      const rel = matchRelacao[1].toLowerCase();
+      const finalName = cleanName(matchRelacao[2]);
+      if (finalName && finalName.length >= 2) {
+        return {
+          name: finalName,
+          relation: rel
+        };
+      }
+    }
+
+    // Padrão 4: "Minha esposa vai retirar" / "Meu filho vai buscar" (sem nome próprio explícito)
+    const relacaoSozinhaRegex = new RegExp(
+      `\\b(?:meu|minha|o|a)\\s+(${relationKeywords.join('|')})\\s+(?:vai|que vai|pode)\\s+(?:buscar|retirar|pegar)`,
+      'i'
+    );
+    const matchRelacaoSozinha = raw.match(relacaoSozinhaRegex);
+    if (matchRelacaoSozinha && matchRelacaoSozinha[1]) {
+      const rel = matchRelacaoSozinha[1].toLowerCase();
+      return {
+        name: rel.charAt(0).toUpperCase() + rel.slice(1).toLowerCase(),
+        relation: rel
+      };
+    }
+
+    // Padrão 5: "Vou pedir pro meu irmão Pedro buscar" / "Vou pedir para o Carlos retirar"
+    const pedirRegex = /\b(?:vou pedir|pedi|vou mandar|mandei)\s+(?:para|pro|pra|ao|a)\s+(?:o|a|meu|minha)?\s*([a-zA-ZÀ-ÿ\s]+?)\s+(?:buscar|retirar|pegar)/i;
+    const matchPedir = raw.match(pedirRegex);
+    if (matchPedir && matchPedir[1]) {
+      let captured = matchPedir[1].trim();
+      let foundRelation: string | null = null;
+      for (const rel of relationKeywords) {
+        const relRegex = new RegExp(`^${rel}\\s+`, 'i');
+        if (relRegex.test(captured)) {
+          foundRelation = rel.toLowerCase();
+          captured = captured.replace(relRegex, '');
+          break;
+        }
+      }
+      const finalName = cleanName(captured);
+      if (finalName && finalName.length >= 2) {
+        return {
+          name: finalName,
+          relation: foundRelation
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Motor Heurístico Consciente Local (0ms, 100% offline, resiliente a qualquer falha de IA).
    * Processa a linguagem natural brasileira entendendo profundamente nuances de:
+   * - Retirada Pessoal: "eu mesmo", "eu mesma", "vou eu"
+   * - Terceiros: "quem vai buscar é minha esposa Maria", "pode entregar pro Carlos"
    * - O "SIM": confirmações, ciências e acordos ("sim", "sim por favor", "com certeza", "positivo", etc.)
    * - O "NÃO": contestações, recusas e não-reconhecimento ("não", "não é meu", "não pedi nada", "veio errado", etc.)
    * - O "OK": confirmações simples e educadas ("ok", "ok obrigado", "ok combinado", etc.)
-   * - O "SHOW", "BELEZA", "JÁ VOU BUSCAR": confirmações coloquiais e prontidão para retirada ("show", "beleza", "blz", "já vou buscar", "show beleza já vou buscar", "tô descendo", etc.)
+   * - O "SHOW", "BELEZA", "JÁ VOU BUSCAR": confirmações coloquiais e prontidão para retirada
    * - Pedidos de Código / QR Code: "me manda aí", "manda aí", "qual o código", "manda o link", etc.
    */
   public classifyConsciousHeuristic(text: string, quotedText?: string): AIIntentResult {
@@ -749,7 +958,33 @@ export class AIIntentService {
       };
     }
 
-    // ── 2. PEDIDO DE CÓDIGO / QR CODE ───────────────────────────────────────
+    // ── 2. RETIRADA PESSOAL DECLARADA ("EU MESMO", "EU MESMA", "VOU EU") ──
+    const selfPickupRegex = /\b(eu mesmo|eu mesma|eu proprio|eu propria|vou eu|eu que vou|eu quem vou|retirada pessoal|pego pessoalmente|vou retirar pessoalmente)\b/i;
+    if (selfPickupRegex.test(normalized)) {
+      return {
+        intent: 'CONFIRM_SCIENCE',
+        confidence: 0.98,
+        reasoning: 'Morador confirmou retirada pessoal ("eu mesmo")',
+        extractedCode,
+        source: 'heuristic'
+      };
+    }
+
+    // ── 3. AUTORIZAÇÃO DE RETIRADA POR TERCEIRO ("QUEM VAI BUSCAR É MINHA ESPOSA MARIA", "PODE ENTREGAR PRO CARLOS") ──
+    const thirdParty = this.extractThirdParty(trimmed, normalized);
+    if (thirdParty && thirdParty.name) {
+      return {
+        intent: 'AUTHORIZE_THIRD_PARTY',
+        confidence: 0.97,
+        reasoning: `Morador autorizou retirada por terceiro: ${thirdParty.name}${thirdParty.relation ? ` (${thirdParty.relation})` : ''}`,
+        extractedCode,
+        thirdPartyName: thirdParty.name,
+        thirdPartyRelation: thirdParty.relation || null,
+        source: 'heuristic'
+      };
+    }
+
+    // ── 4. PEDIDO DE CÓDIGO / QR CODE ───────────────────────────────────────
     const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|(me )?manda (ai|ae|o link|o codigo|o qr|os dados|pra mim)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o (qr\s?code|codigo)|como (retiro|pego|faco pra pegar)|passa o (codigo|link|qr)|pode mandar|me passa)\b/i;
 
     if (codeRequestRegex.test(normalized)) {
@@ -905,7 +1140,9 @@ export class AIIntentService {
 
         let intent: AIIntentCategory = 'UNRELATED';
         const rawIntent = String(parsed.intent || '').toUpperCase();
-        if (rawIntent.includes('CONFIRM') || rawIntent.includes('CIENCIA') || rawIntent.includes('SCIENCE')) {
+        if (rawIntent.includes('THIRD') || rawIntent.includes('TERCEIRO') || rawIntent.includes('AUTHORIZE')) {
+          intent = 'AUTHORIZE_THIRD_PARTY';
+        } else if (rawIntent.includes('CONFIRM') || rawIntent.includes('CIENCIA') || rawIntent.includes('SCIENCE')) {
           intent = 'CONFIRM_SCIENCE';
         } else if (rawIntent.includes('CONTEST') || rawIntent.includes('NAO') || rawIntent.includes('REJEIT')) {
           intent = 'CONTEST_PACKAGE';
@@ -920,6 +1157,8 @@ export class AIIntentService {
           confidence: Number(parsed.confidence) || 0.95,
           reasoning: String(parsed.reasoning || parsed.explanation || ''),
           extractedCode: parsed.extractedCode || parsed.extracted_code || null,
+          thirdPartyName: parsed.thirdPartyName || parsed.third_party_name || null,
+          thirdPartyRelation: parsed.thirdPartyRelation || parsed.third_party_relation || null,
           conciergeAlert: parsed.conciergeAlert || parsed.concierge_alert || null
         };
       }
@@ -927,7 +1166,9 @@ export class AIIntentService {
       // Se a IA responder em texto puro (ex: "CONFIRM_SCIENCE: o morador disse...")
       const upper = content.toUpperCase();
       let intent: AIIntentCategory | null = null;
-      if (upper.includes('CONFIRM_SCIENCE') || upper.includes('CONFIRM')) {
+      if (upper.includes('THIRD') || upper.includes('TERCEIRO') || upper.includes('AUTHORIZE')) {
+        intent = 'AUTHORIZE_THIRD_PARTY';
+      } else if (upper.includes('CONFIRM_SCIENCE') || upper.includes('CONFIRM')) {
         intent = 'CONFIRM_SCIENCE';
       } else if (upper.includes('CONTEST_PACKAGE') || upper.includes('CONTEST')) {
         intent = 'CONTEST_PACKAGE';
@@ -943,6 +1184,8 @@ export class AIIntentService {
           confidence: 0.9,
           reasoning: content.trim().slice(0, 120),
           extractedCode: null,
+          thirdPartyName: null,
+          thirdPartyRelation: null,
           conciergeAlert: intent === 'CONTEST_PACKAGE' ? content.trim().slice(0, 120) : null
         };
       }
