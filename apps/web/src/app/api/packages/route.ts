@@ -108,9 +108,9 @@ export async function POST(request: NextRequest) {
           `Olá, *${name}*! 👋\n\n` +
           `Uma encomenda da *${carrier}* acabou de ser recebida na portaria para sua unidade (*${unitText}*).\n\n` +
           `📸 *Foto da etiqueta anexada acima.*\n\n` +
-          `💬 *Por favor, responda quem irá retirar:*\n` +
-          `• Se for você mesmo: responda *"Eu mesmo"* ou *"OK"*\n` +
-          `• Se for outra pessoa: responda ex: *"Quem vai buscar é minha esposa Maria"* ou *"Pode entregar para o Carlos"*\n\n` +
+          `💬 *Por favor, responda esta mensagem informando quem irá retirar:*\n` +
+          `• *Se for você mesmo:* responda *"Eu mesmo"* ou *"OK"*.\n` +
+          `• *Se for algum terceiro retirar (familiar, amigo, vizinho ou prestador):* informe quem vai buscar (ex: *"Quem vai buscar é minha esposa Maria"* ou *"Pode entregar para o Carlos"*).\n\n` +
           `Assim que você responder, seu Código e QR Code de Retirada serão liberados automaticamente! 🔑\n\n` +
           `🏢 Portaria do Condomínio`;
 
