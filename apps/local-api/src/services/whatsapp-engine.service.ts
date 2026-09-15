@@ -745,11 +745,12 @@ export class WhatsAppEngineService {
 
     const text =
       `⏰ *LEMBRETE: ENCOMENDA AGUARDANDO RETIRADA*\n\n` +
-      `Olá, *${params.residentName}*!\n\n` +
-      `Lembramos que sua encomenda de *${params.carrier}* (recebida em ${params.receivedAt}) ainda está disponível para retirada na portaria para sua unidade (*${params.unitInfo}*).\n\n` +
-      `🔑 *Código de Retirada:* *${params.pickupCode}*\n` +
-      `📱 *Link do QR Code:*\n${pickupUrl}\n\n` +
-      `_Por favor, passe na portaria para retirar sua encomenda quando puder._\n\n` +
+      `Olá, *${params.residentName}*! 👋\n\n` +
+      `Sua encomenda de *${params.carrier}* (recebida em ${params.receivedAt}) continua disponível para retirada na portaria para *${params.unitInfo}*.\n\n` +
+      `💬 *Para liberarmos o código e o link de retirada, por favor, responda a esta mensagem informando:*\n` +
+      `1️⃣ Você já está ciente da chegada do pacote?\n` +
+      `2️⃣ Quem irá retirar? (Você mesmo ou um terceiro autorizado? Caso seja um terceiro, favor informar o nome completo).\n\n` +
+      `Assim que responder, enviaremos os dados de acesso para a retirada. 🔑\n\n` +
       `🏢 Portaria do Condomínio`;
 
     return this.sendTextMessage(params.phone, text);
