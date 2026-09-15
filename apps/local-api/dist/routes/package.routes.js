@@ -187,6 +187,33 @@ export async function packageRoutes(fastify) {
             if (!pkg) {
                 return reply.status(404).send({ success: false, error: 'Encomenda não encontrada no sistema' });
             }
+            // 🛑 TRAVA DE SEGURANÇA: Valida se a encomenda não foi excluída ou alterada na nuvem
+            if (supabaseService.isConfigured()) {
+                try {
+                    const client = supabaseService.getClient();
+                    const { data: cloudPkg, error: cErr } = await client
+                        .from('packages')
+                        .select('id, status')
+                        .eq('id', pkg.id)
+                        .maybeSingle();
+                    if (!cErr && !cloudPkg) {
+                        console.warn(`🛑 [PackageRoutes] Trava acionada: Encomenda ${pkg.id} (${pkg.pickup_code}) foi excluída na nuvem. Removendo do SQLite.`);
+                        databaseService.deletePackage(pkg.id);
+                        return reply.status(404).send({
+                            success: false,
+                            error: 'Esta encomenda já foi excluída do sistema.'
+                        });
+                    }
+                    if (cloudPkg && (cloudPkg.status === 'DELIVERED' || cloudPkg.status === 'RETURNED')) {
+                        databaseService.updatePackageStatus(pkg.id, cloudPkg.status);
+                        return reply.status(400).send({
+                            success: false,
+                            error: `Esta encomenda já consta como ${cloudPkg.status === 'DELIVERED' ? 'entregue' : 'devolvida'}.`
+                        });
+                    }
+                }
+                catch { }
+            }
             // 3. Resolve telefone e dados do destinatário
             let phone = pkg.resident?.phone;
             let residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
@@ -260,6 +287,29 @@ export async function packageRoutes(fastify) {
             let alreadySentCount = recent.filter(p => p.status !== 'RECEIVED').length;
             let failedCount = 0;
             for (const pkg of pending) {
+                // 🛑 TRAVA DE SEGURANÇA: Checa no Supabase se o pacote não foi excluído ou já retirado
+                if (supabaseService.isConfigured()) {
+                    try {
+                        const client = supabaseService.getClient();
+                        const { data: cloudPkg, error: cErr } = await client
+                            .from('packages')
+                            .select('id, status')
+                            .eq('id', pkg.id)
+                            .maybeSingle();
+                        if (!cErr && !cloudPkg) {
+                            console.warn(`🛑 [PackageRoutes] Trava acionada: Encomenda ${pkg.id} (${pkg.pickup_code}) excluída na nuvem. Limpando do SQLite local e ignorando.`);
+                            databaseService.deletePackage(pkg.id);
+                            failedCount++;
+                            continue;
+                        }
+                        if (cloudPkg && cloudPkg.status !== 'RECEIVED') {
+                            databaseService.updatePackageStatus(pkg.id, cloudPkg.status);
+                            alreadySentCount++;
+                            continue;
+                        }
+                    }
+                    catch { }
+                }
                 let phone = pkg.resident?.phone;
                 let residentName = pkg.resident?.name || pkg.recipient_name_ocr || 'Morador(a)';
                 let unitInfo = pkg.unit ? `Apto ${pkg.unit.unit_number} - ${pkg.unit.block}` : 'sua unidade';

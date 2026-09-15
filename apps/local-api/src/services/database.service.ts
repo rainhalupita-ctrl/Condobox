@@ -39,7 +39,7 @@ export interface LocalPackage {
   delivered_by_user_id?: string | null;
   pickup_code: string;
   qr_token: string;
-  status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED';
+  status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED' | 'RETURNED';
   received_at: string;
   delivered_at?: string | null;
   notes?: string | null;
@@ -366,6 +366,26 @@ export class DatabaseService {
       .get(cleanCode, cleanCode) as any;
 
     if (row) {
+      // Trava de integridade: checa se a encomenda ainda existe no Supabase
+      try {
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          const client = supabaseService.getClient();
+          const { data: cloudPkg, error } = await client
+            .from('packages')
+            .select('id, status')
+            .eq('id', row.id)
+            .maybeSingle();
+
+          if (!error && !cloudPkg) {
+            // Se a encomenda NÃO existe na nuvem, ela foi excluída definitivamente!
+            console.log(`🛑 [DatabaseService] Trava acionada: Encomenda ${row.id} (${row.pickup_code}) foi excluída na nuvem. Limpando do SQLite.`);
+            this.deletePackage(row.id);
+            return null;
+          }
+        }
+      } catch {}
+
       return {
         ...row,
         unit: row.unit_id ? { id: row.unit_id, block: row.unit_block, unit_number: row.unit_number } : null,
@@ -487,13 +507,13 @@ export class DatabaseService {
 
     let rows: any[] = [];
 
-    // 1. Busca por código informado diretamente
+    // 1. Busca por código informado diretamente (somente pendentes: RECEIVED ou NOTIFIED)
     if (mentionedCode) {
       const query = `
         SELECT p.*, r.name as resident_name, r.phone as resident_phone
         FROM packages p
         LEFT JOIN residents r ON p.resident_id = r.id
-        WHERE p.status != 'DELIVERED'
+        WHERE p.status IN ('RECEIVED', 'NOTIFIED')
           AND (p.pickup_code = ? OR upper(p.pickup_code) = upper(?))
         LIMIT 1
       `;
@@ -507,7 +527,7 @@ export class DatabaseService {
         SELECT p.*, r.name as resident_name, r.phone as resident_phone
         FROM packages p
         LEFT JOIN residents r ON p.resident_id = r.id
-        WHERE p.status != 'DELIVERED'
+        WHERE p.status IN ('RECEIVED', 'NOTIFIED')
         ORDER BY p.received_at DESC
       `).all() as any[];
 
@@ -521,6 +541,44 @@ export class DatabaseService {
       }
     }
 
+    // 🛑 TRAVA DE INTEGRIDADE: Se encontrou localmente no SQLite, valida se ainda existem na nuvem
+    if (rows.length > 0) {
+      try {
+        const { supabaseService } = await import('./supabase.service.js');
+        if (supabaseService.isConfigured()) {
+          const client = supabaseService.getClient();
+          const checkIds = rows.map(r => r.id);
+          const { data: cloudExists, error: chkErr } = await client
+            .from('packages')
+            .select('id, status')
+            .in('id', checkIds);
+
+          if (!chkErr) {
+            const cloudMap = new Map((cloudExists || []).map(cp => [cp.id, cp]));
+            const validRows: any[] = [];
+
+            for (const r of rows) {
+              const cp = cloudMap.get(r.id);
+              if (!cp) {
+                // Encomenda foi excluída definitivamente no sistema central/nuvem!
+                console.log(`🛑 [DatabaseService] Trava acionada: Encomenda ${r.id} (${r.pickup_code}) excluída na nuvem. Limpando do SQLite local.`);
+                this.deletePackage(r.id);
+              } else if (cp.status === 'RECEIVED' || cp.status === 'NOTIFIED') {
+                validRows.push(r);
+              } else {
+                // Status mudou na nuvem (ex: DELIVERED ou RETURNED)
+                console.log(`🔄 [DatabaseService] Atualizando status local de ${r.pickup_code}: ${r.status} -> ${cp.status}`);
+                this.updatePackageStatus(r.id, cp.status);
+              }
+            }
+            rows = validRows;
+          }
+        }
+      } catch (err: any) {
+        console.warn('[DatabaseService] Erro ao validar integridade com a nuvem:', err.message);
+      }
+    }
+
     // 3. Fallback na Nuvem (Supabase) se não encontrar no SQLite local
     if (rows.length === 0 && last8) {
       try {
@@ -530,7 +588,7 @@ export class DatabaseService {
           const { data: cloudPkgs } = await client
             .from('packages')
             .select('*, resident:residents(*)')
-            .neq('status', 'DELIVERED')
+            .in('status', ['RECEIVED', 'NOTIFIED'])
             .order('created_at', { ascending: false })
             .limit(30);
 
@@ -565,13 +623,14 @@ export class DatabaseService {
     }
     const allMatching = Array.from(uniqueMap.values());
 
-    const isDelivered = (p: any): boolean => {
-      return p.status === 'DELIVERED' ||
-             Boolean(p.delivered_at) ||
-             Boolean(p.notes?.includes('DELIVERY_NOTIFIED'));
+    const isPending = (p: any): boolean => {
+      if (p.status !== 'RECEIVED' && p.status !== 'NOTIFIED') return false;
+      if (Boolean(p.delivered_at)) return false;
+      if (Boolean(p.notes?.includes('DELIVERY_NOTIFIED'))) return false;
+      return true;
     };
 
-    return allMatching.filter(p => !isDelivered(p));
+    return allMatching.filter(p => isPending(p));
   }
 
   public async acknowledgePackageByPhone(phone: string, mentionedCode?: string | null): Promise<{ pkg?: any; pkgs?: any[]; alreadyAcknowledged?: boolean } | null> {

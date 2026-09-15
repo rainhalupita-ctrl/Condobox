@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { databaseService } from './database.service.js';
 import { whatsAppEngineService } from './whatsapp-engine.service.js';
+import { supabaseService } from './supabase.service.js';
 
 export class ReminderCronService {
   private isRunning: boolean = false;
@@ -33,17 +34,49 @@ export class ReminderCronService {
       const now = Date.now();
       const minAgeMs = minHoursAge * 60 * 60 * 1000;
 
-      // Filtra encomendas não entregues recebidas há mais de minHoursAge
+      // Filtra estritamente encomendas pendentes (RECEIVED ou NOTIFIED) recebidas há mais de minHoursAge
+      // Bloqueia DELIVERED, RETURNED ou qualquer encomenda que não esteja aguardando retirada
       const pendingPackages = allPackages.filter((pkg) => {
-        if (pkg.status === 'DELIVERED') return false;
+        if (pkg.status !== 'RECEIVED' && pkg.status !== 'NOTIFIED') return false;
         const receivedTime = new Date(pkg.received_at).getTime();
         return now - receivedTime >= minAgeMs;
       });
 
-      console.log(`🔍 [Reminder Cron] Encontradas ${pendingPackages.length} encomendas com mais de ${minHoursAge}h na portaria.`);
+      console.log(`🔍 [Reminder Cron] Encontradas ${pendingPackages.length} encomendas elegíveis com mais de ${minHoursAge}h na portaria.`);
 
       for (const pkg of pendingPackages) {
         try {
+          // 🛑 TRAVA DE SEGURANÇA: Validação prévia com o Supabase (Nuvem)
+          // Impede expressamente o envio de lembretes para encomendas excluídas ou com status alterado
+          if (supabaseService.isConfigured()) {
+            try {
+              const client = supabaseService.getClient();
+              const { data: cloudPkg, error: cloudErr } = await client
+                .from('packages')
+                .select('id, status')
+                .eq('id', pkg.id)
+                .maybeSingle();
+
+              if (!cloudErr) {
+                // Se a encomenda NÃO existe mais na nuvem (foi excluída definitivamente)
+                if (!cloudPkg) {
+                  console.warn(`🛑 [Reminder Cron] Trava acionada: Encomenda ${pkg.id} (${pkg.pickup_code} - ${pkg.carrier}) foi EXCLUÍDA do sistema. Removendo do banco local e abortando envio.`);
+                  databaseService.deletePackage(pkg.id);
+                  continue;
+                }
+
+                // Se a encomenda já foi entregue ou devolvida na nuvem
+                if (cloudPkg.status !== 'RECEIVED' && cloudPkg.status !== 'NOTIFIED') {
+                  console.warn(`🛑 [Reminder Cron] Trava acionada: Encomenda ${pkg.id} (${pkg.pickup_code}) não está mais pendente na nuvem (status: ${cloudPkg.status}). Atualizando SQLite local e abortando.`);
+                  databaseService.updatePackageStatus(pkg.id, cloudPkg.status);
+                  continue;
+                }
+              }
+            } catch (checkErr: any) {
+              console.warn(`⚠️ [Reminder Cron] Falha ao verificar nuvem para pacote ${pkg.id}:`, checkErr.message);
+            }
+          }
+
           // Busca morador associado
           let resident = pkg.resident_id ? databaseService.getResidentById(pkg.resident_id) : null;
           if (!resident && pkg.unit_id) {

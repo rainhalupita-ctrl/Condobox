@@ -190,6 +190,25 @@ export class WhatsAppQueueWorker {
       for (const logItem of pendingLogs || []) {
         if (logItem.recipient_phone && logItem.message_content) {
           try {
+            // 🛑 TRAVA DE SEGURANÇA: Se a notificação estiver vinculada a uma encomenda,
+            // verifica se a encomenda ainda existe no Supabase (não foi excluída)
+            if (logItem.package_id) {
+              const { data: pkgCheck, error: pErr } = await client
+                .from('packages')
+                .select('id, status')
+                .eq('id', logItem.package_id)
+                .maybeSingle();
+
+              if (!pErr && !pkgCheck) {
+                console.warn(`🛑 [WhatsApp Worker] Trava acionada: Pacote ${logItem.package_id} foi excluído do sistema. Cancelando notificação pendente ${logItem.id}.`);
+                await client.from('notifications_log').update({
+                  status: 'CANCELLED',
+                  error_message: 'Cancelado: Encomenda foi excluída do sistema'
+                }).eq('id', logItem.id);
+                continue;
+              }
+            }
+
             // Lock atômico: só processa se ainda estiver com status PENDING no Supabase
             const { data: claimed } = await client
               .from('notifications_log')

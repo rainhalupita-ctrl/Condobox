@@ -62,11 +62,73 @@ export class SyncService {
       // 3. Pull: Baixar unidades e moradores atualizados da nuvem
       await this.pullUnitsAndResidents();
 
+      // 4. Reconcile: Sincronizar exclusões e mudanças de status de encomendas da nuvem para o SQLite local
+      await this.reconcilePackages();
+
     } catch (err: any) {
       this.isOnline = false;
       // Silencioso para não poluir logs em caso de internet offline na portaria
     } finally {
       this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Reconciliação Bidirecional:
+   * Verifica pacotes locais ativos (RECEIVED ou NOTIFIED).
+   * - Se o pacote foi excluído na nuvem (Supabase), apaga-o do SQLite local.
+   * - Se o pacote mudou de status na nuvem (DELIVERED ou RETURNED), atualiza no SQLite local.
+   */
+  public async reconcilePackages(): Promise<void> {
+    try {
+      const allLocal = databaseService.getAllPackages();
+      // Pacotes que ainda constam como aguardando retirada no SQLite local
+      const activeLocal = allLocal.filter(p => p.status === 'RECEIVED' || p.status === 'NOTIFIED');
+      if (activeLocal.length === 0) return;
+
+      const client = supabaseService.getClient();
+      const localIds = activeLocal.map(p => p.id);
+
+      const chunkSize = 50;
+      for (let i = 0; i < localIds.length; i += chunkSize) {
+        const chunk = localIds.slice(i, i + chunkSize);
+        const { data: cloudPkgs, error } = await client
+          .from('packages')
+          .select('id, status, notes, delivered_at, delivered_to_name')
+          .in('id', chunk);
+
+        if (error) {
+          console.warn('[SyncService] Erro ao consultar nuvem para reconciliação:', error.message);
+          continue;
+        }
+
+        const cloudMap = new Map((cloudPkgs || []).map(cp => [cp.id, cp]));
+
+        for (const localId of chunk) {
+          const localPkg = activeLocal.find(p => p.id === localId);
+          if (!localPkg) continue;
+
+          const cloudPkg = cloudMap.get(localId);
+
+          if (!cloudPkg) {
+            // Encomenda não existe mais no Supabase.
+            // Se já foi sincronizada ou foi cadastrada há mais de 10 min, foi excluída na nuvem!
+            const ageMs = Date.now() - new Date(localPkg.received_at).getTime();
+            if (localPkg.sync_status === 'SYNCED' || ageMs > 10 * 60 * 1000) {
+              console.log(`🧹 [SyncService] Encomenda excluída na nuvem removida do banco local: ${localPkg.pickup_code} (${localPkg.carrier})`);
+              databaseService.deletePackage(localId);
+            }
+          } else {
+            // Se existe na nuvem, checa se o status mudou (ex: retirada ou devolvida via web)
+            if (cloudPkg.status !== localPkg.status) {
+              console.log(`🔄 [SyncService] Sincronizando status da encomenda ${localPkg.pickup_code}: local ${localPkg.status} -> nuvem ${cloudPkg.status}`);
+              databaseService.updatePackageStatus(localId, cloudPkg.status);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[SyncService] Exceção durante reconciliação de pacotes:', err.message);
     }
   }
 
