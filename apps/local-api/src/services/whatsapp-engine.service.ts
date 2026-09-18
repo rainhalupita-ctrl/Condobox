@@ -6,8 +6,10 @@ import makeWASocket, {
   proto,
   WASocket,
   Browsers,
-  makeCacheableSignalKeyStore
+  makeCacheableSignalKeyStore,
+  downloadMediaMessage
 } from '@whiskeysockets/baileys';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import QRCode from 'qrcode';
 import fs from 'fs';
 import path from 'path';
@@ -978,18 +980,6 @@ export class WhatsAppEngineService {
         this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via notificação recente`);
         return phone;
       }
-
-      // 5. Se houver apenas 1 notificação recente ativa nas últimas 2 horas, infere a identidade
-      const now = Date.now();
-      const recentList = Array.from(this.recentSentNotifications.values()).filter(n => now - n.timestamp < 2 * 3600000);
-      if (recentList.length === 1) {
-        const single = recentList[0];
-        const phone = single.phone.replace(/\D/g, '');
-        this.lidCache.set(cleanLid, phone);
-        this.recordLidMapping(cleanLid, phone);
-        this.logToFile(`LID ${cleanLid} inferido para telefone: ${phone} (único envio recente ativo)`);
-        return phone;
-      }
     }
 
     return remoteJid.replace(/@s\.whatsapp\.net|@c\.us|@lid|\D/g, '');
@@ -999,7 +989,7 @@ export class WhatsAppEngineService {
     const m = msg.message;
     if (!m) return '';
     if ((m as any).audioMessage) {
-      return '[ÁUDIO ENVIADO PELO MORADOR]';
+      return '';
     }
     return (
       m.conversation ||
@@ -1112,6 +1102,56 @@ export class WhatsAppEngineService {
     }
   }
 
+  private async transcribeAudioMessage(msg: WAMessage): Promise<string> {
+    try {
+      const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) return '';
+
+      const buffer = await downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        {
+          logger: pino({ level: 'silent' }),
+          reuploadRequest: (update: any) => {
+            if (!this.socket) return Promise.reject(new Error('Socket unavailable'));
+            return this.socket.updateMediaMessage(update);
+          },
+        }
+      );
+
+      if (!buffer || buffer.length === 0) return '';
+
+      const base64Data = buffer.toString('base64');
+      const audioMime = msg.message?.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+      const cleanMime = audioMime.split(';')[0].trim() || 'audio/ogg';
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: cleanMime,
+            data: base64Data,
+          },
+        },
+        {
+          text: 'Transcreva o áudio em português com precisão. Retorne APENAS o texto falado, sem aspas, introduções ou comentários adicionais. Se inaudível ou ruído, retorne vazio.',
+        },
+      ]);
+
+      const transcribed = result.response.text().trim();
+      if (transcribed) {
+        this.logToFile(`🎙️ [Áudio Transcrito com Gemini]: "${transcribed}"`);
+      }
+      return transcribed;
+    } catch (err: any) {
+      this.logToFile(`⚠️ Falha ao transcrever áudio com Gemini: ${err.message}`);
+      return '';
+    }
+  }
+
   private async handleIncomingMessage(msg: WAMessage): Promise<void> {
     try {
       if (msg.key.fromMe) return;
@@ -1148,7 +1188,21 @@ export class WhatsAppEngineService {
         }
       }
 
-      const text = this.extractTextFromMessage(msg).trim();
+      let text = this.extractTextFromMessage(msg).trim();
+      const isAudio = Boolean((msg.message as any)?.audioMessage);
+
+      // Se for mensagem de áudio, tenta transcrever com Gemini
+      if (isAudio && !text) {
+        this.logToFile(`🎤 Mensagem de áudio recebida de ${remoteJid}. Tentando transcrição inteligente...`);
+        const transcribed = await this.transcribeAudioMessage(msg);
+        if (transcribed) {
+          text = transcribed.trim();
+        } else {
+          this.logToFile(`ℹ️ [Silenciado] Áudio de ${remoteJid} inaudível ou não transcrito. Nenhuma ação automática disparada.`);
+          return;
+        }
+      }
+
       this.logToFile(`📝 Texto bruto extraído de ${remoteJid}: "${text}"`);
       if (!text) {
         const msgKeys = Object.keys(msg.message || {}).join(', ');
@@ -1239,24 +1293,6 @@ export class WhatsAppEngineService {
           pendingPkgs = [pkg];
         }
       }
-    }
-
-    // Tratamento humanizado caso o morador responda por áudio
-    if (text === '[ÁUDIO ENVIADO PELO MORADOR]') {
-      this.logToFile(`🎤 Áudio recebido de ${cleanPhone}. Enviando orientação amigável...`);
-      let rName = 'Morador(a)';
-      if (pendingPkgs && pendingPkgs.length > 0) {
-        rName = pendingPkgs[0].resident?.name || pendingPkgs[0].recipient_name_ocr || 'Morador(a)';
-      }
-      const audioReply =
-        `Olá, *${rName}*! 👋\n\n` +
-        `Recebemos seu áudio, porém nosso sistema automático de portaria lê apenas respostas em texto ou reações (emojis).\n\n` +
-        `💬 *Por favor, responda esta mensagem informando:*\n` +
-        `• Se for você mesmo retirar, responda: *"Eu mesmo"* ou *"OK"*.\n` +
-        `• Se for outra pessoa retirar, informe o nome dela (ex: *"Minha esposa Maria"* ou *"Pode entregar para o Carlos"*).\n\n` +
-        `Assim que você responder por texto, liberamos seu Código e link de QR Code na hora! 🔑`;
-      await this.sendWhatsAppReply(remoteJid, cleanPhone, audioReply);
-      return;
     }
 
     // Verifica se a mensagem possui sinal claro de contestação ou retirada indevida
