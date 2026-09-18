@@ -4,7 +4,9 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   WAMessage,
   proto,
-  WASocket
+  WASocket,
+  Browsers,
+  makeCacheableSignalKeyStore
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import fs from 'fs';
@@ -204,18 +206,23 @@ export class WhatsAppEngineService {
 
       const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] as [number, number, number] }));
 
-      const logger = pino({ level: 'silent' });
+      const sockLogger = pino({ level: 'warn' });
 
       this.socket = makeWASocket({
         version,
-        logger,
+        logger: sockLogger,
         printQRInTerminal: false,
-        auth: state,
-        browser: ['CondoBox Portaria', 'Desktop', '1.0.0'],
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, sockLogger),
+        },
+        browser: Browsers.macOS('Desktop'),
+        markOnlineOnConnect: true,
         syncFullHistory: false,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000
+        keepAliveIntervalMs: 15000,
+        getMessage: async () => undefined
       });
 
       this.socket.ev.on('creds.update', saveCreds);
@@ -1020,6 +1027,8 @@ export class WhatsAppEngineService {
         remoteJid.includes('@broadcast')
       ) return;
 
+      this.logToFile(`📩 Mensagem recebida via socket de ${remoteJid} (fromMe: ${msg.key.fromMe}, id: ${msg.key.id})`);
+
       // Ignora mensagens históricas muito antigas (> 12 horas) recebidas em sincronizações iniciais
       const rawTs = typeof msg.messageTimestamp === 'number'
         ? msg.messageTimestamp
@@ -1043,6 +1052,7 @@ export class WhatsAppEngineService {
       }
 
       const text = this.extractTextFromMessage(msg).trim();
+      this.logToFile(`📝 Texto bruto extraído de ${remoteJid}: "${text}"`);
       if (!text) {
         const msgKeys = Object.keys(msg.message || {}).join(', ');
         if (msgKeys) {
