@@ -18,6 +18,8 @@ import {
   Loader2,
   Search,
   Eye,
+  EyeOff,
+  KeyRound,
   SlidersHorizontal,
   Calendar,
   AlertCircle,
@@ -74,6 +76,13 @@ interface AccountItem {
     email: string | null;
     role: string;
   } | null;
+  staff?: Array<{
+    id: string;
+    name: string;
+    phone: string | null;
+    email: string | null;
+    role: string;
+  }>;
   stats: {
     units_count: number;
     max_units: number;
@@ -255,6 +264,14 @@ export default function SuperAdminPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [editMessage, setEditMessage] = useState<string | null>(null);
 
+  // Modal de Alteração de Senha do Condomínio (Dono do SaaS / Master Admin)
+  const [passwordModalAccount, setPasswordModalAccount] = useState<AccountItem | null>(null);
+  const [selectedStaffUserId, setSelectedStaffUserId] = useState<string>('');
+  const [newAccountPassword, setNewAccountPassword] = useState<string>('');
+  const [showNewPassword, setShowNewPassword] = useState<boolean>(false);
+  const [passwordChangeLoading, setPasswordChangeLoading] = useState<boolean>(false);
+  const [passwordChangeMessage, setPasswordChangeMessage] = useState<{ text: string; success: boolean } | null>(null);
+
   // Modal de Exclusão de Condomínio
   const [condoToDelete, setCondoToDelete] = useState<AccountItem | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
@@ -327,7 +344,7 @@ export default function SuperAdminPage() {
 
   // Trava a rolagem do fundo no celular/desktop quando qualquer modal estiver aberto
   useEffect(() => {
-    const isAnyModalOpen = Boolean(editingAccount || isCreateModalOpen || selectedReceiptForReview || isManualReceiptModalOpen);
+    const isAnyModalOpen = Boolean(editingAccount || isCreateModalOpen || selectedReceiptForReview || isManualReceiptModalOpen || passwordModalAccount);
     if (isAnyModalOpen) {
       const originalBodyOverflow = document.body.style.overflow;
       const originalHtmlOverflow = document.documentElement.style.overflow;
@@ -338,7 +355,7 @@ export default function SuperAdminPage() {
         document.documentElement.style.overflow = originalHtmlOverflow;
       };
     }
-  }, [editingAccount, isCreateModalOpen, selectedReceiptForReview, isManualReceiptModalOpen]);
+  }, [editingAccount, isCreateModalOpen, selectedReceiptForReview, isManualReceiptModalOpen, passwordModalAccount]);
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
     try {
@@ -1019,6 +1036,60 @@ export default function SuperAdminPage() {
       setEditMessage(`❌ ${err.message}`);
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  // Abrir Modal de Troca de Senha de Condomínio
+  const handleOpenPasswordModal = (account: AccountItem) => {
+    setPasswordModalAccount(account);
+    const defaultUserId = account.syndic?.id || account.staff?.[0]?.id || '';
+    setSelectedStaffUserId(defaultUserId);
+    setNewAccountPassword('');
+    setShowNewPassword(false);
+    setPasswordChangeMessage(null);
+  };
+
+  // Salvar Nova Senha de Acesso do Condomínio
+  const handleSavePassword = async () => {
+    if (!passwordModalAccount) return;
+    if (!newAccountPassword.trim() || newAccountPassword.trim().length < 6) {
+      setPasswordChangeMessage({ text: 'A nova senha deve ter no mínimo 6 caracteres.', success: false });
+      return;
+    }
+
+    setPasswordChangeLoading(true);
+    setPasswordChangeMessage(null);
+
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch('/api/super-admin/accounts', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          condoId: passwordModalAccount.id,
+          userId: selectedStaffUserId || passwordModalAccount.syndic?.id,
+          newPassword: newAccountPassword.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha ao alterar senha.');
+      }
+
+      setPasswordChangeMessage({ text: '✅ Senha alterada com sucesso!', success: true });
+      setTimeout(() => {
+        setPasswordModalAccount(null);
+        setPasswordChangeMessage(null);
+        setNewAccountPassword('');
+      }, 1400);
+    } catch (err: any) {
+      setPasswordChangeMessage({ text: `❌ ${err.message || 'Erro ao alterar senha.'}`, success: false });
+    } finally {
+      setPasswordChangeLoading(false);
     }
   };
 
@@ -1813,6 +1884,16 @@ export default function SuperAdminPage() {
                             >
                               <Eye size={13} />
                               <span>Impersonar</span>
+                            </button>
+
+                            {/* Botão de Trocar Senha */}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPasswordModal(account)}
+                              className="p-1.5 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded-xl transition border border-transparent hover:border-amber-500/30"
+                              title={`Trocar senha de acesso do condomínio ${account.name}`}
+                            >
+                              <KeyRound size={15} />
                             </button>
 
                             {/* Botão de Alterar Plano & Limites */}
@@ -3178,6 +3259,144 @@ export default function SuperAdminPage() {
         </div>
       </ModalPortal>
     )}
+
+      {/* MODAL: ALTERAR SENHA DO CONDOMÍNIO (DONO DO SAAS / MASTER ADMIN) */}
+      {passwordModalAccount && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+            <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-5 sm:p-7 max-w-md w-full space-y-5 shadow-2xl relative my-auto">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-500/15 border border-amber-500/30 rounded-xl text-amber-400">
+                    <KeyRound size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Alterar Senha de Acesso</h3>
+                    <p className="text-xs text-amber-400/90 font-medium truncate max-w-[240px]">
+                      {passwordModalAccount.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPasswordModalAccount(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {passwordChangeMessage && (
+                <div
+                  className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
+                    passwordChangeMessage.success
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                      : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                  }`}
+                >
+                  {passwordChangeMessage.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                  <span>{passwordChangeMessage.text}</span>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {/* Seleção do Usuário/Conta se houver membros */}
+                {passwordModalAccount.staff && passwordModalAccount.staff.length > 0 ? (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 mb-1.5 block">
+                      Conta / Membro da Equipe
+                    </label>
+                    <select
+                      value={selectedStaffUserId}
+                      onChange={(e) => setSelectedStaffUserId(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white focus:outline-none focus:border-amber-500/60 transition"
+                    >
+                      {passwordModalAccount.staff.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name} ({member.email || 'Sem e-mail'}) — {member.role === 'SYNDIC' ? 'Síndico' : member.role === 'ADMIN' ? 'Administrador' : member.role === 'GUARD' ? 'Porteiro' : member.role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-300 space-y-1">
+                    <p className="font-semibold text-white">
+                      {passwordModalAccount.syndic?.name || 'Administrador do Condomínio'}
+                    </p>
+                    <p className="text-slate-400 font-mono text-[11px]">
+                      {passwordModalAccount.syndic?.email || 'Conta de Acesso Principal'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Campo da Nova Senha */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-300">Nova Senha</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const randomPass = `Condo@${Math.floor(1000 + Math.random() * 9000)}!`;
+                        setNewAccountPassword(randomPass);
+                        setShowNewPassword(true);
+                      }}
+                      className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 transition flex items-center gap-1"
+                    >
+                      <Sparkles size={12} />
+                      Gerar Senha Forte
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newAccountPassword}
+                      onChange={(e) => setNewAccountPassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full px-3.5 py-2.5 pr-10 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60 transition font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition"
+                    >
+                      {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                    ℹ️ Como Sócio Proprietário (Dono do SaaS), você pode redefinir diretamente a senha de qualquer condomínio. A nova senha entra em vigor imediatamente.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="flex gap-2.5 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPasswordModalAccount(null)}
+                  disabled={passwordChangeLoading}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePassword}
+                  disabled={passwordChangeLoading || !newAccountPassword.trim()}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 disabled:opacity-50"
+                >
+                  {passwordChangeLoading ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <KeyRound size={14} />
+                  )}
+                  Salvar Nova Senha
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       {/* MODAL: NOVA CONTA DE CONDOMÍNIO */}
       {isCreateModalOpen && (

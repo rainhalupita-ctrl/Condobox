@@ -1521,6 +1521,12 @@ export class WhatsAppEngineService {
 
     // 👍 CASO 4: CONFIRMAÇÃO DE CIÊNCIA (RETIRADA PESSOAL / OK / JÁ VOU BUSCAR)
     if (aiResult.intent === 'CONFIRM_SCIENCE') {
+      // Se a confiança for baixa (<0.65) e não houver código informado, evita confirmação indevida
+      if (aiResult.confidence < 0.65 && !codeFromText && !aiResult.extractedCode) {
+        this.logToFile(`⚠️ [Silenciado] Mensagem de ${cleanPhone} com baixa confiança (${aiResult.confidence}) para CONFIRM_SCIENCE ("${text}"). Nenhuma ação tomada.`);
+        return;
+      }
+
       const lastAck = this.acknowledgmentCooldown.get(cleanPhone) || 0;
       // Cooldown de 15s apenas para evitar envios duplicados em rajada acidental
       if (!aiResult.extractedCode && !codeFromText && Date.now() - lastAck < 15000) {

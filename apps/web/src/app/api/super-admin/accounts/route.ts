@@ -162,6 +162,13 @@ export async function GET(request: Request) {
           email: syndicEmail,
           role: syndicProfile.role,
         } : null,
+        staff: condoProfiles.map(p => ({
+          id: p.id,
+          name: p.name,
+          phone: p.phone,
+          email: authUserMap.get(p.id) || null,
+          role: p.role,
+        })),
         stats: {
           units_count: condoUnitsCount,
           max_units: license?.max_apartments || 250,
@@ -546,3 +553,105 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: error.message || 'Erro interno.' }, { status: 500 });
   }
 }
+
+// PATCH: Permite ao Dono do SaaS alterar a senha de acesso de qualquer conta do condomínio (Síndico, Admin ou Porteiro)
+export async function PATCH(request: Request) {
+  try {
+    const authCheck = await verifyAdminAuth(request);
+    if ('error' in authCheck) {
+      return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
+    }
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const body = await request.json();
+    const { condoId, userId, newPassword } = body;
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 6) {
+      return NextResponse.json({ error: 'A nova senha deve ter no mínimo 6 caracteres.' }, { status: 400 });
+    }
+
+    let targetUserId = userId;
+
+    // Se o userId não foi enviado, busca o síndico ou administrador principal deste condomínio
+    if (!targetUserId) {
+      if (!condoId) {
+        return NextResponse.json({ error: 'Informe o ID do condomínio ou o ID do usuário.' }, { status: 400 });
+      }
+
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('condo_id', condoId)
+        .in('role', ['ADMIN', 'SYNDIC'])
+        .maybeSingle();
+
+      if (!profile) {
+        const { data: anyProfile } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .eq('condo_id', condoId)
+          .maybeSingle();
+
+        targetUserId = anyProfile?.id;
+      } else {
+        targetUserId = profile.id;
+      }
+    }
+
+    if (!targetUserId) {
+      return NextResponse.json({ error: 'Nenhum usuário encontrado para alterar senha neste condomínio.' }, { status: 404 });
+    }
+
+    // 1. Atualiza a senha no Supabase Auth usando as permissões de Service Role Admin
+    const { data: updateRes, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
+      targetUserId,
+      { password: newPassword.trim() }
+    );
+
+    if (updateErr) {
+      console.error('[Super Admin API] Erro ao atualizar senha no Auth:', updateErr);
+      return NextResponse.json({ error: `Erro ao atualizar senha no Supabase Auth: ${updateErr.message}` }, { status: 500 });
+    }
+
+    // 2. Busca o nome do usuário alterado para log de auditoria
+    const { data: targetProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('name, role')
+      .eq('id', targetUserId)
+      .maybeSingle();
+
+    // 3. Registra na trilha de auditoria
+    try {
+      await supabaseAdmin.from('security_audit_logs').insert({
+        user_id: authCheck.user?.id || null,
+        action: 'PASSWORD_RESET_BY_SUPERADMIN',
+        entity_type: 'users',
+        entity_id: targetUserId,
+        details: {
+          target_email: updateRes?.user?.email || null,
+          target_name: targetProfile?.name || null,
+          target_role: targetProfile?.role || null,
+          condo_id: condoId || null,
+          changed_by: authCheck.user?.email || 'Super Admin',
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (auditErr) {
+      console.warn('[Super Admin API] Aviso ao gravar log de troca de senha:', auditErr);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Senha alterada com sucesso!',
+      user: {
+        id: updateRes.user.id,
+        email: updateRes.user.email,
+        name: targetProfile?.name || null
+      }
+    });
+  } catch (error: any) {
+    console.error('[Super Admin API] Erro no PATCH de troca de senha:', error);
+    return NextResponse.json({ error: error.message || 'Erro interno ao alterar senha.' }, { status: 500 });
+  }
+}
+

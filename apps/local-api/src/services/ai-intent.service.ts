@@ -64,8 +64,13 @@ Classifique a mensagem do morador ESTRITAMENTE em uma destas 5 categorias:
    Exemplos: "qual meu código?", "manda o qr code", "perdi o código", "onde vejo o código?", "como retiro?".
 
 5. "UNRELATED":
-   A mensagem NÃO é sobre ciência da encomenda nem contestação. Trata de outros assuntos condominiais (garagem, vaga, portão, interfone, síndico, boleto, visita ou saudação isolada como "bom dia", "olá").
-   Exemplos: "Tem vaga de visitante?", "O portão abriu?", "Bom dia", "Qual o ramal do síndico?".
+   A mensagem NÃO é sobre a encomenda notificada nem sobre sua retirada. Se o morador perguntar, reclamar ou falar sobre qualquer outro assunto do condomínio ou pessoal, classifique OBRIGATORIAMENTE como "UNRELATED" com alta confiança.
+   Exemplos de UNRELATED:
+   - Assuntos prediais: portão ("o portão abriu?", "portão quebrado"), interfone, elevador, vaga de garagem, estacionamento, carro do vizinho, barulho, festa, reforma, vazamento, água, luz.
+   - Assuntos administrativos: boleto, condomínio, taxa, falar com o síndico, contato da administradora, assembleia.
+   - Saudações e perguntas gerais: "bom dia", "olá", "tudo bem?", "como vai?", "quem é?", "de quem é esse número?".
+   - Dúvidas ou conversas que não confirmam explicitamente a retirada da encomenda.
+   ATENÇÃO CRÍTICA: Se a mensagem contiver termos educados como "ok", "obrigado" ou "beleza", mas fizer parte de uma pergunta ou assunto condominial (ex: "O portão já foi consertado? Obrigado", "Tudo bem? O boleto chegou?"), classifique SEMPRE como "UNRELATED", NUNCA como "CONFIRM_SCIENCE".
 
 IMPORTANTE:
 - Se for "AUTHORIZE_THIRD_PARTY", extraia rigorosamente "thirdPartyName" e "thirdPartyRelation".
@@ -463,7 +468,7 @@ export class AIIntentService {
    * Consulta o cache em memória procurando correspondência exata ou por trecho chave flexível.
    */
   private checkLearnedCache(normalized: string, rawText: string): LearnedPatternItem | null {
-    // 1. Busca exata pela frase normalizada
+    // 1. Busca exata pela frase normalizada completa
     const exact = this.memoryCache.get(normalized);
     if (exact) {
       exact.hits += 1;
@@ -471,10 +476,14 @@ export class AIIntentService {
       return exact;
     }
 
-    // 2. Busca flexível nos padrões já aprendidos (se o morador mandar frase contendo expressão aprendida)
-    const flexible = this.findLearnedPatternFlexible(normalized);
-    if (flexible) {
-      return flexible.item;
+    // 2. Busca flexível nos padrões já aprendidos: APENAS se a mensagem for curta (<= 3 palavras e <= 22 caracteres)
+    // Se o morador digitou uma frase mais longa, NUNCA use cache flexível raso: envie para a IA analisar a semântica completa!
+    const words = normalized.trim().split(/\s+/).filter(Boolean);
+    if (words.length <= 3 && normalized.length <= 22) {
+      const flexible = this.findLearnedPatternFlexible(normalized);
+      if (flexible) {
+        return flexible.item;
+      }
     }
 
     return null;
@@ -515,10 +524,7 @@ export class AIIntentService {
 
     const matchesPattern = (patternKey: string) => {
       if (!patternKey || patternKey.length < 2) return false;
-      if (patternKey.length >= 4) {
-        return normalized.includes(patternKey);
-      }
-      // Para chaves curtas (ex: "ok", "sim", "nao", "blz"), exige limite de palavras para evitar falsos positivos
+      // SEMPRE exige limite de palavras completas para evitar falsos positivos de substrings
       const escaped = patternKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, 'i');
       return regex.test(normalized);
@@ -534,7 +540,27 @@ export class AIIntentService {
       }
     }
 
-    // 2.2 PRIORIDADE 2: PEDIDOS DE CÓDIGO / QR CODE (Ex: "manda ai", "passa o codigo")
+    // 2.2 PRIORIDADE 2: ASSUNTOS DIVERSOS DO CONDOMÍNIO (Ex: "portao", "vaga", "boleto", "sindico")
+    // Se a mensagem mencionar assuntos prediais ou contiver interrogação sem pedir código, NÃO confirme encomenda
+    const hasUnrelatedCondoSignal =
+      /\b(vaga|garagem|boleto|portao|interfone|sindico|sindica|elevador|carro|taxa|barulho|vizinho|morador|academia|piscina|visitante|uber|ifood|pizza)\b/i.test(normalized) ||
+      normalized.includes('?');
+
+    unrelatedPatterns.sort((a, b) => b.key.length - a.key.length);
+    for (const p of unrelatedPatterns) {
+      if (matchesPattern(p.key)) {
+        p.item.hits += 1;
+        databaseService.incrementPatternHits(p.key);
+        return { matchedKey: p.key, item: p.item };
+      }
+    }
+
+    // Se houver indício claro de assunto condominial ou pergunta genérica, nunca aceite confirmação pelo cache flexível
+    if (hasUnrelatedCondoSignal) {
+      return null;
+    }
+
+    // 2.3 PRIORIDADE 3: PEDIDOS DE CÓDIGO / QR CODE (Ex: "manda ai", "passa o codigo")
     requestCodePatterns.sort((a, b) => b.key.length - a.key.length);
     for (const p of requestCodePatterns) {
       if (matchesPattern(p.key)) {
@@ -544,7 +570,7 @@ export class AIIntentService {
       }
     }
 
-    // 2.3 PRIORIDADE 3: AUTORIZAÇÃO DE TERCEIRO / CONFIRMAÇÃO DE CIÊNCIA
+    // 2.4 PRIORIDADE 4: AUTORIZAÇÃO DE TERCEIRO / CONFIRMAÇÃO DE CIÊNCIA
     // Se a mensagem contiver negações suspeitas (ex: "nao e meu ok"), NÃO casa como confirmação
     const hasSuspectNegation = /\b(nao|não|nem|nunca|errado|engano|rejeit|recus)\b/i.test(normalized);
     if (!hasSuspectNegation) {
@@ -564,16 +590,6 @@ export class AIIntentService {
           databaseService.incrementPatternHits(p.key);
           return { matchedKey: p.key, item: p.item };
         }
-      }
-    }
-
-    // 2.4 PRIORIDADE 4: NÃO RELACIONADO
-    unrelatedPatterns.sort((a, b) => b.key.length - a.key.length);
-    for (const p of unrelatedPatterns) {
-      if (p.key.length >= 4 && matchesPattern(p.key)) {
-        p.item.hits += 1;
-        databaseService.incrementPatternHits(p.key);
-        return { matchedKey: p.key, item: p.item };
       }
     }
 
@@ -683,35 +699,39 @@ export class AIIntentService {
     return null;
   }
 
-  // ── 2. Gemini (Google Generative AI - gemini-3.6-flash) ───────────────────
+  // ── 2. Gemini (Google Generative AI - gemini-3.5-flash-lite / gemini-3.6-flash) ──
   private async tryGemini(text: string, options?: ClassifyOptions): Promise<AIIntentResult | null> {
     const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (!geminiKey) return null;
 
-    try {
-      const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-3.6-flash',
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: 400
-        }
-      });
+    const models = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+    for (const modelName of models) {
+      try {
+        const genAI = new GoogleGenerativeAI(geminiKey);
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 300
+          }
+        });
 
-      const userPrompt = `${SYSTEM_PROMPT}\n\n${this.buildPrompt(text, options)}`;
-      const result = await model.generateContent(userPrompt);
-      const rawText = result.response.text();
-      const parsed = this.parseAIJson(rawText);
-      if (parsed) {
-        console.log(`[AIIntent] ✅ Gemini classificou como ${parsed.intent} (${parsed.reasoning})`);
-        return { ...parsed, source: 'gemini' };
-      }
-    } catch (err: any) {
-      const msg = String(err.message || '');
-      if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
-        this.triggerProviderCooldown('gemini', 'Quota/Rate Limit Exceeded');
-      } else {
-        console.warn(`[AIIntent] Gemini falhou detalhe: ${msg}`);
+        const userPrompt = `${SYSTEM_PROMPT}\n\n${this.buildPrompt(text, options)}`;
+        const result = await model.generateContent(userPrompt);
+        const rawText = result.response.text();
+        const parsed = this.parseAIJson(rawText);
+        if (parsed) {
+          console.log(`[AIIntent] ✅ Gemini [${modelName}] classificou como ${parsed.intent} (${parsed.reasoning})`);
+          return { ...parsed, source: 'gemini' };
+        }
+      } catch (err: any) {
+        const msg = String(err.message || '');
+        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+          this.triggerProviderCooldown('gemini', 'Quota/Rate Limit Exceeded');
+          break;
+        } else {
+          console.warn(`[AIIntent] Gemini [${modelName}] falhou: ${msg.slice(0, 80)}`);
+        }
       }
     }
     return null;
@@ -958,7 +978,33 @@ export class AIIntentService {
       };
     }
 
-    // ── 2. RETIRADA PESSOAL DECLARADA ("EU MESMO", "EU MESMA", "VOU EU") ──
+    // ── 2. ASSUNTOS CONDOMINIAIS DIVERSOS OU PERGUNTAS GERAIS (PRIORIDADE ALTA) ──
+    // Se o morador estiver perguntando sobre assuntos prediais, portão, vaga, boleto, interfone,
+    // ou fizer perguntas com '?' que não sejam sobre a encomenda/código, classifique como UNRELATED antes das afirmações!
+    const isAskingPackageCode = /\b(cod(?:igo)?|qr\s?code|rastreio|encomenda|pacote|retirad[ao]|pegar|buscar)\b/i.test(normalized);
+    const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
+
+    if (unrelatedCondoRegex.test(normalized)) {
+      return {
+        intent: 'UNRELATED',
+        confidence: 0.98,
+        reasoning: 'Regra consciente detectou assunto condominial sem relação com a encomenda (portão, vaga, boleto, etc.)',
+        extractedCode: null,
+        source: 'heuristic'
+      };
+    }
+
+    if (text.includes('?') && !isAskingPackageCode) {
+      return {
+        intent: 'UNRELATED',
+        confidence: 0.95,
+        reasoning: 'Pergunta geral para a portaria não relacionada à encomenda ou código de retirada',
+        extractedCode: null,
+        source: 'heuristic'
+      };
+    }
+
+    // ── 3. RETIRADA PESSOAL DECLARADA ("EU MESMO", "EU MESMA", "VOU EU") ──
     const selfPickupRegex = /\b(eu mesmo|eu mesma|eu proprio|eu propria|vou eu|eu que vou|eu quem vou|retirada pessoal|pego pessoalmente|vou retirar pessoalmente)\b/i;
     if (selfPickupRegex.test(normalized)) {
       return {
@@ -970,7 +1016,7 @@ export class AIIntentService {
       };
     }
 
-    // ── 3. AUTORIZAÇÃO DE RETIRADA POR TERCEIRO ("QUEM VAI BUSCAR É MINHA ESPOSA MARIA", "PODE ENTREGAR PRO CARLOS") ──
+    // ── 4. AUTORIZAÇÃO DE RETIRADA POR TERCEIRO ("QUEM VAI BUSCAR É MINHA ESPOSA MARIA", "PODE ENTREGAR PRO CARLOS") ──
     const thirdParty = this.extractThirdParty(trimmed, normalized);
     if (thirdParty && thirdParty.name) {
       return {
@@ -984,7 +1030,7 @@ export class AIIntentService {
       };
     }
 
-    // ── 4. PEDIDO DE CÓDIGO / QR CODE ───────────────────────────────────────
+    // ── 5. PEDIDO DE CÓDIGO / QR CODE ───────────────────────────────────────
     const codeRequestRegex = /\b(qual (o |meu )?cod(?:igo)?|manda (o |o link do )?(qr\s?code|cod(?:igo)?)|(me )?manda (ai|ae|o link|o codigo|o qr|os dados|pra mim)|perdi (o |meu )?(qr\s?code|cod(?:igo)?)|link (da encomenda|do qr\s?code|de retirada)|cade o (qr\s?code|codigo)|como (retiro|pego|faco pra pegar)|passa o (codigo|link|qr)|pode mandar|me passa)\b/i;
 
     if (codeRequestRegex.test(normalized)) {
@@ -997,7 +1043,7 @@ export class AIIntentService {
       };
     }
 
-    // ── 3. RESPOSTA DIRETA CITANDO NOTIFICAÇÃO (QUOTED TEXT) ────────────────
+    // ── 6. RESPOSTA DIRETA CITANDO NOTIFICAÇÃO (QUOTED TEXT) ────────────────
     if (quotedText) {
       const normQuoted = quotedText.toLowerCase();
       const isQuotingPackage =
@@ -1017,29 +1063,30 @@ export class AIIntentService {
       }
     }
 
-    // ── 4. AFIRMAÇÕES CONSCIENTES ("SIM", "OK", "SHOW", "BELEZA", "JÁ VOU BUSCAR") ──
-    // 4.1 O "SIM" isolado ou com complementos afirmativos
+    // ── 7. AFIRMAÇÕES CONSCIENTES ("SIM", "OK", "SHOW", "BELEZA", "JÁ VOU BUSCAR") ──
+    // 7.1 O "SIM" isolado ou com complementos afirmativos
     const isolatedYesRegex = /^(sim|s|simm+|sim sim|positivo|isso|isso mesmo|exato|exatamente|claro|claro que sim|com certeza|com toda certeza|perfeito|certinho|certo)$/i;
     const affirmativeYesRegex = /\b(sim por favor|sim obrigado|sim obrigada|sim valeu|sim ciente|sim ja vi|sim to sabendo|sim tô sabendo|sim pode mandar|sim vou buscar|sim estou descendo|sim to descendo|sim senhor|sim senhora|sim claro|sim com certeza|pode ser|pode mandar|pode sim)\b/i;
 
-    // 4.2 O "OK" isolado ou com complementos
+    // 7.2 O "OK" isolado ou com complementos (SEM 'tudo bem', que é saudação)
     const isolatedOkRegex = /^(ok|okk+|okey|okay|ok ok|ok!+|ok\s*👍)$/i;
-    const affirmativeOkRegex = /\b(ok obrigado|ok obrigada|ok valeu|ok vlw|ok obg|ok ciente|ok to ciente|ok pode deixar|ok ja vi|ok combinado|ok show|ok beleza|tudo bem|combinado|fechado|otimo|ótimo)\b/i;
+    const affirmativeOkRegex = /\b(ok obrigado|ok obrigada|ok valeu|ok vlw|ok obg|ok ciente|ok to ciente|ok pode deixar|ok ja vi|ok combinado|ok show|ok beleza|combinado|fechado|otimo|ótimo)\b/i;
 
-    // 4.3 O "SHOW", "BELEZA", "JÁ VOU BUSCAR" e prontidão para retirada
+    // 7.3 O "SHOW", "BELEZA", "JÁ VOU BUSCAR" e prontidão para retirada
     const readinessAndAffirmationRegex = /\b(show|showw+|show de bola|showzaco|top|maravilha|joia|jóia|massa|beleza|blz|blzz+|belezura|tranquilo|tranks|ja vou buscar|já vou buscar|vou buscar|ja busco|já busco|busco ja|busco já|vou la buscar|vou lá buscar|vou retirar|ja vou retirar|já vou retirar|ja retiro|já retiro|vou la retirar|vou lá retirar|ja vou pegar|já vou pegar|vou pegar|ja pego|já pego|pego ja|pego já|pego mais tarde|logo busco|passo ai|passo aí|logo mais passo ai|logo mais passo aí|daqui a pouco busco|daqui a pouco eu pego|to descendo|tô descendo|estou descendo|ja estou descendo|já estou descendo|ja to descendo|já tô descendo|vou descer|ja vou descer|já vou descer|ja desco|já desço|descendo ja|descendo já|descendo|estou indo|to indo|tô indo|ja to indo|já tô indo|indo buscar|a caminho|indo ai|indo aí|pode deixar|pode deixar que pego|pode deixar que busco|deixa comigo|ciente|estou ciente|to ciente|tô ciente|ta ciente|tá ciente|confirmado|confirmo|confirmar|confirmada|recebido|recebi|entendido|entendi|obrigad[ao]|valeu|vlw|obg|agradecid[ao]|gratidao)\b/i;
 
-    // 4.4 Emojis afirmativos
+    // 7.4 Emojis afirmativos
     const ackEmojiRegex = /(👍|👌|📦|✅|🆗|🤝|🙏|😊|😃|🙌|👏|🫡|emoji_positivo)/;
 
+    // Para frases com mais de 3 palavras, exige que a intenção afirmativa seja explícita e não incidental
+    const wordCount = normalized.trim().split(/\s+/).filter(Boolean).length;
     const isAffirmative =
       isolatedYesRegex.test(normalized) ||
       affirmativeYesRegex.test(normalized) ||
       isolatedOkRegex.test(normalized) ||
       affirmativeOkRegex.test(normalized) ||
-      readinessAndAffirmationRegex.test(normalized) ||
-      ackEmojiRegex.test(text) ||
-      normalized.includes('emoji_positivo');
+      (wordCount <= 4 && readinessAndAffirmationRegex.test(normalized)) ||
+      (wordCount === 1 && (ackEmojiRegex.test(text) || normalized.includes('emoji_positivo')));
 
     if (isAffirmative || extractedCode) {
       return {
@@ -1053,35 +1100,11 @@ export class AIIntentService {
       };
     }
 
-    // ── 5. ASSUNTOS CONDOMINIAIS DIVERSOS ────────────────────────────────────
-    const unrelatedCondoRegex = /\b(vaga|garagem|estacionamento|boleto|cota condominial|taxa|segunda via|sindico|sindica|administradora|administracao|interfone|portao|fechadura|chaveiro|chave|barulho|vizinho|som alto|lixo|reciclagem|elevador|vazamento|infiltracao|cano|agua|luz|visita|visitante|prestador|uber|ifood|pizza|entregador|mudanca|salao|churrasqueira|piscina|academia)\b/i;
-
-    if (unrelatedCondoRegex.test(normalized)) {
-      return {
-        intent: 'UNRELATED',
-        confidence: 0.95,
-        reasoning: 'Regra consciente detectou assunto condominial sem relação com encomenda',
-        extractedCode: null,
-        source: 'heuristic'
-      };
-    }
-
-    // ── 6. PERGUNTAS GERAIS OU SAUDAÇÕES ─────────────────────────────────────
-    if (text.includes('?')) {
-      return {
-        intent: 'UNRELATED',
-        confidence: 0.9,
-        reasoning: 'Pergunta geral para a portaria',
-        extractedCode: null,
-        source: 'heuristic'
-      };
-    }
-
-    // ── 7. CASUAL / DESCONHECIDO ─────────────────────────────────────────────
+    // ── 8. CASUAL / DESCONHECIDO (SILÊNCIO TOTAL) ────────────────────────────
     return {
       intent: 'UNRELATED',
-      confidence: 0.9,
-      reasoning: 'Mensagem casual ou assunto não relacionado a confirmação de encomenda',
+      confidence: 0.92,
+      reasoning: 'Mensagem casual ou assunto não relacionado à retirada de encomenda',
       extractedCode: null,
       source: 'heuristic'
     };
