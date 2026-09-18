@@ -3,19 +3,68 @@ import { ocrService } from '../services/ocr.service.js';
 import { supabaseService } from '../services/supabase.service.js';
 export async function uploadRoutes(fastify) {
     /**
-     * POST /api/upload
-     * Recebe multipart file da etiqueta, salva em disco e processa OCR com Gemini
+     * POST /api/upload-label
+     * Salva a imagem da etiqueta em disco e Supabase SEM OCR (resposta ultra-rápida < 10ms)
      */
-    fastify.post('/api/upload', async (request, reply) => {
+    fastify.post('/api/upload-label', async (request, reply) => {
         try {
             const data = await request.file();
             if (!data) {
                 return reply.status(400).send({ error: 'Nenhum arquivo de imagem enviado' });
             }
             const buffer = await data.toBuffer();
-            const ext = data.filename.split('.').pop() || 'jpg';
+            const ext = data.filename ? (data.filename.split('.').pop() || 'jpg') : 'jpg';
+            const stored = await storageService.saveLabelImage(buffer, ext);
+            return reply.send({
+                success: true,
+                image: {
+                    path: stored.relativePath,
+                    url: stored.url,
+                    fullPath: stored.fullPath
+                }
+            });
+        }
+        catch (err) {
+            request.log.error(err);
+            return reply.status(500).send({
+                error: 'Falha ao salvar etiqueta',
+                details: err.message
+            });
+        }
+    });
+    /**
+     * POST /api/upload
+     * Recebe multipart file da etiqueta, salva em disco e processa OCR com Gemini
+     */
+    fastify.post('/api/upload', async (request, reply) => {
+        try {
+            const query = request.query;
+            const skipOcr = query?.skipOcr === 'true';
+            const data = await request.file();
+            if (!data) {
+                return reply.status(400).send({ error: 'Nenhum arquivo de imagem enviado' });
+            }
+            const buffer = await data.toBuffer();
+            const ext = data.filename ? (data.filename.split('.').pop() || 'jpg') : 'jpg';
             // 1. Salva a imagem no disco local da portaria (/data/packages/labels/...)
             const stored = await storageService.saveLabelImage(buffer, ext);
+            if (skipOcr) {
+                return reply.send({
+                    success: true,
+                    image: {
+                        path: stored.relativePath,
+                        url: stored.url
+                    },
+                    ocr: {
+                        carrier: 'Outro',
+                        trackingCode: null,
+                        recipientName: null,
+                        block: null,
+                        unitNumber: null,
+                        confidence: 1
+                    }
+                });
+            }
             // 2. Extrai informações com o Gemini Vision
             const ocrResult = await ocrService.extractPackageInfo(buffer, data.mimetype);
             // 3. Tenta localizar a unidade e morador automaticamente no banco
