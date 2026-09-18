@@ -18,8 +18,11 @@ import {
   Phone,
   Mail,
   FileText,
-  Download
+  Download,
+  AlertTriangle,
+  ExternalLink
 } from 'lucide-react';
+import { buildQuotaExceededWhatsAppUrl, SUPPORT_CONTACTS } from '../lib/support-contacts';
 
 interface ParsedResident {
   id?: string;
@@ -51,6 +54,7 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
   const [isSaving, setIsSaving] = useState(false);
   const [importResult, setImportResult] = useState<any | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [quotaExceededData, setQuotaExceededData] = useState<{ currentUnitsCount: number; maxApartments: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -324,6 +328,12 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
         setImportResult(data);
         onSuccess();
       } else {
+        if (data.quotaExceeded) {
+          setQuotaExceededData({
+            currentUnitsCount: data.currentUnitsCount || 0,
+            maxApartments: data.maxApartments || 250,
+          });
+        }
         setParseError(data.error || 'Falha ao salvar moradores no banco de dados.');
       }
     } catch (err: any) {
@@ -339,6 +349,7 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
     setParsedList([]);
     setImportResult(null);
     setParseError(null);
+    setQuotaExceededData(null);
   };
 
   return (
@@ -664,13 +675,47 @@ João Souza - Ap 201 - 73981953741`}
               </table>
             </div>
 
-            {/* Mensagem de Erro de Validação */}
-            {parseError && (
+            {/* Mensagem de Erro de Validação ou Cota */}
+            {quotaExceededData ? (
+              <div className="p-4 bg-rose-950/70 border border-rose-500/70 rounded-2xl text-xs space-y-3 shadow-xl shadow-rose-950/60 animate-fade-in">
+                <div className="flex items-start gap-3 text-rose-300">
+                  <div className="p-2 bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/40 shrink-0 shadow-sm">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-white text-sm">Limite Máximo de Apartamentos Atingido</h4>
+                    <p className="text-slate-300 text-xs leading-relaxed">
+                      {parseError || 'A importação criaria novos apartamentos que ultrapassam o limite do plano atual deste condomínio.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-rose-800/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-300">
+                    Capacidade atual: <strong className="text-rose-300 font-mono">{quotaExceededData.currentUnitsCount} / {quotaExceededData.maxApartments}</strong> apartamentos cadastrados.
+                  </span>
+                  <a
+                    href={buildQuotaExceededWhatsAppUrl(
+                      SUPPORT_CONTACTS[0].raw,
+                      undefined,
+                      quotaExceededData.currentUnitsCount,
+                      quotaExceededData.maxApartments
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white rounded-xl font-bold text-xs transition flex items-center justify-center gap-2 shadow-md shadow-emerald-950 active:scale-95 shrink-0"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Contatar Suporte para Atualizar Plano</span>
+                  </a>
+                </div>
+              </div>
+            ) : parseError ? (
               <div className="p-3 bg-rose-950/40 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
                 <span>{parseError}</span>
               </div>
-            )}
+            ) : null}
 
             {/* Ações Finais */}
             <div className="flex items-center justify-between pt-3 border-t border-slate-800 shrink-0">

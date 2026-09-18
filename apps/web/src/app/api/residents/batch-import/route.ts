@@ -56,6 +56,29 @@ export async function POST(req: NextRequest) {
 
     let unitsCreatedCount = 0;
     if (unitsToCreate.size > 0) {
+      // Validação rigorosa de cota de apartamentos permitida pela licença
+      if (condoId) {
+        const { data: license } = await supabase
+          .from('licenses')
+          .select('max_apartments')
+          .eq('condo_id', condoId)
+          .maybeSingle();
+
+        const maxApartments = license?.max_apartments || 250;
+        const currentUnitsCount = (existingUnits || []).length;
+        if (currentUnitsCount + unitsToCreate.size > maxApartments) {
+          return NextResponse.json(
+            {
+              error: `Cota máxima de apartamentos atingida (${currentUnitsCount}/${maxApartments} unidades). Não é possível cadastrar mais ${unitsToCreate.size} novo(s) apartamento(s). Entre em contato com o suporte para atualizar seu plano.`,
+              quotaExceeded: true,
+              currentUnitsCount,
+              maxApartments,
+            },
+            { status: 403 }
+          );
+        }
+      }
+
       const newUnitsArray = Array.from(unitsToCreate.values());
       const { data: createdUnits, error: insertUErr } = await supabase
         .from('units')

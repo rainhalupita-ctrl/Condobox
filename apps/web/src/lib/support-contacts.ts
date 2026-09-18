@@ -26,6 +26,20 @@ export function buildSupportWhatsAppUrl(phoneRaw: string, condoName?: string, co
   return `https://wa.me/${phoneRaw}?text=${encodeURIComponent(message)}`;
 }
 
+export function buildQuotaExceededWhatsAppUrl(
+  phoneRaw: string,
+  condoName?: string,
+  currentUnits?: number,
+  maxApartments?: number
+): string {
+  let message = `Olá! Nosso condomínio atingiu o limite máximo de ${maxApartments || 250} apartamentos permitidos no plano atual do CondoBox (${currentUnits || 0}/${maxApartments || 250} unidades cadastradas).`;
+  if (condoName) {
+    message += `\n\nCondomínio: ${condoName}`;
+  }
+  message += `\n\nGostaria de falar com o suporte comercial para solicitar o upgrade do plano e liberar a criação de novos apartamentos.`;
+  return `https://wa.me/${phoneRaw}?text=${encodeURIComponent(message)}`;
+}
+
 export const SUPPORT_CONTACTS: SupportContact[] = [
   {
     id: 'support-73',

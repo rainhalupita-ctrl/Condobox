@@ -47,7 +47,8 @@ import {
   Copy,
   ExternalLink,
   ShieldCheck,
-  Download
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { PackageCard } from '../../components/package-card';
@@ -55,9 +56,10 @@ import { VoiceService } from '../../lib/voice';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
 import { exportCondoSpreadsheet } from '../../lib/export-excel';
+import { buildQuotaExceededWhatsAppUrl, SUPPORT_CONTACTS } from '../../lib/support-contacts';
 
 export default function AdminPage() {
-  const { user, profile, isGuard, isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
+  const { user, profile, isGuard, isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading, license } = useAuth();
   const router = useRouter();
   const [availableCondos, setAvailableCondos] = useState<{ id: string; name: string }[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -92,6 +94,10 @@ export default function AdminPage() {
   const [singleUnitNumber, setSingleUnitNumber] = useState('');
   const [singleLoading, setSingleLoading] = useState(false);
   const [selectedBlockFilter, setSelectedBlockFilter] = useState<string>('ALL');
+
+  // Limite / Cota Máxima de Apartamentos por Plano
+  const [condoMaxApartments, setCondoMaxApartments] = useState<number>(250);
+  const [isQuotaModalOpen, setIsQuotaModalOpen] = useState(false);
 
   // Formulário de criar porteiro/síndico
   const [staffName, setStaffName] = useState('');
@@ -453,11 +459,40 @@ export default function AdminPage() {
       }
       setResidents(rData || []);
       setPackages(pData || []);
+
+      // Carrega cota de apartamentos contratada no plano
+      const { data: licData } = await supabase
+        .from('licenses')
+        .select('id, plan, status, expires_at, max_apartments')
+        .eq('condo_id', effectiveCondoId)
+        .maybeSingle();
+
+      if (licData?.max_apartments) {
+        setCondoMaxApartments(Number(licData.max_apartments));
+      } else if (license?.max_apartments) {
+        setCondoMaxApartments(Number(license.max_apartments));
+      }
     } catch (err) {
       console.error('Erro ao carregar dados do admin:', err);
     } finally {
       if (!isBackground) setLoading(false);
     }
+  };
+
+  const isQuotaReached = units.length >= condoMaxApartments;
+
+  const activeCondoName =
+    impersonatedCondo?.name ||
+    availableCondos.find((c) => c.id === effectiveCondoId)?.name ||
+    (profile as any)?.condo?.name ||
+    'Condomínio';
+
+  const checkUnitQuota = (additionalCount = 1): boolean => {
+    if (units.length + additionalCount > condoMaxApartments) {
+      setIsQuotaModalOpen(true);
+      return false;
+    }
+    return true;
   };
 
   const handleConnectWhatsApp = async () => {
@@ -804,6 +839,13 @@ export default function AdminPage() {
     setBatchError('');
     setBatchSuccess('');
 
+    // Validação imediata: se já atingiu ou ultrapassou a cota, bloqueia de cara
+    if (units.length >= condoMaxApartments) {
+      checkUnitQuota(1);
+      setBatchError(`Limite máximo do plano atingido (${units.length}/${condoMaxApartments} apartamentos). Não é possível adicionar novas unidades. Contate o suporte para atualizar seu plano.`);
+      return;
+    }
+
     if (!batchBlock.trim() || batchFloors < 1 || batchEndUnit < batchStartUnit) {
       setBatchError('Configure os parâmetros corretamente. O último apto deve ser maior ou igual ao primeiro.');
       return;
@@ -839,6 +881,13 @@ export default function AdminPage() {
       const alreadyExisting = unitsToInsert.filter((u) => existingKeys.has(u.unit_number.trim())).length;
       const newCount = unitsToInsert.length - alreadyExisting;
 
+      // Validação de Cota do Plano: bloqueia se ultrapassar a capacidade máxima
+      if (newCount > 0 && !checkUnitQuota(newCount)) {
+        setBatchError(`Limite máximo do plano atingido (${units.length}/${condoMaxApartments} apartamentos). Não é possível adicionar mais ${newCount} unidade(s). Contate o suporte para atualizar seu plano.`);
+        setBatchLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('units')
         .upsert(unitsToInsert, { onConflict: 'condo_id,block,unit_number', ignoreDuplicates: true })
@@ -871,6 +920,11 @@ export default function AdminPage() {
     if (!singleBlock.trim() || !singleUnitNumber.trim()) return;
     if (!effectiveCondoId) {
       alert('Condomínio não identificado.');
+      return;
+    }
+
+    // Validação de Cota do Plano: bloqueia se atingir o limite
+    if (!checkUnitQuota(1)) {
       return;
     }
 
@@ -997,12 +1051,6 @@ export default function AdminPage() {
   const handleExportSpreadsheet = () => {
     try {
       setIsExportingSpreadsheet(true);
-      const activeCondoName =
-        impersonatedCondo?.name ||
-        availableCondos.find((c) => c.id === effectiveCondoId)?.name ||
-        (profile as any)?.condo?.name ||
-        'Condominio';
-
       exportCondoSpreadsheet(activeCondoName, units, residents);
     } catch (err: any) {
       console.error('Erro ao exportar planilha:', err);
@@ -1053,6 +1101,11 @@ export default function AdminPage() {
 
       // 2. Se não existir, cria a unidade automaticamente no banco
       if (!unit && supabase) {
+        // Validação de cota: se atingiu o limite, não permite criar nova unidade
+        if (!checkUnitQuota(1)) {
+          return;
+        }
+
         const { data: newUnit, error: uErr } = await supabase
           .from('units')
           .insert({
@@ -1507,6 +1560,44 @@ export default function AdminPage() {
       {/* ABA: BLOCOS & UNIDADES */}
       {activeTab === 'UNITS' && (
         <div className="space-y-6 animate-fade-in">
+          {/* Alerta de Cota do Plano Atingida */}
+          {isQuotaReached && (
+            <div className="bg-gradient-to-r from-rose-950/90 via-slate-900 to-rose-950/50 border border-rose-500/50 rounded-3xl p-5 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl border border-rose-500/40 shrink-0 shadow-lg shadow-rose-950/50">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-rose-400 bg-rose-500/15 px-2.5 py-0.5 rounded-full border border-rose-500/30">
+                      Limite do Plano Atingido
+                    </span>
+                    <span className="text-xs font-mono font-bold text-rose-300">
+                      {units.length} / {condoMaxApartments} apartamentos (100% da cota)
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-white mt-1">
+                    Cota máxima de apartamentos atingida
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-0.5 max-w-2xl">
+                    Este condomínio atingiu a capacidade máxima permitida no plano contratado. A criação de novas unidades está bloqueada até que o plano seja atualizado.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsQuotaModalOpen(true)}
+                  className="w-full md:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-950 transition flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Ver Detalhes & Falar com Suporte</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Top banner / Ferramentas */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -1595,10 +1686,30 @@ export default function AdminPage() {
                 <button
                   type="submit"
                   disabled={batchLoading}
-                  className="w-full py-2.5 rounded-xl font-bold text-white text-xs bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center gap-2 transition"
+                  onClick={(e) => {
+                    if (isQuotaReached) {
+                      e.preventDefault();
+                      setIsQuotaModalOpen(true);
+                    }
+                  }}
+                  className={`w-full py-2.5 rounded-xl font-bold text-white text-xs flex items-center justify-center gap-2 transition ${
+                    isQuotaReached
+                      ? 'bg-rose-700 hover:bg-rose-600 border border-rose-500/50 shadow-lg shadow-rose-950'
+                      : 'bg-indigo-600 hover:bg-indigo-500'
+                  }`}
                 >
-                  {batchLoading ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                  {batchLoading ? 'Gerando...' : 'Gerar Unidades em Lote'}
+                  {batchLoading ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : isQuotaReached ? (
+                    <AlertTriangle size={15} />
+                  ) : (
+                    <Plus size={15} />
+                  )}
+                  {batchLoading
+                    ? 'Gerando...'
+                    : isQuotaReached
+                    ? 'Limite do Plano Atingido (Clique p/ Atualizar)'
+                    : 'Gerar Unidades em Lote'}
                 </button>
               </form>
             </div>
@@ -1641,10 +1752,28 @@ export default function AdminPage() {
                 <button
                   type="submit"
                   disabled={singleLoading}
-                  className="w-full py-2.5 rounded-xl font-bold text-white text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center gap-2 transition"
+                  onClick={(e) => {
+                    if (isQuotaReached) {
+                      e.preventDefault();
+                      setIsQuotaModalOpen(true);
+                    }
+                  }}
+                  className={`w-full py-2.5 rounded-xl font-bold text-white text-xs flex items-center justify-center gap-2 transition ${
+                    isQuotaReached
+                      ? 'bg-rose-700 hover:bg-rose-600 border border-rose-500/50 shadow-lg shadow-rose-950'
+                      : 'bg-slate-800 hover:bg-slate-700 border border-slate-700'
+                  }`}
                 >
-                  {singleLoading ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                  Adicionar Unidade
+                  {singleLoading ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : isQuotaReached ? (
+                    <AlertTriangle size={15} />
+                  ) : (
+                    <Plus size={15} />
+                  )}
+                  {isQuotaReached
+                    ? 'Limite do Plano Atingido (Clique p/ Atualizar)'
+                    : 'Adicionar Unidade'}
                 </button>
               </form>
             </div>
@@ -1654,10 +1783,21 @@ export default function AdminPage() {
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-indigo-400" />
-                  Unidades Cadastradas ({units.length})
-                </h3>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-indigo-400" />
+                    Unidades Cadastradas ({units.length} / {condoMaxApartments})
+                  </h3>
+                  {isQuotaReached ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 text-rose-400" /> COTA ESGOTADA (100%)
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                      {Math.min(100, Math.round((units.length / condoMaxApartments) * 100))}% da capacidade
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Visualização de todos os blocos e seus respectivos apartamentos.
                 </p>
@@ -3456,16 +3596,31 @@ export default function AdminPage() {
                       ).filter((num) => num.toLowerCase().includes((newResUnitNumber || '').trim().toLowerCase())).length === 0 && (
                         <div className="px-3.5 py-2.5 text-xs text-slate-400 text-center">
                           {newResUnitNumber.trim() ? (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setIsUnitDropdownOpen(false);
-                              }}
-                              className="text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
-                            >
-                              Usar &quot;Apto {newResUnitNumber}&quot; (Criará unidade)
-                            </button>
+                            isQuotaReached ? (
+                              <button
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setIsUnitDropdownOpen(false);
+                                  setIsQuotaModalOpen(true);
+                                }}
+                                className="text-rose-400 hover:text-rose-300 font-bold flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                              >
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                <span>Cota esgotada (Clique p/ Atualizar Plano)</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setIsUnitDropdownOpen(false);
+                                }}
+                                className="text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
+                              >
+                                Usar &quot;Apto {newResUnitNumber}&quot; (Criará unidade)
+                              </button>
+                            )
                           ) : (
                             'Nenhum apartamento cadastrado neste bloco'
                           )}
@@ -3545,6 +3700,112 @@ export default function AdminPage() {
           loadData();
         }}
       />
+
+      {/* Modal de Limite Máximo de Apartamentos Atingido (Cota do Plano) */}
+      {isQuotaModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fade-in select-none">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative overflow-hidden space-y-6">
+            {/* Efeito Glow / Gradiente no Topo */}
+            <div className="absolute -top-24 -right-24 w-48 h-48 bg-rose-500/20 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Header com Ícone e Fechar */}
+            <div className="flex items-start gap-4">
+              <div className="p-3.5 bg-rose-500/20 text-rose-400 rounded-2xl border border-rose-500/40 shrink-0 shadow-lg shadow-rose-950/50">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div className="flex-1">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-rose-400 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/30 inline-block">
+                  Limite do Plano Atingido
+                </span>
+                <h2 className="text-xl sm:text-2xl font-black text-white mt-1.5 leading-tight">
+                  Cota Máxima de Apartamentos
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {activeCondoName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQuotaModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Barra de Capacidade 100% */}
+            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-semibold flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4 text-rose-400" /> Capacidade Contratada
+                </span>
+                <span className="font-mono font-bold text-rose-400">
+                  {units.length} / {condoMaxApartments} aptos (100%)
+                </span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-rose-500 to-red-600 rounded-full w-full shadow-sm" />
+              </div>
+              <p className="text-[11px] text-slate-400">
+                O condomínio atingiu o número máximo de unidades permitidas pelo plano atual.
+              </p>
+            </div>
+
+            {/* Mensagem Explicativa */}
+            <div className="space-y-2 text-xs text-slate-300 leading-relaxed bg-rose-950/20 border border-rose-900/40 p-4 rounded-2xl">
+              <p>
+                <strong className="text-white">Não é possível adicionar novas unidades.</strong> Ao bater a cota de apartamentos permitidos, a criação de novas unidades ou blocos fica temporariamente bloqueada.
+              </p>
+              <p className="text-slate-400 text-[11px]">
+                Para liberar mais apartamentos e continuar cadastrando, entre em contato imediatamente com o suporte para fazer o upgrade do seu plano.
+              </p>
+            </div>
+
+            {/* Botões de Ação */}
+            <div className="space-y-2.5 pt-1">
+              <a
+                href={buildQuotaExceededWhatsAppUrl(
+                  SUPPORT_CONTACTS[0].raw,
+                  activeCondoName,
+                  units.length,
+                  condoMaxApartments
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 active:scale-[0.98]"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Contatar Suporte no WhatsApp para Atualizar Plano</span>
+              </a>
+
+              {SUPPORT_CONTACTS[1] && (
+                <a
+                  href={buildQuotaExceededWhatsAppUrl(
+                    SUPPORT_CONTACTS[1].raw,
+                    activeCondoName,
+                    units.length,
+                    condoMaxApartments
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl font-semibold text-xs transition flex items-center justify-center gap-2"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>Suporte Alternativo: {SUPPORT_CONTACTS[1].display}</span>
+                </a>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsQuotaModalOpen(false)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold text-xs transition cursor-pointer"
+              >
+                Entendido / Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
