@@ -619,11 +619,10 @@ export function CameraCapture({
       }
 
       // Economia inteligente de tokens (Detector de Câmera Parada / Anti-Idle):
-      // Se a nitidez não variou (câmera parada apontada pro mesmo local sem etiqueta),
-      // desacelera as chamadas para poupar tokens.
+      // Apenas desacelera se a câmera estiver prolongadamente ociosa e sem alteração na cena
       const sharpnessDelta = Math.abs(sharpnessMetrics.sharpness - lastSharpnessRef.current);
       lastSharpnessRef.current = sharpnessMetrics.sharpness;
-      if (sharpnessDelta < 2.5) {
+      if (sharpnessDelta < 1.8) {
         consecutiveStaticRef.current++;
       } else {
         consecutiveStaticRef.current = 0;
@@ -647,9 +646,9 @@ export function CameraCapture({
       setIsLiveAnalyzing(true);
 
       try {
-        // Captura frame otimizado e leve (720px JPEG @ 0.70 - ~45KB) para envio ultrarrápido ao OCR
+        // Captura frame otimizado e nítido (680px JPEG @ 0.68 com leve realce de contraste) para envio ultrarrápido ao OCR
         const frameBlob = await new Promise<Blob | null>((resolve) => {
-          const targetDim = 720;
+          const targetDim = 680;
           let w = video.videoWidth || targetDim;
           let h = video.videoHeight || Math.round(targetDim * 0.75);
           if (w > targetDim || h > targetDim) {
@@ -668,6 +667,10 @@ export function CameraCapture({
           if (!ctx) return resolve(null);
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'medium';
+          try {
+            // Realce leve de contraste para destacar caracteres térmicos na etiqueta
+            ctx.filter = 'contrast(1.08) brightness(1.02)';
+          } catch {}
 
           const isDigitalZoom = !hasHardwareZoom && currentZoom > 1;
           const factor = currentZoom;
@@ -680,7 +683,7 @@ export function CameraCapture({
           const sy = isDigitalZoom ? (vh - sh) / 2 : 0;
           ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
 
-          c.toBlob((b) => resolve(b), 'image/jpeg', 0.70);
+          c.toBlob((b) => resolve(b), 'image/jpeg', 0.68);
         });
 
         if (!frameBlob || !isMountedRef.current || !isActive || autoCaptureFiredRef.current) {
@@ -788,15 +791,16 @@ export function CameraCapture({
         if (isMountedRef.current && isActive) {
           setIsLiveAnalyzing(false);
           if (!autoCaptureFiredRef.current) {
-            // Cadência adaptativa ultrarrápida: 450ms normal, ou 1200ms se câmera parada sem etiqueta
-            const nextDelay = consecutiveStaticRef.current >= 3 ? 1200 : 450;
+            // Cadência ultrarrápida: 200ms entre verificações para leitura quase instantânea ao apresentar o pacote
+            // Desacelera para 650ms apenas se ficar imóvel sem etiqueta por mais de 8 ciclos seguidos
+            const nextDelay = consecutiveStaticRef.current >= 8 ? 650 : 200;
             scanTimeout = setTimeout(runLiveScan, nextDelay);
           }
         }
       }
     };
 
-    scanTimeout = setTimeout(runLiveScan, 300);
+    scanTimeout = setTimeout(runLiveScan, 100);
 
     return () => {
       isActive = false;

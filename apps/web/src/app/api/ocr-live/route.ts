@@ -193,7 +193,7 @@ DIRETRIZES:
 5. carrier = nome do remetente/loja (ex: "Mercado Livre").
 6. NUNCA use CEP (ex: 29168-322) como trackingCode.`;
 
-  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite-preview', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  const models = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
 
   for (const apiKey of apiKeys) {
     for (const model of models) {
@@ -205,9 +205,9 @@ DIRETRIZES:
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ parts: [{ text: PROMPT }, { inlineData: { mimeType, data: base64Image } }] }],
-              generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 250 },
+              generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 140 },
             }),
-            signal: AbortSignal.timeout(3200),
+            signal: AbortSignal.timeout(2400),
           }
         );
 

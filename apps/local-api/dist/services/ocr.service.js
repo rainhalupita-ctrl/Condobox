@@ -173,7 +173,7 @@ export class OCRService {
     async tryGemini(base64Image, mimeType) {
         if (!env.GEMINI_API_KEY)
             return null;
-        const models = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'];
+        const models = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
         for (const model of models) {
             try {
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
