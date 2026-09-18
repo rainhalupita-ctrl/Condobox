@@ -40,7 +40,7 @@ interface BatchResidentImportModalProps {
 }
 
 export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchResidentImportModalProps) {
-  const { effectiveCondoId } = useAuth();
+  const { effectiveCondoId, isSuperAdmin } = useAuth();
   const [activeMode, setActiveMode] = useState<'FILE' | 'PASTE'>('FILE');
   const [file, setFile] = useState<File | null>(null);
   const [rawPastedText, setRawPastedText] = useState('');
@@ -478,21 +478,23 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
                   </div>
                 </div>
 
-                {/* Download do Modelo de Planilha */}
-                <div className="flex items-center justify-between p-3.5 bg-slate-950/70 rounded-2xl border border-slate-800 text-xs">
-                  <div className="flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="text-slate-300">Precisa de uma planilha pronta para preencher?</span>
+                {/* Download do Modelo de Planilha (Exclusivo Dono do SaaS) */}
+                {isSuperAdmin && (
+                  <div className="flex items-center justify-between p-3.5 bg-slate-950/70 rounded-2xl border border-slate-800 text-xs">
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="text-slate-300">Precisa de uma planilha pronta para preencher?</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDownloadTemplate}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition border border-slate-700 hover:border-emerald-500/30 shrink-0"
+                      title="Baixar modelo de planilha Excel (.xlsx)"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Baixar Modelo (.xlsx)
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleDownloadTemplate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition border border-slate-700 hover:border-emerald-500/30 shrink-0"
-                    title="Baixar modelo de planilha Excel (.xlsx)"
-                  >
-                    <Download className="w-3.5 h-3.5" /> Baixar Modelo (.xlsx)
-                  </button>
-                </div>
+                )}
               </div>
             ) : (
               /* Colar Texto / Tabela */

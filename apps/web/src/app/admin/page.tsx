@@ -1665,18 +1665,22 @@ export default function AdminPage() {
 
               {/* Filtro por Bloco e Exportação */}
               <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handleExportSpreadsheet}
-                  disabled={isExportingSpreadsheet}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-md transition active:scale-95 whitespace-nowrap disabled:opacity-50"
-                  title="Baixar planilha completa (.xlsx) com todos os Blocos, Apartamentos, Moradores, Telefones e E-mails"
-                >
-                  {isExportingSpreadsheet ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                  <span>Baixar Planilha</span>
-                </button>
+                {isSuperAdmin && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleExportSpreadsheet}
+                      disabled={isExportingSpreadsheet}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-md transition active:scale-95 whitespace-nowrap disabled:opacity-50"
+                      title="Baixar planilha completa (.xlsx) com todos os Blocos, Apartamentos, Moradores, Telefones e E-mails (Exclusivo Dono do SaaS)"
+                    >
+                      {isExportingSpreadsheet ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                      <span>Baixar Planilha</span>
+                    </button>
 
-                <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+                    <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+                  </>
+                )}
 
                 <button
                   onClick={() => setSelectedBlockFilter('ALL')}
@@ -1836,20 +1840,22 @@ export default function AdminPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleExportSpreadsheet}
-                disabled={isExportingSpreadsheet}
-                className="flex items-center gap-1.5 px-3.5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950 transition active:scale-95 whitespace-nowrap disabled:opacity-50"
-                title="Baixar planilha completa (.xlsx) com todos os Blocos, Apartamentos, Moradores, Telefones e E-mails"
-              >
-                {isExportingSpreadsheet ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                <span>Baixar Planilha</span>
-              </button>
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={handleExportSpreadsheet}
+                  disabled={isExportingSpreadsheet}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950 transition active:scale-95 whitespace-nowrap disabled:opacity-50"
+                  title="Baixar planilha completa (.xlsx) com todos os Blocos, Apartamentos, Moradores, Telefones e E-mails (Exclusivo Dono do SaaS)"
+                >
+                  {isExportingSpreadsheet ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  <span>Baixar Planilha</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -2573,32 +2579,39 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* 5. EXPORTAR CADASTRO GERAL EM PLANILHA EXCEL */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
-                    <FileSpreadsheet size={20} />
+            {/* 5. EXPORTAR CADASTRO GERAL EM PLANILHA EXCEL (EXCLUSIVO DONO DO SAAS) */}
+            {isSuperAdmin && (
+              <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
+                      <FileSpreadsheet size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        Exportar Cadastro em Planilha (.xlsx)
+                        <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded-md font-semibold">
+                          Exclusivo Master SaaS
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-400">Download de todos os blocos, unidades, moradores, WhatsApp e e-mails</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-base font-bold text-white">Exportar Cadastro em Planilha (.xlsx)</h3>
-                    <p className="text-xs text-slate-400">Download de todos os blocos, unidades, moradores, WhatsApp e e-mails</p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleExportSpreadsheet}
+                    disabled={isExportingSpreadsheet}
+                    className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-cyan-950"
+                  >
+                    {isExportingSpreadsheet ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    Baixar Planilha Agora
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleExportSpreadsheet}
-                  disabled={isExportingSpreadsheet}
-                  className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-cyan-950"
-                >
-                  {isExportingSpreadsheet ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  Baixar Planilha Agora
-                </button>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Gera um arquivo Excel compatível com Microsoft Excel, Google Sheets e LibreOffice contendo todos os dados do condomínio estruturados por Bloco, Número da Unidade, Nome do Morador, Número/WhatsApp e E-mail.
+                </p>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Gera um arquivo Excel compatível com Microsoft Excel, Google Sheets e LibreOffice contendo todos os dados do condomínio estruturados por Bloco, Número da Unidade, Nome do Morador, Número/WhatsApp e E-mail.
-              </p>
-            </div>
+            )}
           </div>
         </div>
       )}
