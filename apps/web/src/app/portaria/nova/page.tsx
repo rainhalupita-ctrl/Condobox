@@ -87,9 +87,59 @@ export default function NovaEncomendaPage() {
   const [isUnitDropdownOpen, setIsUnitDropdownOpen] = useState(false);
 
   useEffect(() => {
-    if (!authLoading) {
-      loadUnitsAndResidents();
-    }
+    if (authLoading || !effectiveCondoId) return;
+
+    loadUnitsAndResidents();
+
+    // Revalidação imediata ao focar na janela (ex: voltando de outra aba ou do site)
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadUnitsAndResidents();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    // Canal Realtime para Moradores e Unidades
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`nova-units-residents-${effectiveCondoId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'residents' },
+        () => {
+          loadUnitsAndResidents();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'units' },
+        (payload: any) => {
+          const uCondo = payload.new?.condo_id || payload.old?.condo_id;
+          if (!uCondo || uCondo === effectiveCondoId) {
+            loadUnitsAndResidents();
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          loadUnitsAndResidents();
+        }
+      });
+
+    // Polling suave a cada 15 segundos para garantir integridade caso a conexão oscile
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadUnitsAndResidents();
+      }
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
+    };
   }, [authLoading, effectiveCondoId]);
 
   // Escuta enriquecimento em segundo plano (Estágio 2 do OCR live)

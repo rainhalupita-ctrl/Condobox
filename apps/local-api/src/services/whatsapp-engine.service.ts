@@ -33,6 +33,9 @@ export class WhatsAppEngineService {
   private maxReconnectAttempts = 10;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private lidCache: Map<string, string> = new Map();
+  private jidToPhoneMap: Map<string, string> = new Map();
+  private recentNotificationByPhone: Map<string, any> = new Map();
+  private recentNotificationByJid: Map<string, any> = new Map();
   private processedMessageIds: Set<string> = new Set();
   private acknowledgmentCooldown: Map<string, number> = new Map();
   private recentSentNotifications: Map<string, {
@@ -522,10 +525,21 @@ export class WhatsAppEngineService {
     }
 
     try {
+      const cleanPhone = phone.replace(/\D/g, '');
       const jid = await this.resolveJid(phone);
       console.log(`📱 [WhatsApp Engine] Enviando mensagem de texto para JID: ${jid} (telefone: ${phone})`);
+      this.jidToPhoneMap.set(jid, cleanPhone);
+      this.jidToPhoneMap.set(cleanPhone, cleanPhone);
+
       const sent = await this.socket.sendMessage(jid, { text });
-      return { success: true, messageId: sent?.key?.id || 'ok' };
+      const msgId = sent?.key?.id || 'ok';
+      if (sent?.key?.remoteJid) {
+        this.jidToPhoneMap.set(sent.key.remoteJid, cleanPhone);
+        if (sent.key.remoteJid.includes('@lid')) {
+          this.recordLidMapping(sent.key.remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        }
+      }
+      return { success: true, messageId: msgId };
     } catch (err: any) {
       console.error('[WhatsApp Engine] Erro ao enviar mensagem de texto:', err.message);
       return { success: false, error: err.message };
@@ -542,14 +556,18 @@ export class WhatsAppEngineService {
     }
 
     try {
+      const cleanPhone = phone.replace(/\D/g, '');
       const jid = await this.resolveJid(phone);
       console.log(`🖼️ [WhatsApp Engine] Enviando imagem para JID: ${jid} (telefone: ${phone})`);
+      this.jidToPhoneMap.set(jid, cleanPhone);
+      this.jidToPhoneMap.set(cleanPhone, cleanPhone);
+
       let imageBuffer: Buffer;
 
       if (Buffer.isBuffer(imageSource)) {
         imageBuffer = imageSource;
       } else if (typeof imageSource === 'string' && (imageSource.startsWith('http://') || imageSource.startsWith('https://'))) {
-        const res = await fetch(imageSource);
+        const res = await fetch(imageSource, { signal: AbortSignal.timeout(8000) });
         const arrayBuf = await res.arrayBuffer();
         imageBuffer = Buffer.from(arrayBuf);
       } else if (typeof imageSource === 'string' && fs.existsSync(imageSource)) {
@@ -566,7 +584,15 @@ export class WhatsAppEngineService {
         mimetype: 'image/jpeg'
       });
 
-      return { success: true, messageId: sent?.key?.id || 'ok' };
+      const msgId = sent?.key?.id || 'ok';
+      if (sent?.key?.remoteJid) {
+        this.jidToPhoneMap.set(sent.key.remoteJid, cleanPhone);
+        if (sent.key.remoteJid.includes('@lid')) {
+          this.recordLidMapping(sent.key.remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        }
+      }
+
+      return { success: true, messageId: msgId };
     } catch (err: any) {
       console.warn('[WhatsApp Engine] Falha no envio de imagem, enviando apenas texto:', err.message);
       if (caption) {
@@ -633,14 +659,22 @@ export class WhatsAppEngineService {
     }
 
     if (res.success && res.messageId) {
-      this.recentSentNotifications.set(res.messageId, {
+      const notifData = {
         phone: params.phone,
         residentName: params.residentName,
         carrier: params.carrier,
         pickupCode: params.pickupCode,
         qrToken: params.qrToken,
         timestamp: Date.now()
-      });
+      };
+      this.recentSentNotifications.set(res.messageId, notifData);
+      const cleanP = params.phone.replace(/\D/g, '');
+      this.recentNotificationByPhone.set(cleanP, notifData);
+      try {
+        const targetJid = await this.resolveJid(params.phone);
+        this.recentNotificationByJid.set(targetJid, notifData);
+      } catch {}
+
       if (this.recentSentNotifications.size > 500) {
         const first = this.recentSentNotifications.keys().next().value;
         if (first) this.recentSentNotifications.delete(first);
@@ -769,12 +803,22 @@ export class WhatsAppEngineService {
     if (remoteJid.includes('@lid')) {
       const cleanLid = remoteJid.replace(/@lid|\D/g, '');
 
-      // Resposta instantânea da memória (0.001ms)
+      // 1. Resposta instantânea da memória (0.001ms)
       if (this.lidCache.has(cleanLid)) {
         return this.lidCache.get(cleanLid)!;
       }
+      if (this.jidToPhoneMap.has(remoteJid)) {
+        const phone = this.jidToPhoneMap.get(remoteJid)!;
+        this.lidCache.set(cleanLid, phone);
+        return phone;
+      }
+      if (this.jidToPhoneMap.has(cleanLid)) {
+        const phone = this.jidToPhoneMap.get(cleanLid)!;
+        this.lidCache.set(cleanLid, phone);
+        return phone;
+      }
 
-      // Se ainda não estiver em cache, faz leitura rápida do disco
+      // 2. Leitura direta O(1) do arquivo reverso sem varredura pesada de diretório
       const dirs = [
         this.sessionDir,
         path.join(process.env.APPDATA || '', 'condobox-desktop', 'data', 'whatsapp_session'),
@@ -783,31 +827,63 @@ export class WhatsAppEngineService {
 
       for (const dir of dirs) {
         try {
-          if (fs.existsSync(dir)) {
-            const files = fs.readdirSync(dir);
-            for (const f of files) {
-              if (f.startsWith('lid-mapping-') && f.endsWith('.json')) {
-                try {
-                  const content = fs.readFileSync(path.join(dir, f), 'utf-8').trim().replace(/"/g, '');
-                  if (f.endsWith('_reverse.json')) {
-                    const lid = f.replace('lid-mapping-', '').replace('_reverse.json', '');
-                    const phone = content.replace(/\D/g, '');
-                    if (lid && phone) this.lidCache.set(lid, phone);
-                  } else {
-                    const phone = f.replace('lid-mapping-', '').replace('.json', '').replace(/\D/g, '');
-                    const lid = content.replace(/\D/g, '');
-                    if (lid && phone) this.lidCache.set(lid, phone);
-                  }
-                } catch {}
-              }
+          const revFile = path.join(dir, `lid-mapping-${cleanLid}_reverse.json`);
+          if (fs.existsSync(revFile)) {
+            const content = fs.readFileSync(revFile, 'utf-8').trim().replace(/\D/g, '');
+            if (content) {
+              this.lidCache.set(cleanLid, content);
+              this.logToFile(`LID ${cleanLid} resolvido para telefone: ${content} via disco`);
+              return content;
             }
           }
         } catch {}
       }
 
-      if (this.lidCache.has(cleanLid)) {
-        const phone = this.lidCache.get(cleanLid)!;
-        this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone}`);
+      // 3. Verificação direta nos arquivos Baileys: se algum telefone recente mapeia para este cleanLid
+      const candidatePhones = new Set<string>();
+      for (const notif of this.recentNotificationByPhone.values()) {
+        if (notif.phone) candidatePhones.add(notif.phone.replace(/\D/g, ''));
+      }
+      for (const notif of this.recentSentNotifications.values()) {
+        if (notif.phone) candidatePhones.add(notif.phone.replace(/\D/g, ''));
+      }
+
+      for (const phone of candidatePhones) {
+        for (const dir of dirs) {
+          try {
+            const f = path.join(dir, `lid-mapping-${phone}.json`);
+            if (fs.existsSync(f)) {
+              const lidVal = fs.readFileSync(f, 'utf-8').trim().replace(/\D/g, '');
+              if (lidVal === cleanLid) {
+                this.lidCache.set(cleanLid, phone);
+                this.recordLidMapping(cleanLid, phone);
+                this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via lid-mapping direto`);
+                return phone;
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // 4. Fallback via notificação recente enviada por JID
+      if (this.recentNotificationByJid.has(remoteJid)) {
+        const notif = this.recentNotificationByJid.get(remoteJid)!;
+        const phone = notif.phone.replace(/\D/g, '');
+        this.lidCache.set(cleanLid, phone);
+        this.recordLidMapping(cleanLid, phone);
+        this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via notificação recente`);
+        return phone;
+      }
+
+      // 5. Se houver apenas 1 notificação recente ativa nas últimas 2 horas, infere a identidade
+      const now = Date.now();
+      const recentList = Array.from(this.recentSentNotifications.values()).filter(n => now - n.timestamp < 2 * 3600000);
+      if (recentList.length === 1) {
+        const single = recentList[0];
+        const phone = single.phone.replace(/\D/g, '');
+        this.lidCache.set(cleanLid, phone);
+        this.recordLidMapping(cleanLid, phone);
+        this.logToFile(`LID ${cleanLid} inferido para telefone: ${phone} (único envio recente ativo)`);
         return phone;
       }
     }
@@ -818,6 +894,9 @@ export class WhatsAppEngineService {
   private extractTextFromMessage(msg: WAMessage): string {
     const m = msg.message;
     if (!m) return '';
+    if ((m as any).audioMessage) {
+      return '[ÁUDIO ENVIADO PELO MORADOR]';
+    }
     return (
       m.conversation ||
       m.extendedTextMessage?.text ||
@@ -829,6 +908,17 @@ export class WhatsAppEngineService {
       m.viewOnceMessage?.message?.extendedTextMessage?.text ||
       m.viewOnceMessageV2?.message?.conversation ||
       m.viewOnceMessageV2?.message?.extendedTextMessage?.text ||
+      (m as any).viewOnceMessageV2Extension?.message?.conversation ||
+      (m as any).viewOnceMessageV2Extension?.message?.extendedTextMessage?.text ||
+      (m as any).interactiveMessage?.body?.text ||
+      (m as any).interactiveMessage?.header?.title ||
+      (m as any).editedMessage?.message?.protocolMessage?.editedMessage?.conversation ||
+      (m as any).editedMessage?.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
+      (m as any).protocolMessage?.editedMessage?.conversation ||
+      (m as any).protocolMessage?.editedMessage?.extendedTextMessage?.text ||
+      (m as any).interactiveResponseMessage?.body?.text ||
+      (m as any).interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
+      (m as any).documentWithCaptionMessage?.message?.documentMessage?.caption ||
       m.imageMessage?.caption ||
       m.documentMessage?.caption ||
       m.videoMessage?.caption ||
@@ -846,7 +936,9 @@ export class WhatsAppEngineService {
       msg.message?.extendedTextMessage?.contextInfo ||
       msg.message?.imageMessage?.contextInfo ||
       msg.message?.videoMessage?.contextInfo ||
-      (msg.message as any)?.ephemeralMessage?.message?.extendedTextMessage?.contextInfo;
+      (msg.message as any)?.ephemeralMessage?.message?.extendedTextMessage?.contextInfo ||
+      (msg.message as any)?.interactiveMessage?.contextInfo ||
+      (msg.message as any)?.buttonsResponseMessage?.contextInfo;
 
     const quotedMsgId = contextInfo?.stanzaId;
     const qm = contextInfo?.quotedMessage;
@@ -928,6 +1020,17 @@ export class WhatsAppEngineService {
         remoteJid.includes('@broadcast')
       ) return;
 
+      // Ignora mensagens históricas muito antigas (> 12 horas) recebidas em sincronizações iniciais
+      const rawTs = typeof msg.messageTimestamp === 'number'
+        ? msg.messageTimestamp
+        : (msg.messageTimestamp?.low ? msg.messageTimestamp.low : null);
+      if (rawTs) {
+        const msgAgeMs = Date.now() - (rawTs * 1000);
+        if (msgAgeMs > 12 * 60 * 60 * 1000) {
+          return;
+        }
+      }
+
       // Deduplicação: ignora se a mesma mensagem já foi processada
       const msgId = msg.key.id;
       if (msgId) {
@@ -940,7 +1043,13 @@ export class WhatsAppEngineService {
       }
 
       const text = this.extractTextFromMessage(msg).trim();
-      if (!text) return;
+      if (!text) {
+        const msgKeys = Object.keys(msg.message || {}).join(', ');
+        if (msgKeys) {
+          this.logToFile(`ℹ️ Mensagem recebida de ${remoteJid} sem texto extraível direto. Proto types: [${msgKeys}]`);
+        }
+        return;
+      }
 
       const { quotedText, quotedMsgId } = this.extractQuotedInfoFromMessage(msg);
 
@@ -984,6 +1093,13 @@ export class WhatsAppEngineService {
         this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
       }
       this.logToFile(`🎯 Morador identificado via histórico da mensagem citada (${quotedMsgId}): ${notif.residentName} (${cleanPhone})`);
+    } else if (this.recentNotificationByJid.has(remoteJid)) {
+      const notif = this.recentNotificationByJid.get(remoteJid)!;
+      cleanPhone = notif.phone.replace(/\D/g, '');
+      if (remoteJid.includes('@lid')) {
+        this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+      }
+      this.logToFile(`🎯 Morador identificado via notificação enviada para JID (${remoteJid}): ${notif.residentName} (${cleanPhone})`);
     }
 
     // 2. Extrai código de retirada mencionado no texto ou no texto citado
@@ -1005,6 +1121,35 @@ export class WhatsAppEngineService {
     let pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone, codeFromText);
     if ((!pendingPkgs || pendingPkgs.length === 0) && matchedPkgByCode && matchedPkgByCode.status !== 'DELIVERED') {
       pendingPkgs = [matchedPkgByCode];
+    }
+
+    // Se ainda não achou mas há notificação recente enviada para este contato:
+    if ((!pendingPkgs || pendingPkgs.length === 0) && this.recentNotificationByPhone.has(cleanPhone)) {
+      const notif = this.recentNotificationByPhone.get(cleanPhone)!;
+      if (notif.pickupCode) {
+        const pkg = await databaseService.findPackageByCode(notif.pickupCode);
+        if (pkg && pkg.status !== 'DELIVERED') {
+          pendingPkgs = [pkg];
+        }
+      }
+    }
+
+    // Tratamento humanizado caso o morador responda por áudio
+    if (text === '[ÁUDIO ENVIADO PELO MORADOR]') {
+      this.logToFile(`🎤 Áudio recebido de ${cleanPhone}. Enviando orientação amigável...`);
+      let rName = 'Morador(a)';
+      if (pendingPkgs && pendingPkgs.length > 0) {
+        rName = pendingPkgs[0].resident?.name || pendingPkgs[0].recipient_name_ocr || 'Morador(a)';
+      }
+      const audioReply =
+        `Olá, *${rName}*! 👋\n\n` +
+        `Recebemos seu áudio, porém nosso sistema automático de portaria lê apenas respostas em texto ou reações (emojis).\n\n` +
+        `💬 *Por favor, responda esta mensagem informando:*\n` +
+        `• Se for você mesmo retirar, responda: *"Eu mesmo"* ou *"OK"*.\n` +
+        `• Se for outra pessoa retirar, informe o nome dela (ex: *"Minha esposa Maria"* ou *"Pode entregar para o Carlos"*).\n\n` +
+        `Assim que você responder por texto, liberamos seu Código e link de QR Code na hora! 🔑`;
+      await this.sendWhatsAppReply(remoteJid, cleanPhone, audioReply);
+      return;
     }
 
     // Verifica se a mensagem possui sinal claro de contestação ou retirada indevida

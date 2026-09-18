@@ -48,3 +48,6 @@ apps/desktop/release/
 apps/desktop/bin/
 scratch/
 **/scratch/
+check_*.js
+update_*.js
+test_*.js

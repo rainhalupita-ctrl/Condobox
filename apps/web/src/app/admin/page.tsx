@@ -181,9 +181,69 @@ export default function AdminPage() {
   const [unitResError, setUnitResError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!authLoading) {
-      loadData();
-    }
+    if (authLoading || !effectiveCondoId) return;
+
+    loadData();
+
+    // Revalidação imediata ao focar na janela (ex: voltando do painel master ou de outra aba)
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadData(true);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    // Canal Realtime para Pacotes, Moradores e Unidades
+    const supabase = createClient();
+    const ch = supabase
+      .channel(`admin-data-sync-${effectiveCondoId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'packages' },
+        (payload: any) => {
+          const pCondo = payload.new?.condo_id || payload.old?.condo_id;
+          if (!pCondo || pCondo === effectiveCondoId) {
+            loadData(true);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'residents' },
+        () => {
+          loadData(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'units' },
+        (payload: any) => {
+          const uCondo = payload.new?.condo_id || payload.old?.condo_id;
+          if (!uCondo || uCondo === effectiveCondoId) {
+            loadData(true);
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          loadData(true);
+        }
+      });
+
+    // Polling de contingência a cada 15 segundos
+    const poll = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadData(true);
+      }
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      clearInterval(poll);
+      supabase.removeChannel(ch);
+    };
   }, [authLoading, effectiveCondoId]);
 
   // Sincroniza estado do sintetizador de voz com o localStorage persistido
@@ -281,6 +341,24 @@ export default function AdminPage() {
     }
   }, [isSuperAdmin, isImpersonating, authLoading, router]);
 
+  // Regra obrigatória: no celular e no computador, a Portaria deve abrir primeiro!
+  // Se o usuário acessar /admin diretamente no celular sem ter clicado na aba de administração (?tab=admin),
+  // redireciona para a Portaria imediatamente.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+    const params = new URLSearchParams(window.location.search);
+    const hasExplicitTab = params.get('tab') === 'admin';
+    const isTabNavigated = sessionStorage.getItem('condobox_admin_tab_active') === 'true';
+
+    if (hasExplicitTab) {
+      sessionStorage.setItem('condobox_admin_tab_active', 'true');
+    } else if (isMobile && !isTabNavigated) {
+      router.replace('/portaria');
+      return;
+    }
+  }, [router]);
+
   useEffect(() => {
     const handleUnitsChanged = () => {
       loadData();
@@ -302,22 +380,23 @@ export default function AdminPage() {
     } catch {}
   };
 
-  const loadData = async () => {
+  const loadData = async (options?: boolean | any) => {
+    const isBackground = options === true;
     if (authLoading) return;
     if (!effectiveCondoId) {
       setUnits([]);
       setResidents([]);
       setPackages([]);
-      setLoading(false);
+      if (!isBackground) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!isBackground) setLoading(true);
     const supabase = createClient();
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const currentUser = user || session?.user;
       if (!currentUser) {
-        router.replace('/admin/login?redirect=/admin');
+        router.replace('/admin/login?redirect=/portaria');
         return;
       }
 
@@ -361,7 +440,7 @@ export default function AdminPage() {
     } catch (err) {
       console.error('Erro ao carregar dados do admin:', err);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 

@@ -318,6 +318,76 @@ export class DatabaseService {
     };
   }
 
+  public upsertPackagesFromCloud(packages: any[]): void {
+    if (!packages || packages.length === 0) return;
+
+    const upsertStmt = this.db.prepare(`
+      INSERT INTO packages (
+        id, condo_id, unit_id, resident_id, carrier, tracking_code,
+        recipient_name_ocr, label_image_path, signature_image_path,
+        delivered_to_name, delivered_by_user_id, pickup_code, qr_token,
+        status, received_at, delivered_at, notes, sync_status, last_synced_at
+      ) VALUES (
+        @id, @condo_id, @unit_id, @resident_id, @carrier, @tracking_code,
+        @recipient_name_ocr, @label_image_path, @signature_image_path,
+        @delivered_to_name, @delivered_by_user_id, @pickup_code, @qr_token,
+        @status, @received_at, @delivered_at, @notes, 'SYNCED', @last_synced_at
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        condo_id = excluded.condo_id,
+        unit_id = excluded.unit_id,
+        resident_id = excluded.resident_id,
+        carrier = excluded.carrier,
+        tracking_code = excluded.tracking_code,
+        recipient_name_ocr = excluded.recipient_name_ocr,
+        label_image_path = excluded.label_image_path,
+        signature_image_path = excluded.signature_image_path,
+        delivered_to_name = excluded.delivered_to_name,
+        delivered_by_user_id = excluded.delivered_by_user_id,
+        pickup_code = excluded.pickup_code,
+        qr_token = excluded.qr_token,
+        status = excluded.status,
+        received_at = excluded.received_at,
+        delivered_at = excluded.delivered_at,
+        notes = excluded.notes,
+        sync_status = CASE WHEN packages.sync_status = 'PENDING' THEN 'PENDING' ELSE 'SYNCED' END,
+        last_synced_at = excluded.last_synced_at
+    `);
+
+    const now = new Date().toISOString();
+    const tx = this.db.transaction((items: any[]) => {
+      for (const p of items) {
+        if (!p.id || !p.pickup_code) continue;
+        upsertStmt.run({
+          id: p.id,
+          condo_id: p.condo_id || env.CONDO_ID,
+          unit_id: p.unit_id || null,
+          resident_id: p.resident_id || null,
+          carrier: p.carrier || 'Outro',
+          tracking_code: p.tracking_code || null,
+          recipient_name_ocr: p.recipient_name_ocr || null,
+          label_image_path: p.label_image_path || null,
+          signature_image_path: p.signature_image_path || null,
+          delivered_to_name: p.delivered_to_name || null,
+          delivered_by_user_id: p.delivered_by_user_id || null,
+          pickup_code: p.pickup_code,
+          qr_token: p.qr_token || p.pickup_code,
+          status: p.status || 'RECEIVED',
+          received_at: p.received_at || p.created_at || now,
+          delivered_at: p.delivered_at || null,
+          notes: p.notes || null,
+          last_synced_at: now
+        });
+      }
+    });
+
+    try {
+      tx(packages);
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao sincronizar encomendas no SQLite:', err.message);
+    }
+  }
+
   public getPackageByQrTokenOrCode(tokenOrCode: string): any {
     const row = this.db
       .prepare(`
@@ -406,7 +476,10 @@ export class DatabaseService {
           .limit(1)
           .maybeSingle();
 
-        if (cloudPkg) return cloudPkg;
+        if (cloudPkg) {
+          this.upsertPackagesFromCloud([cloudPkg]);
+          return cloudPkg;
+        }
       }
     } catch (err: any) {
       console.warn('[DatabaseService] Erro ao buscar pacote por código no Supabase:', err.message);
@@ -580,7 +653,7 @@ export class DatabaseService {
     }
 
     // 3. Fallback na Nuvem (Supabase) se não encontrar no SQLite local
-    if (rows.length === 0 && last8) {
+    if (rows.length === 0 && (last8 || mentionedCode)) {
       try {
         const { supabaseService } = await import('./supabase.service.js');
         if (supabaseService.isConfigured()) {
@@ -590,12 +663,13 @@ export class DatabaseService {
             .select('*, resident:residents(*)')
             .in('status', ['RECEIVED', 'NOTIFIED'])
             .order('created_at', { ascending: false })
-            .limit(30);
+            .limit(50);
 
           if (cloudPkgs && cloudPkgs.length > 0) {
+            const matched: any[] = [];
             for (const cPkg of cloudPkgs) {
               if (mentionedCode && (cPkg.pickup_code === mentionedCode || cPkg.pickup_code?.toUpperCase() === mentionedCode.toUpperCase())) {
-                rows.push(cPkg);
+                matched.push(cPkg);
                 break;
               }
               const rPhone = cPkg.resident?.phone;
@@ -603,9 +677,13 @@ export class DatabaseService {
                 const cleanCloud = rPhone.replace(/\D/g, '');
                 const cloudLast8 = cleanCloud.slice(-8);
                 if (cloudLast8 && (cloudLast8 === last8 || cleanCloud.endsWith(last8) || clean.endsWith(cloudLast8))) {
-                  rows.push(cPkg);
+                  matched.push(cPkg);
                 }
               }
+            }
+            if (matched.length > 0) {
+              this.upsertPackagesFromCloud(matched);
+              rows.push(...matched);
             }
           }
         }
@@ -1093,6 +1171,84 @@ export class DatabaseService {
 
       transaction();
     console.log(`🔄 [Database Service] Atualizados ${units.length} unidades e ${residents.length} moradores do Supabase.`);
+  }
+
+  public upsertUnit(u: any): void {
+    try {
+      if (!u || !u.id) return;
+      this.db.prepare(`
+        INSERT INTO units (id, condo_id, block, unit_number, created_at, updated_at)
+        VALUES (@id, @condo_id, @block, @unit_number, @created_at, @updated_at)
+        ON CONFLICT(id) DO UPDATE SET
+          block = excluded.block,
+          unit_number = excluded.unit_number,
+          updated_at = excluded.updated_at
+      `).run({
+        id: u.id,
+        condo_id: u.condo_id || env.CONDO_ID,
+        block: u.block || '',
+        unit_number: u.unit_number || '',
+        created_at: u.created_at || new Date().toISOString(),
+        updated_at: u.updated_at || new Date().toISOString()
+      });
+      console.log(`🏢 [Database Service] Unidade ${u.block} - ${u.unit_number} sincronizada em tempo real no SQLite.`);
+    } catch (err: any) {
+      console.warn('[Database Service] Erro ao sincronizar unidade em tempo real:', err.message);
+    }
+  }
+
+  public deleteUnit(unitId: string): boolean {
+    try {
+      if (!unitId) return false;
+      const res = this.db.prepare('DELETE FROM units WHERE id = ?').run(unitId);
+      console.log(`🏢 [Database Service] Unidade ${unitId} removida do SQLite local.`);
+      return res.changes > 0;
+    } catch (err: any) {
+      console.warn('[Database Service] Erro ao excluir unidade do SQLite:', err.message);
+      return false;
+    }
+  }
+
+  public upsertResident(r: any): void {
+    try {
+      if (!r || !r.id) return;
+      this.db.prepare(`
+        INSERT INTO residents (id, unit_id, name, phone, email, is_primary, active, created_at, updated_at)
+        VALUES (@id, @unit_id, @name, @phone, @email, @is_primary, @active, @created_at, @updated_at)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          phone = excluded.phone,
+          email = excluded.email,
+          is_primary = excluded.is_primary,
+          active = excluded.active,
+          updated_at = excluded.updated_at
+      `).run({
+        id: r.id,
+        unit_id: r.unit_id,
+        name: r.name || '',
+        phone: r.phone || '',
+        email: r.email || null,
+        is_primary: r.is_primary ? 1 : 0,
+        active: r.active === false ? 0 : 1,
+        created_at: r.created_at || new Date().toISOString(),
+        updated_at: r.updated_at || new Date().toISOString()
+      });
+      console.log(`👤 [Database Service] Morador ${r.name} sincronizado em tempo real no SQLite.`);
+    } catch (err: any) {
+      console.warn('[Database Service] Erro ao sincronizar morador em tempo real:', err.message);
+    }
+  }
+
+  public deleteResident(residentId: string): boolean {
+    try {
+      if (!residentId) return false;
+      const res = this.db.prepare('DELETE FROM residents WHERE id = ?').run(residentId);
+      console.log(`👤 [Database Service] Morador ${residentId} removido do SQLite local.`);
+      return res.changes > 0;
+    } catch (err: any) {
+      console.warn('[Database Service] Erro ao excluir morador do SQLite:', err.message);
+      return false;
+    }
   }
 
   public getResidentById(residentId: string): LocalResident | null {

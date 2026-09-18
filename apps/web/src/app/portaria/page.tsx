@@ -40,15 +40,7 @@ export default function PortariaDashboardPage() {
   const router = useRouter();
   const { effectiveCondoId, loading: authLoading, isSuperAdmin } = useAuth();
 
-  // Redireciona o Sócio Proprietário automaticamente para o Painel Master
-  // caso a portaria tenha sido aberta sem o parâmetro explícito de inspeção (?view=1)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (!authLoading && isSuperAdmin && params.get('view') !== '1') {
-      router.replace('/super-admin');
-    }
-  }, [authLoading, isSuperAdmin, router]);
+
   const alertChannelRef = useRef<any>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const userInteractedWithSearchRef = useRef(false);
@@ -213,6 +205,7 @@ export default function PortariaDashboardPage() {
   useEffect(() => {
     const handleRecheck = () => {
       if (document.visibilityState === 'visible' && effectiveCondoId) {
+        loadPackages(true);
         syncSettingsFromCloud(effectiveCondoId);
       }
     };
@@ -281,14 +274,15 @@ export default function PortariaDashboardPage() {
     }
   };
 
-  const loadPackages = async () => {
+  const loadPackages = async (options?: boolean | any) => {
+    const isBackground = options === true;
     if (authLoading) return;
     if (!effectiveCondoId) {
       setPackages([]);
-      setLoading(false);
+      if (!isBackground) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!isBackground) setLoading(true);
     const supabase = createClient();
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -305,14 +299,14 @@ export default function PortariaDashboardPage() {
 
       if (!error && data) {
         setPackages(data as PackageType[]);
-      } else {
+      } else if (!isBackground) {
         setPackages([]);
       }
     } catch (err) {
       console.error('Erro ao buscar encomendas:', err);
-      setPackages([]);
+      if (!isBackground) setPackages([]);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
       // Sempre re-sincroniza a tolerância para alertar em conjunto com as encomendas
       if (effectiveCondoId) {
         syncSettingsFromCloud(effectiveCondoId);
@@ -355,7 +349,7 @@ export default function PortariaDashboardPage() {
           isWithdrawalContest: isWithdrawal,
           timestamp: data.timestamp || new Date().toISOString()
         });
-        loadPackages();
+        loadPackages(true);
       })
       .on('broadcast', { event: 'stale-days-threshold-updated' }, (payload: any) => {
         const newThreshold = payload?.payload?.threshold;
@@ -368,18 +362,53 @@ export default function PortariaDashboardPage() {
       })
       .subscribe();
 
+    // Canal Realtime para sincronização contínua de Encomendas, Moradores e Unidades
+    // Sem filtro no packages para garantir que eventos DELETE sejam recebidos
     const dbChangesChannel = supabase
-      .channel(`packages-realtime-${effectiveCondoId}`)
+      .channel(`portaria-live-sync-${effectiveCondoId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'packages', filter: `condo_id=eq.${effectiveCondoId}` },
-        () => {
-          loadPackages();
+        { event: '*', schema: 'public', table: 'packages' },
+        (payload: any) => {
+          const pCondo = payload.new?.condo_id || payload.old?.condo_id;
+          if (!pCondo || pCondo === effectiveCondoId) {
+            loadPackages(true);
+          }
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'residents' },
+        () => {
+          loadPackages(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'units' },
+        (payload: any) => {
+          const uCondo = payload.new?.condo_id || payload.old?.condo_id;
+          if (!uCondo || uCondo === effectiveCondoId) {
+            loadPackages(true);
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn(`[Portaria] Canal Realtime em status ${status}. Revalidando dados...`);
+          loadPackages(true);
+        }
+      });
+
+    // Polling de contingência a cada 8 segundos para garantir sincronização caso o WebSocket caia
+    const pollingInterval = setInterval(() => {
+      if (document.visibilityState === 'visible' && effectiveCondoId) {
+        loadPackages(true);
+      }
+    }, 8000);
 
     return () => {
+      clearInterval(pollingInterval);
       alertChannelRef.current = null;
       supabase.removeChannel(alertChannel);
       supabase.removeChannel(dbChangesChannel);

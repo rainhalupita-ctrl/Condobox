@@ -23,9 +23,9 @@ export function Navbar() {
   const navLinks = isSuperAdmin
     ? isImpersonating
       ? [
-          { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
-          { href: '/admin', label: 'Administração', icon: LayoutDashboard },
           { href: '/portaria?view=1', label: 'Portaria', icon: Shield },
+          { href: '/admin?tab=admin', label: 'Administração do Condomínio', icon: LayoutDashboard },
+          { href: '/super-admin', label: 'Painel Master', icon: ShieldAlert },
         ]
       : [
           { href: '/super-admin', label: 'Painel Master (SaaS)', icon: ShieldAlert },
@@ -37,7 +37,7 @@ export function Navbar() {
     : isAdmin
     ? [
         { href: '/portaria', label: 'Portaria', icon: Shield },
-        { href: '/admin', label: 'Administração do Condomínio', icon: LayoutDashboard },
+        { href: '/admin?tab=admin', label: 'Administração do Condomínio', icon: LayoutDashboard },
       ]
     : isPortaria
     ? [
@@ -142,15 +142,6 @@ export function Navbar() {
                         {isImpersonating && (
                           <>
                             <Link
-                              href="/admin"
-                              onClick={() => setMenuOpen(false)}
-                              className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-emerald-400 hover:bg-emerald-500/15 font-semibold border-b border-slate-800/60 transition-colors"
-                              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                            >
-                              <LayoutDashboard size={14} className="text-emerald-400" />
-                              Administração do Condomínio
-                            </Link>
-                            <Link
                               href="/portaria?view=1"
                               onClick={() => setMenuOpen(false)}
                               className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-blue-400 hover:bg-blue-500/15 font-semibold border-b border-slate-800/60 transition-colors"
@@ -158,6 +149,15 @@ export function Navbar() {
                             >
                               <Shield size={14} className="text-blue-400" />
                               Portaria Operacional
+                            </Link>
+                            <Link
+                              href="/admin?tab=admin"
+                              onClick={() => setMenuOpen(false)}
+                              className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-emerald-400 hover:bg-emerald-500/15 font-semibold border-b border-slate-800/60 transition-colors"
+                              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                            >
+                              <LayoutDashboard size={14} className="text-emerald-400" />
+                              Administração do Condomínio
                             </Link>
                           </>
                         )}

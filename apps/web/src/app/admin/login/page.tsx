@@ -10,7 +10,7 @@ import Link from 'next/link';
 function SyndicLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect') || '/admin';
+  const redirectTo = searchParams.get('redirect') || '/portaria';
   const { user, loading: authLoading } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -25,7 +25,7 @@ function SyndicLoginForm() {
     document.title = 'CondoBox Síndico — Administração do Condomínio';
   }, []);
 
-  // Se o usuário já estiver logado (ou impersonando), redireciona direto para a Administração
+  // Se o usuário já estiver logado (ou impersonando), redireciona direto para a Portaria por padrão
   useEffect(() => {
     if (!authLoading && user) {
       router.replace(redirectTo);
@@ -78,12 +78,6 @@ function SyndicLoginForm() {
         .map(e => e.trim().toLowerCase());
       const isMasterOwner = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
 
-      // Se for o dono do sistema e não houver redirecionamento específico, manda para o super-admin
-      if (isMasterOwner && (!redirectTo || redirectTo === '/portaria')) {
-        router.push('/super-admin');
-        return;
-      }
-
       // 2. Validação: Este portal é para Síndicos, Administradores e Sócios Proprietários
       const isSyndicRole = profile?.role === 'SYNDIC' || profile?.role === 'ADMIN' || isMasterOwner;
 
@@ -100,8 +94,8 @@ function SyndicLoginForm() {
         return;
       }
 
-      // 3. Redireciona para o painel de administração do condomínio
-      router.push(redirectTo);
+      // 3. Redireciona sempre para a Portaria primeiro
+      router.push(redirectTo || '/portaria');
     } catch (err: any) {
       setError(err?.message || 'Erro inesperado ao conectar ao sistema.');
       setLoading(false);

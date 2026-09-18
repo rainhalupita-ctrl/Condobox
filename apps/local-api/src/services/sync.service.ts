@@ -7,19 +7,21 @@ export class SyncService {
   private intervalId: NodeJS.Timeout | null = null;
   private isOnline = false;
 
-  public start(intervalMs = 30000) {
+  private lastUnitsSyncTime = 0;
+
+  public start(intervalMs = 5000) {
     if (this.intervalId) return;
 
     console.log('🔄 [Sync Service] Inicializando serviço de sincronização híbrida (SQLite <-> Supabase)...');
     
-    // Executa sincronização inicial após 5s
+    // Executa sincronização inicial após 1s
     setTimeout(() => {
-      this.syncAll();
-    }, 5000);
+      this.syncAll(true);
+    }, 1000);
 
-    // Agenda sincronização contínua a cada intervalo (padrão: 30s)
+    // Agenda sincronização contínua a cada intervalo (padrão: 5s para pacotes rápidos)
     this.intervalId = setInterval(() => {
-      this.syncAll();
+      this.syncAll(false);
     }, intervalMs);
   }
 
@@ -37,7 +39,7 @@ export class SyncService {
     };
   }
 
-  public async syncAll(): Promise<void> {
+  public async syncAll(forceUnits = false): Promise<void> {
     if (this.isSyncing || !supabaseService.isConfigured()) return;
     this.isSyncing = true;
 
@@ -59,17 +61,49 @@ export class SyncService {
       // 2. Push: Enviar pacotes pendentes gravados localmente no SQLite
       await this.pushPendingPackages();
 
-      // 3. Pull: Baixar unidades e moradores atualizados da nuvem
-      await this.pullUnitsAndResidents();
+      // 3. Pull PRIORITÁRIO: Baixar encomendas ativas e recentes da nuvem para o SQLite local
+      await this.pullPackages();
 
       // 4. Reconcile: Sincronizar exclusões e mudanças de status de encomendas da nuvem para o SQLite local
       await this.reconcilePackages();
+
+      // 5. Pull Otimizado: Baixar unidades e moradores atualizados (a cada 10 min ou inicial)
+      await this.pullUnitsAndResidents(forceUnits);
 
     } catch (err: any) {
       this.isOnline = false;
       // Silencioso para não poluir logs em caso de internet offline na portaria
     } finally {
       this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Puxa encomendas ativas e recentes da nuvem (Supabase) para o SQLite local
+   */
+  public async pullPackages(): Promise<void> {
+    try {
+      const client = supabaseService.getClient();
+      // Puxa encomendas ativas (RECEIVED e NOTIFIED) ou recebidas nas últimas 72 horas
+      const threeDaysAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+      const { data: cloudPkgs, error } = await client
+        .from('packages')
+        .select('*')
+        .or(`status.in.(RECEIVED,NOTIFIED),created_at.gte.${threeDaysAgo}`)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (error) {
+        console.warn('[SyncService] Erro ao puxar pacotes do Supabase:', error.message);
+        return;
+      }
+
+      if (cloudPkgs && cloudPkgs.length > 0) {
+        databaseService.upsertPackagesFromCloud(cloudPkgs);
+        console.log(`📦 [SyncService] ${cloudPkgs.length} encomendas sincronizadas da nuvem para o SQLite local.`);
+      }
+    } catch (err: any) {
+      console.warn('[SyncService] Exceção ao puxar pacotes da nuvem:', err.message);
     }
   }
 
@@ -173,7 +207,14 @@ export class SyncService {
     }
   }
 
-  private async pullUnitsAndResidents(): Promise<void> {
+  private async pullUnitsAndResidents(force = false): Promise<void> {
+    const now = Date.now();
+    // Só sincroniza unidades e moradores a cada 10 minutos (ou se forçado no startup),
+    // pois novos moradores/unidades já são sincronizados instantaneamente via Realtime.
+    if (!force && now - this.lastUnitsSyncTime < 10 * 60 * 1000) {
+      return;
+    }
+
     try {
       const client = supabaseService.getClient();
 
@@ -188,6 +229,7 @@ export class SyncService {
 
       if (units && units.length > 0) {
         databaseService.upsertUnitsAndResidents(units, residents || []);
+        this.lastUnitsSyncTime = now;
       }
     } catch {}
   }

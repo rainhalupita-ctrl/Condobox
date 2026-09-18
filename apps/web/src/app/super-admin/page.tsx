@@ -1076,7 +1076,7 @@ export default function SuperAdminPage() {
   // Impersonar Condomínio
   const handleImpersonate = (account: AccountItem) => {
     impersonateCondo({ id: account.id, name: account.name });
-    router.push('/admin');
+    router.push('/portaria?view=1');
   };
 
   // Abrir Modal de Exclusão de Condomínio

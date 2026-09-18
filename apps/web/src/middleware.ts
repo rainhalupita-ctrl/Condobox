@@ -85,25 +85,16 @@ export async function middleware(request: NextRequest) {
 
       const redirectParam = request.nextUrl.searchParams.get('redirect');
       if (redirectParam && redirectParam.startsWith('/') && !redirectParam.includes('login')) {
-        if (isMasterOwner && (redirectParam === '/portaria' || (redirectParam.startsWith('/portaria') && !redirectParam.includes('view=')))) {
-          return NextResponse.redirect(new URL('/super-admin', request.url));
-        }
         return NextResponse.redirect(new URL(redirectParam, request.url));
       }
 
-      const dest = pathname === '/admin/login'
-        ? '/admin'
-        : isMasterOwner 
-        ? '/super-admin' 
-        : role === 'RESIDENT' 
-        ? '/morador' 
-        : '/portaria';
+      const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
   }
 
-  // Rota raiz `/` — redirecionar baseado no papel
+  // Rota raiz `/` — redirecionar baseado no papel (sempre abre Portaria primeiro para condomínios)
   if (pathname === '/') {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url));
@@ -114,15 +105,6 @@ export async function middleware(request: NextRequest) {
       .eq('id', user.id)
       .single();
     const role = profile.data?.role || 'RESIDENT';
-    const userEmail = (user.email || '').toLowerCase();
-    const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
-      .split(',')
-      .map(e => e.trim().toLowerCase());
-    const isMasterOwner = role === 'ADMIN' || superAdminEmails.includes(userEmail);
-
-    if (isMasterOwner) {
-      return NextResponse.redirect(new URL('/super-admin', request.url));
-    }
     const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
     return NextResponse.redirect(new URL(dest, request.url));
   }
@@ -163,13 +145,6 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(dest, request.url));
     }
     return supabaseResponse;
-  }
-
-  // Se for Dono do Sistema acessando /portaria sem parâmetro explícito (?view=),
-  // redireciona para a central Master dele (/super-admin). Garante que o app Desktop ou inicializações
-  // abram sempre no Painel Master para o Sócio Proprietário!
-  if (pathname === '/portaria' && isMasterOwner && !request.nextUrl.searchParams.has('view')) {
-    return NextResponse.redirect(new URL('/super-admin', request.url));
   }
 
   const role = (profile?.role as string) || 'RESIDENT';

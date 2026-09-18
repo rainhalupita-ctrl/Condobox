@@ -67,6 +67,12 @@ export class WhatsAppQueueWorker {
           { event: 'INSERT', schema: 'public', table: 'packages' },
           async (payload) => {
             console.log('⚡ [WhatsApp Worker] Novo pacote recebido via Realtime:', payload.new?.id);
+            if (payload.new) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.upsertPackagesFromCloud([payload.new]);
+              } catch {}
+            }
             if (payload.new?.id) {
               await this.dispatchArrivalNotification(payload.new.id);
             }
@@ -76,11 +82,105 @@ export class WhatsAppQueueWorker {
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'packages' },
           async (payload) => {
+            if (payload.new) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.upsertPackagesFromCloud([payload.new]);
+              } catch {}
+            }
             if (payload.new?.status === 'DELIVERED') {
               console.log('⚡ [WhatsApp Worker] Encomenda retirada via Realtime:', payload.new?.id);
               if (payload.new?.id) {
                 await this.dispatchDeliveryNotification(payload.new.id);
               }
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'packages' },
+          async (payload) => {
+            const deletedId = payload.old?.id;
+            console.log('⚡ [WhatsApp Worker] Pacote excluído via Realtime:', deletedId);
+            if (deletedId) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.deletePackage(deletedId);
+              } catch {}
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'residents' },
+          async (payload) => {
+            if (payload.new) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.upsertResident(payload.new);
+              } catch {}
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'residents' },
+          async (payload) => {
+            if (payload.new) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.upsertResident(payload.new);
+              } catch {}
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'residents' },
+          async (payload) => {
+            const residentId = payload.old?.id;
+            if (residentId) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.deleteResident(residentId);
+              } catch {}
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'units' },
+          async (payload) => {
+            if (payload.new) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.upsertUnit(payload.new);
+              } catch {}
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'units' },
+          async (payload) => {
+            if (payload.new) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.upsertUnit(payload.new);
+              } catch {}
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'units' },
+          async (payload) => {
+            const unitId = payload.old?.id;
+            if (unitId) {
+              try {
+                const { databaseService } = await import('./database.service.js');
+                databaseService.deleteUnit(unitId);
+              } catch {}
             }
           }
         )
@@ -96,6 +196,12 @@ export class WhatsAppQueueWorker {
         )
         .subscribe((status) => {
           console.log(`📡 [WhatsApp Worker] Realtime canal: ${status}`);
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn(`⚠️ [WhatsApp Worker] Canal Realtime em status ${status}. Tentando reconectar em 5s...`);
+            setTimeout(() => {
+              if (this.isRunning) this.setupRealtimeListener();
+            }, 5000);
+          }
         });
     } catch (err) {
       console.warn('[WhatsApp Worker] Falha ao registrar listener Realtime, operando via polling:', err);
@@ -410,6 +516,19 @@ export class WhatsAppQueueWorker {
 
       if (res.success) {
         console.log(`✅ [WhatsApp Worker] Notificação de Chegada enviada para ${phone}!`);
+        try {
+          if (supabaseService.isConfigured()) {
+            await client
+              .from('notifications_log')
+              .update({
+                status: 'SENT',
+                sent_at: new Date().toISOString(),
+                external_message_id: res.messageId || 'arrival-dispatch'
+              })
+              .eq('package_id', packageId)
+              .eq('status', 'PENDING');
+          }
+        } catch {}
       } else {
         const count = (this.arrivalAttempts.get(packageId) || 0) + 1;
         this.arrivalAttempts.set(packageId, count);
