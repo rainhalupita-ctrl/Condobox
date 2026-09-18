@@ -1879,11 +1879,10 @@ export default function SuperAdminPage() {
                             <button
                               type="button"
                               onClick={() => handleImpersonate(account)}
-                              className="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                              className="p-1.5 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded-xl transition border border-transparent hover:border-amber-500/30"
                               title={`Impersonar condomínio ${account.name} e navegar como Síndico`}
                             >
-                              <Eye size={13} />
-                              <span>Impersonar</span>
+                              <Eye size={15} />
                             </button>
 
                             {/* Botão de Trocar Senha */}
