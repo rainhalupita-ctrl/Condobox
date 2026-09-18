@@ -55,7 +55,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function AdminPage() {
-  const { user, isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
+  const { user, profile, isGuard, isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
   const router = useRouter();
   const [availableCondos, setAvailableCondos] = useState<{ id: string; name: string }[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -329,6 +329,13 @@ export default function AdminPage() {
       return;
     }
 
+    // Se for Porteiro (GUARD) ou não for Administrador/Síndico, bloqueia acesso a /admin e redireciona para a Portaria
+    const isPorteiro = isGuard || profile?.role === 'GUARD';
+    if (!authLoading && (isPorteiro || (!isAdmin && !isSuperAdmin))) {
+      router.replace('/portaria');
+      return;
+    }
+
     if (isSuperAdmin) {
       const fetchCondos = async () => {
         const supabase = createClient();
@@ -339,7 +346,7 @@ export default function AdminPage() {
       };
       fetchCondos();
     }
-  }, [isSuperAdmin, isImpersonating, authLoading, router]);
+  }, [isSuperAdmin, isImpersonating, authLoading, isGuard, profile?.role, isAdmin, router]);
 
   // Regra obrigatória: no celular e no computador, a Portaria deve abrir primeiro!
   // Se o usuário acessar /admin diretamente no celular sem ter clicado na aba de administração (?tab=admin),
@@ -397,6 +404,12 @@ export default function AdminPage() {
       const currentUser = user || session?.user;
       if (!currentUser) {
         router.replace('/admin/login?redirect=/portaria');
+        return;
+      }
+
+      const isPorteiro = isGuard || profile?.role === 'GUARD';
+      if (isPorteiro || (!isAdmin && !isSuperAdmin)) {
+        router.replace('/portaria');
         return;
       }
 
@@ -1134,6 +1147,16 @@ export default function AdminPage() {
     const carrierMatch = (pkg.carrier || '').toLowerCase().includes(q);
     return unitMatch || nameMatch || codeMatch || carrierMatch;
   });
+
+  const isPorteiro = isGuard || profile?.role === 'GUARD';
+  if (!authLoading && (isPorteiro || (!isAdmin && !isSuperAdmin))) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+        <p className="text-slate-400 text-sm font-medium">Redirecionando para a Portaria...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

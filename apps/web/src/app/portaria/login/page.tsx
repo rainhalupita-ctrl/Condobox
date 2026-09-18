@@ -78,6 +78,12 @@ function PortariaLoginForm() {
         return;
       }
 
+      // Se for Porteiro (GUARD), o destino é estritamente a aba de Portaria
+      if (role === 'GUARD') {
+        router.push('/portaria');
+        return;
+      }
+
       router.push(redirectTo);
     } catch (err: any) {
       setError(err?.message || 'Erro ao conectar à portaria.');

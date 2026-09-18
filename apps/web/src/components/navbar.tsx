@@ -7,7 +7,7 @@ import { Building2, Package, LayoutDashboard, User, LogOut, Shield, ChevronDown,
 import { useState } from 'react';
 
 export function Navbar() {
-  const { profile, isPortaria, isAdmin, isSuperAdmin, isImpersonating, signOut, loading } = useAuth();
+  const { profile, isPortaria, isGuard, isAdmin, isSuperAdmin, isImpersonating, signOut, loading } = useAuth();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -18,9 +18,15 @@ export function Navbar() {
   }
 
   const isMasterRoute = pathname.startsWith('/super-admin') || pathname.startsWith('/master');
+  const isPorteiro = isGuard || profile?.role === 'GUARD';
 
-  // O Sócio Proprietário (Super Admin) só vê as abas Administração e Portaria se estiver personificando um condomínio!
-  const navLinks = isSuperAdmin
+  // Regra Estrita de Acesso:
+  // Se for Porteiro (GUARD), tem acesso ÚNICO E EXCLUSIVO à aba da Portaria (ícone Shield)
+  const navLinks = isPorteiro
+    ? [
+        { href: '/portaria', label: 'Portaria', icon: Shield },
+      ]
+    : isSuperAdmin
     ? isImpersonating
       ? [
           { href: '/portaria?view=1', label: 'Portaria', icon: Shield },
@@ -59,7 +65,7 @@ export function Navbar() {
         <div className="w-full px-3 sm:px-6 sm:pr-36 h-14 flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo Oficial CondoBox */}
           <Link 
-            href={isSuperAdmin || isMasterRoute ? '/super-admin' : (isPortaria || isAdmin) ? '/portaria' : '/morador'}
+            href={isSuperAdmin || isMasterRoute ? '/super-admin' : (isPorteiro || isPortaria || isAdmin) ? '/portaria' : '/morador'}
             className="flex items-center gap-2 sm:gap-2.5 shrink-0 group"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
@@ -111,10 +117,11 @@ export function Navbar() {
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase whitespace-nowrap ${
                   isSuperAdmin ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                   isAdmin ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
+                  isPorteiro ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
                   isPortaria ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
                   'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                 }`}>
-                  {isSuperAdmin ? 'Sócio Proprietário' : isAdmin ? 'Síndico' : isPortaria ? 'Portaria' : 'Morador'}
+                  {isSuperAdmin ? 'Sócio Proprietário' : isAdmin ? 'Síndico' : isPorteiro ? 'Porteiro' : isPortaria ? 'Portaria' : 'Morador'}
                 </span>
                 <ChevronDown size={13} className="text-slate-500" />
               </button>

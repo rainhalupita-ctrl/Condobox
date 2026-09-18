@@ -35,6 +35,7 @@ interface AuthContextType {
   license: LicenseInfo | null;
   loading: boolean;
   isPortaria: boolean;
+  isGuard: boolean;
   isAdmin: boolean;
   isSuperAdmin: boolean;
   isMorador: boolean;
@@ -194,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     : (profile?.condo_id || null);
 
   // Sócio Proprietário só assume abas/permissões de Portaria ou Administração quando estiver personificando um condomínio!
+  const isGuard = !isSuperAdmin && role === 'GUARD';
   const isPortaria = isSuperAdmin ? isImpersonating : (role === 'SYNDIC' || role === 'GUARD');
   const isAdmin = isSuperAdmin ? isImpersonating : (role === 'SYNDIC');
   const isMorador = !isSuperAdmin && (role === 'RESIDENT' || role === 'SYNDIC');
@@ -217,6 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         license,
         loading,
         isPortaria,
+        isGuard,
         isAdmin,
         isSuperAdmin,
         isMorador,

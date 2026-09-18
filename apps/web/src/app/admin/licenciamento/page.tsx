@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/auth-context';
 import {
   ShieldCheck,
   CreditCard,
@@ -21,7 +23,8 @@ import {
   ChevronRight,
   ArrowLeft,
   Settings,
-  Megaphone
+  Megaphone,
+  Loader2
 } from 'lucide-react';
 
 interface CondoItem {
@@ -40,6 +43,8 @@ interface CondoItem {
 }
 
 export default function AdminLicenciamentoPage() {
+  const { profile, isGuard, isAdmin, isSuperAdmin, loading: authLoading } = useAuth();
+  const router = useRouter();
   const [condos, setCondos] = useState<CondoItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCondo, setSelectedCondo] = useState<CondoItem | null>(null);
@@ -52,8 +57,13 @@ export default function AdminLicenciamentoPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    const isPorteiro = isGuard || profile?.role === 'GUARD';
+    if (!authLoading && (isPorteiro || (!isAdmin && !isSuperAdmin))) {
+      router.replace('/portaria');
+      return;
+    }
     loadCondos();
-  }, []);
+  }, [authLoading, isGuard, profile?.role, isAdmin, isSuperAdmin, router]);
 
   const loadCondos = async () => {
     setLoading(true);
@@ -186,6 +196,15 @@ export default function AdminLicenciamentoPage() {
   const activeCount = condos.filter(c => c.subscription?.status === 'ACTIVE').length;
   const trialCount = condos.filter(c => c.subscription?.status === 'TRIAL').length;
   const estimatedMRR = condos.reduce((acc, c) => acc + (c.subscription?.custom_price_monthly || 0), 0);
+  const isPorteiro = isGuard || profile?.role === 'GUARD';
+  if (!authLoading && (isPorteiro || (!isAdmin && !isSuperAdmin))) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+        <p className="text-slate-400 text-sm font-medium">Redirecionando para a Portaria...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10">

@@ -54,7 +54,7 @@ export async function middleware(request: NextRequest) {
   if (isPublic) {
     // Se já está logado e acessa /master/login, redireciona para /super-admin se for dono
     if (user && pathname.startsWith('/master/login')) {
-      const profile = await supabase
+      const { data: profile } = await supabase
         .from('profiles')
         .select('role, condo_id')
         .eq('id', user.id)
@@ -63,7 +63,7 @@ export async function middleware(request: NextRequest) {
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
         .map(e => e.trim().toLowerCase());
-      const isMasterOwner = profile.data?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
+      const isMasterOwner = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
       if (isMasterOwner) {
         return NextResponse.redirect(new URL('/super-admin', request.url));
       }
@@ -71,12 +71,12 @@ export async function middleware(request: NextRequest) {
 
     // Se já está logado e tenta acessar telas de login ou cadastro
     if (user && (pathname === '/login' || pathname === '/cadastro' || pathname === '/admin/login' || pathname === '/portaria/login')) {
-      const profile = await supabase
+      const { data: profile } = await supabase
         .from('profiles')
         .select('role, condo_id')
         .eq('id', user.id)
         .single();
-      const role = profile.data?.role || 'RESIDENT';
+      const role = profile?.role || 'RESIDENT';
       const userEmail = (user.email || '').toLowerCase();
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
@@ -85,7 +85,10 @@ export async function middleware(request: NextRequest) {
 
       const redirectParam = request.nextUrl.searchParams.get('redirect');
       if (redirectParam && redirectParam.startsWith('/') && !redirectParam.includes('login')) {
-        return NextResponse.redirect(new URL(redirectParam, request.url));
+        const allowedPaths = ROLE_ALLOWED_PATHS[role] || ['/morador'];
+        if (allowedPaths.some(p => redirectParam.startsWith(p))) {
+          return NextResponse.redirect(new URL(redirectParam, request.url));
+        }
       }
 
       const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
@@ -99,12 +102,12 @@ export async function middleware(request: NextRequest) {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
-    const profile = await supabase
+    const { data: profile } = await supabase
       .from('profiles')
       .select('role, condo_id')
       .eq('id', user.id)
       .single();
-    const role = profile.data?.role || 'RESIDENT';
+    const role = profile?.role || 'RESIDENT';
     const dest = role === 'RESIDENT' ? '/morador' : '/portaria';
     return NextResponse.redirect(new URL(dest, request.url));
   }

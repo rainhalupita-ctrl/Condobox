@@ -88,6 +88,10 @@ export default function MoradorPage() {
     }
 
     if (!authLoading && user) {
+      if (profile?.role === 'GUARD') {
+        window.location.href = '/portaria';
+        return;
+      }
       loadResidentAndPackages();
 
       const supabase = createClient();
@@ -110,10 +114,19 @@ export default function MoradorPage() {
         supabase.removeChannel(channel);
       };
     }
-  }, [authLoading, user]);
+  }, [authLoading, user, profile?.role]);
 
   const pendingPackages = packages.filter(p => p.status !== 'DELIVERED' && p.status !== 'RETURNED');
   const historyPackages = packages.filter(p => p.status === 'DELIVERED' || p.status === 'RETURNED');
+
+  if (!authLoading && profile?.role === 'GUARD') {
+    return (
+      <div className="py-20 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
+        <RefreshCw className="w-8 h-8 animate-spin text-emerald-400" />
+        <p className="text-sm font-medium">Redirecionando para a Portaria...</p>
+      </div>
+    );
+  }
 
   if (authLoading || loading) {
     return (

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/auth-context';
 import {
   Megaphone,
   Plus,
@@ -16,7 +18,8 @@ import {
   MessageSquare,
   Link as LinkIcon,
   Trash2,
-  Edit2
+  Edit2,
+  Loader2
 } from 'lucide-react';
 
 interface AdCampaign {
@@ -34,6 +37,8 @@ interface AdCampaign {
 }
 
 export default function AdminAnunciosPage() {
+  const { profile, isGuard, isAdmin, isSuperAdmin, loading: authLoading } = useAuth();
+  const router = useRouter();
   const [ads, setAds] = useState<AdCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -50,8 +55,13 @@ export default function AdminAnunciosPage() {
   const [active, setActive] = useState(true);
 
   useEffect(() => {
+    const isPorteiro = isGuard || profile?.role === 'GUARD';
+    if (!authLoading && (isPorteiro || (!isAdmin && !isSuperAdmin))) {
+      router.replace('/portaria');
+      return;
+    }
     loadAds();
-  }, []);
+  }, [authLoading, isGuard, profile?.role, isAdmin, isSuperAdmin, router]);
 
   const loadAds = async () => {
     setLoading(true);
@@ -174,6 +184,16 @@ export default function AdminAnunciosPage() {
   const totalViews = ads.reduce((acc, a) => acc + a.views_count, 0);
   const totalClicks = ads.reduce((acc, a) => acc + a.clicks_count, 0);
   const averageCTR = totalViews > 0 ? ((totalClicks / totalViews) * 100).toFixed(1) : '0';
+
+  const isPorteiro = isGuard || profile?.role === 'GUARD';
+  if (!authLoading && (isPorteiro || (!isAdmin && !isSuperAdmin))) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+        <p className="text-slate-400 text-sm font-medium">Redirecionando para a Portaria...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10">
