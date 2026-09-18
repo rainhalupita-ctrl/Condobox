@@ -43,6 +43,7 @@ export default function NovaEncomendaPage() {
   const router = useRouter();
   const { effectiveCondoId, loading: authLoading } = useAuth();
   const [step, setStep] = useState<'CAPTURE' | 'CONFIRM'>('CAPTURE');
+  const [cameraKey, setCameraKey] = useState<number>(0);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [ocrData, setOcrData] = useState<OCRResponse | null>(null);
@@ -563,102 +564,150 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
       return;
     }
 
-    await executeSavePackage();
+    executeSavePackage();
   };
 
-  const executeSavePackage = async () => {
+  const handleRetakePhoto = () => {
+    setCapturedBlob(null);
+    setCapturedPreview(null);
+    setStep('CAPTURE');
+    setCameraKey((k) => k + 1);
+  };
+
+  const executeSavePackage = () => {
     if (isSaving) return;
     setIsSaving(true);
+    setTimeout(() => setIsSaving(false), 500);
     setDuplicateWarning(null);
 
-    try {
-      const selectedUnit = units.find(u => u.id === selectedUnitId);
-      const selectedRes = residents.find(r => r.id === selectedResidentId);
-      const unitText = selectedUnit ? `Apto ${selectedUnit.unit_number} - ${selectedUnit.block}` : 'Unidade';
-      const resName = selectedRes?.name || recipientNameOcr || 'Morador';
+    // 1. Snapshot instantâneo de todas as variáveis do formulário
+    const snapUnitId = selectedUnitId;
+    const snapResidentId = selectedResidentId || null;
+    const snapCarrier = carrier;
+    const snapTrackingCode = trackingCode || null;
+    const snapRecipientNameOcr = recipientNameOcr || null;
+    const snapNotes = notes || '';
+    const snapInvoiceNumber = invoiceNumber || '';
+    const snapIsThirdParty = isThirdPartyAuthorized;
+    const snapThirdPartyName = thirdPartyName;
+    const snapThirdPartyRelation = thirdPartyRelation;
+    const snapSendWhatsApp = sendWhatsApp;
+    const snapCustomPhone = customPhone;
+    const snapCapturedBlob = capturedBlob;
+    const snapInitialLabelPath = ocrData?.image?.path || null;
+    const snapCondoId = effectiveCondoId;
 
-      // Concatena nota fiscal e terceiro autorizado nas notas caso preenchidos
-      let finalNotes: string | null = invoiceNumber
-        ? `NF: ${invoiceNumber}${notes ? ` | ${notes}` : ''}`
-        : (notes || '');
+    const selectedUnit = units.find(u => u.id === snapUnitId);
+    const selectedRes = residents.find(r => r.id === snapResidentId);
+    const unitText = selectedUnit ? `Apto ${selectedUnit.unit_number} - ${selectedUnit.block}` : 'Unidade';
+    const resName = selectedRes?.name || snapRecipientNameOcr || 'Morador';
+    const phone = snapCustomPhone || selectedRes?.phone || null;
+    const deliveredTo = (snapIsThirdParty && snapThirdPartyName.trim()) ? snapThirdPartyName.trim() : null;
 
-      if (isThirdPartyAuthorized && thirdPartyName.trim()) {
-        const tpNote = `TERCEIRO_AUTORIZADO: ${thirdPartyName.trim()}${thirdPartyRelation.trim() ? ` (${thirdPartyRelation.trim()})` : ''} registrado na portaria em ${new Date().toLocaleDateString('pt-BR')}`;
-        finalNotes = finalNotes ? `${finalNotes} | ${tpNote}` : tpNote;
-      }
-      finalNotes = finalNotes ? (finalNotes.trim() || null) : null;
+    let finalNotes: string | null = snapInvoiceNumber
+      ? `NF: ${snapInvoiceNumber}${snapNotes ? ` | ${snapNotes}` : ''}`
+      : (snapNotes || '');
 
-      // Se o path da imagem ainda está vazio (modo ao vivo), faz o upload agora antes de salvar
-      let labelImagePath = ocrData?.image?.path || null;
-      if (!labelImagePath && capturedBlob) {
-        try {
-          const uploadData = await LocalApiClient.uploadLabelAndOCR(capturedBlob);
-          labelImagePath = uploadData?.image?.path || null;
-        } catch (uploadErr) {
-          console.warn('[Nova] Falha no upload da imagem antes de salvar:', uploadErr);
-        }
-      }
-
-      const res = await LocalApiClient.createPackage({
-        condoId: effectiveCondoId,
-        unitId: selectedUnitId,
-        residentId: selectedResidentId || null,
-        carrier: carrier,
-        trackingCode: trackingCode || null,
-        recipientNameOcr: recipientNameOcr || null,
-        labelImagePath,
-        notes: finalNotes,
-        sendWhatsApp: sendWhatsApp,
-        residentPhone: customPhone || selectedRes?.phone || null,
-        residentName: resName,
-        unitInfo: unitText,
-        deliveredToName: (isThirdPartyAuthorized && thirdPartyName.trim()) ? thirdPartyName.trim() : null
-      });
-
-      const pkgId = res.package?.id;
-      const pickupCode = res.package?.pickup_code || '----';
-
-      // Feedback auditivo e de voz
-      VoiceService.playSuccessBeep();
-      VoiceService.speak(`Nova encomenda: ${unitText}`);
-
-      // Feedback háptico de sucesso
-      try {
-        navigator.vibrate?.([40, 60, 40]);
-      } catch {}
-
-      // Se a criação inicial (pela Vercel ou Local) falhou ao enviar o WhatsApp,
-      // tenta disparar a notificação local como fallback.
-      if (pkgId && !res.whatsapp?.sent) {
-        LocalApiClient.notifyPackage(pkgId, false).catch(() => {});
-      }
-
-      // Adiciona na lista de recentes para acompanhamento em tempo real
-      const newSavedItem: RecentSavedPackage = {
-        id: pkgId,
-        pickupCode,
-        unitText,
-        residentName: resName,
-        carrier,
-        whatsappStatus: res.whatsapp?.sent ? 'SENT' : 'SENDING',
-        createdAt: new Date()
-      };
-
-      setRecentSaved(prev => [newSavedItem, ...prev.slice(0, 9)]);
-      setLastNotificationToast(newSavedItem);
-
-      // Auto-oculta o toast após 6s
-      setTimeout(() => {
-        setLastNotificationToast(prev => (prev?.id === pkgId ? null : prev));
-      }, 6000);
-
-      // Retorna IMEDIATAMENTE para a câmera para ler o próximo pacote sem travar!
-      resetForm();
-    } catch (err: any) {
-      alert(`Erro ao registrar encomenda: ${err.message}`);
-    } finally {
-      setIsSaving(false);
+    if (snapIsThirdParty && snapThirdPartyName.trim()) {
+      const tpNote = `TERCEIRO_AUTORIZADO: ${snapThirdPartyName.trim()}${snapThirdPartyRelation.trim() ? ` (${snapThirdPartyRelation.trim()})` : ''} registrado na portaria em ${new Date().toLocaleDateString('pt-BR')}`;
+      finalNotes = finalNotes ? `${finalNotes} | ${tpNote}` : tpNote;
     }
+    finalNotes = finalNotes ? (finalNotes.trim() || null) : null;
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 2. Feedback auditivo, por voz e tátil instantâneo (0ms de atraso na interface)
+    VoiceService.playSuccessBeep();
+    VoiceService.speak(`Nova encomenda: ${unitText}`);
+    try {
+      navigator.vibrate?.([40, 60, 40]);
+    } catch {}
+
+    // 3. Adiciona imediatamente na fila de recentes visível abaixo da câmera
+    const optimisticSavedItem: RecentSavedPackage = {
+      id: tempId,
+      pickupCode: '...',
+      unitText,
+      residentName: resName,
+      carrier: snapCarrier,
+      whatsappStatus: 'SENDING',
+      createdAt: new Date()
+    };
+    setRecentSaved(prev => [optimisticSavedItem, ...prev.slice(0, 9)]);
+    setLastNotificationToast(optimisticSavedItem);
+
+    // 4. RETORNA IMEDIATAMENTE PARA A CÂMERA PRONTA PARA A PRÓXIMA ENCOMENDA!
+    resetForm();
+
+    // 5. Todos os processos de upload, persistência e WhatsApp rodam em segundo plano
+    (async () => {
+      let labelImagePath = snapInitialLabelPath;
+      try {
+        if (!labelImagePath && snapCapturedBlob) {
+          try {
+            const uploadData = await LocalApiClient.uploadLabelAndOCR(snapCapturedBlob);
+            labelImagePath = uploadData?.image?.path || null;
+          } catch (uploadErr) {
+            console.warn('[Nova Background] Falha no upload da imagem:', uploadErr);
+          }
+        }
+
+        const res = await LocalApiClient.createPackage({
+          condoId: snapCondoId,
+          unitId: snapUnitId,
+          residentId: snapResidentId,
+          carrier: snapCarrier,
+          trackingCode: snapTrackingCode,
+          recipientNameOcr: snapRecipientNameOcr,
+          labelImagePath,
+          notes: finalNotes,
+          sendWhatsApp: snapSendWhatsApp,
+          residentPhone: phone,
+          residentName: resName,
+          unitInfo: unitText,
+          deliveredToName: deliveredTo
+        });
+
+        const pkgId = res.package?.id || tempId;
+        const pickupCode = res.package?.pickup_code || '----';
+        const isSent = !!res.whatsapp?.sent;
+
+        if (pkgId && !isSent && snapSendWhatsApp) {
+          LocalApiClient.notifyPackage(pkgId, false).catch(() => {});
+        }
+
+        const finalSavedItem: RecentSavedPackage = {
+          id: pkgId,
+          pickupCode,
+          unitText,
+          residentName: resName,
+          carrier: snapCarrier,
+          whatsappStatus: isSent ? 'SENT' : 'SENDING',
+          createdAt: new Date()
+        };
+
+        setRecentSaved(prev => prev.map(item => item.id === tempId ? finalSavedItem : item));
+        setLastNotificationToast(finalSavedItem);
+
+        setTimeout(() => {
+          setLastNotificationToast(prev => (prev?.id === pkgId ? null : prev));
+        }, 5000);
+      } catch (bgErr: any) {
+        console.error('[Nova Background] Erro ao registrar encomenda:', bgErr);
+        setRecentSaved(prev => prev.map(item => item.id === tempId ? {
+          ...item,
+          whatsappStatus: 'FAILED'
+        } : item));
+        setLastNotificationToast({
+          id: tempId,
+          pickupCode: 'ERRO',
+          unitText,
+          carrier: snapCarrier,
+          residentName: resName,
+          whatsappStatus: 'FAILED'
+        });
+      }
+    })();
   };
 
   const resetForm = () => {
@@ -679,6 +728,7 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
     setThirdPartyName('');
     setThirdPartyRelation('');
     setDuplicateWarning(null);
+    setCameraKey((k) => k + 1);
   };
 
   return (
@@ -832,9 +882,10 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
         </span>
       </div>
 
-      {/* Passo 1: Captura da Foto Imediata (Mantido montado fora de display:none para preservar a permissão e o pipeline de vídeo no iOS) */}
-      <div className={step === 'CAPTURE' ? 'space-y-5 animate-fade-in' : 'fixed -top-[9999px] -left-[9999px] w-1 h-1 opacity-0 pointer-events-none overflow-hidden'}>
+      {/* Passo 1: Captura da Foto Imediata */}
+      <div className={step === 'CAPTURE' ? 'space-y-5 animate-fade-in' : 'hidden'}>
         <CameraCapture
+          key={cameraKey}
           keepStreamAlive={true}
           isCaptureActive={step === 'CAPTURE'}
           onCapture={handleCapturePhoto}
@@ -1237,7 +1288,7 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => setStep('CAPTURE')}
+                onClick={handleRetakePhoto}
                 className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-semibold transition"
               >
                 Tirar Outra Foto

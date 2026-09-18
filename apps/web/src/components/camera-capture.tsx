@@ -84,6 +84,19 @@ export function CameraCapture({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
+
+  // Callback ref para garantir que o elemento <video> receba o stream imediatamente ao ser anexado
+  const handleVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node && streamRef.current) {
+      if (node.srcObject !== streamRef.current) {
+        node.srcObject = streamRef.current;
+      }
+      node.setAttribute('playsinline', 'true');
+      node.setAttribute('webkit-playsinline', 'true');
+      node.play().catch(() => {});
+    }
+  }, []);
   
   // Modo padrão da câmera: inicia na traseira (ideal para leitura de etiquetas)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -111,6 +124,18 @@ export function CameraCapture({
   // Economia inteligente de tokens (Detector de Câmera Parada / Anti-Idle)
   const lastSharpnessRef = useRef<number>(0);
   const consecutiveStaticRef = useRef<number>(0);
+
+  // Sincroniza ativamente o stream com o elemento de vídeo sempre que o estado mudar
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+      }
+      videoRef.current.setAttribute('playsinline', 'true');
+      videoRef.current.setAttribute('webkit-playsinline', 'true');
+      videoRef.current.play().catch(() => {});
+    }
+  }, [stream]);
 
   // Função centralizada para desligar completamente a câmera e liberar o hardware
   const stopCamera = useCallback(() => {
@@ -304,43 +329,71 @@ export function CameraCapture({
       setIsDetected(false);
       setIsSteady(false);
 
-      const hasLiveTracks = streamRef.current?.getVideoTracks().some((t) => t.readyState === 'live');
-      if (!hasLiveTracks || !streamRef.current) {
-        startCamera();
-      } else {
+      const restorePlayback = () => {
         const video = videoRef.current;
-        if (video) {
+        const currentStream = streamRef.current;
+        const hasLiveTracks = currentStream?.getVideoTracks().some((t) => t.readyState === 'live');
+
+        if (!hasLiveTracks || !currentStream) {
+          startCamera();
+        } else if (video) {
           video.muted = true;
           video.setAttribute('playsinline', 'true');
           video.setAttribute('webkit-playsinline', 'true');
-          if (video.srcObject !== streamRef.current) {
-            video.srcObject = streamRef.current;
+          if (video.srcObject !== currentStream) {
+            video.srcObject = currentStream;
           }
-          video.play().catch(() => {});
-
-          // Garante destravamento do renderizador no Safari (evita tela preta por pausa do WebKit)
-          const unfreezePlayback = () => {
-            if (videoRef.current && streamRef.current) {
-              if (videoRef.current.paused || videoRef.current.readyState < 2) {
-                videoRef.current.srcObject = streamRef.current;
-                videoRef.current.play().catch(() => {
-                  startCamera();
-                });
-              }
-            }
-          };
-
-          requestAnimationFrame(unfreezePlayback);
-          setTimeout(unfreezePlayback, 120);
-          setTimeout(unfreezePlayback, 350);
+          video.play().catch(() => {
+            startCamera();
+          });
         }
-      }
+      };
+
+      restorePlayback();
+      const t1 = setTimeout(restorePlayback, 80);
+      const t2 = setTimeout(restorePlayback, 250);
+      const t3 = setTimeout(restorePlayback, 600);
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+      };
     } else {
       // Pausado durante a confirmação de dados para economizar CPU
       autoCaptureFiredRef.current = true;
       isProcessingRef.current = true;
     }
   }, [isCaptureActive, keepStreamAlive, startCamera]);
+
+  // Watchdog de saúde da câmera: detecta e reanima vídeo pausado, tela preta ou stream interrompido
+  useEffect(() => {
+    if (!isCaptureActive || capturedBlob) return;
+
+    const watchdog = setInterval(() => {
+      const v = videoRef.current;
+      const s = streamRef.current;
+      if (!isMountedRef.current || !v) return;
+
+      const hasLiveTracks = s?.getVideoTracks().some((t) => t.readyState === 'live');
+      if (!hasLiveTracks || !s) {
+        startCamera();
+        return;
+      }
+
+      if (v.srcObject !== s) {
+        v.srcObject = s;
+      }
+
+      if (v.paused || v.readyState < 2) {
+        v.play().catch(() => {
+          startCamera();
+        });
+      }
+    }, 800);
+
+    return () => clearInterval(watchdog);
+  }, [isCaptureActive, capturedBlob, startCamera]);
 
   const switchCamera = () => {
     stopCamera();
@@ -808,14 +861,47 @@ export function CameraCapture({
         }}
         className="relative w-full h-[58vh] sm:h-[62vh] min-h-[440px] max-h-[680px] bg-black rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner cursor-pointer"
       >
-        {capturedPreview ? (
+        {/* Vídeo SEMPRE montado no DOM para nunca perder o stream ou renderizar tela preta */}
+        <video
+          ref={handleVideoRef}
+          autoPlay
+          playsInline
+          muted
+          controls={false}
+          disablePictureInPicture
+          // @ts-ignore
+          webkit-playsinline="true"
+          onPause={() => {
+            if (isCaptureActive && !capturedBlob && streamRef.current) {
+              videoRef.current?.play().catch(() => {});
+            }
+          }}
+          onLoadedMetadata={() => {
+            videoRef.current?.play().catch(() => {});
+          }}
+          onCanPlay={() => {
+            videoRef.current?.play().catch(() => {});
+          }}
+          style={{
+            transform: currentZoom === 2 && !hasHardwareZoom ? 'scale(2)' : 'scale(1)',
+            transformOrigin: 'center center',
+            transition: 'transform 0.2s ease-out',
+          }}
+          className={`w-full h-full object-cover pointer-events-none select-none ${
+            capturedPreview || cameraError ? 'hidden' : 'block'
+          }`}
+        />
+
+        {capturedPreview && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={capturedPreview}
             alt="Etiqueta capturada"
             className="w-full h-full object-contain bg-black"
           />
-        ) : cameraError ? (
+        )}
+
+        {cameraError && !capturedPreview && (
           <div className="p-6 text-center text-slate-400 flex flex-col items-center gap-3">
             <p className="text-sm">{cameraError}</p>
             <button
@@ -825,36 +911,10 @@ export function CameraCapture({
               <Upload className="w-4 h-4" /> Selecionar Foto da Galeria
             </button>
           </div>
-        ) : (
-          <>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              controls={false}
-              disablePictureInPicture
-              // @ts-ignore
-              webkit-playsinline="true"
-              onPause={() => {
-                if (isCaptureActive && !capturedBlob && streamRef.current) {
-                  videoRef.current?.play().catch(() => {});
-                }
-              }}
-              onLoadedMetadata={() => {
-                videoRef.current?.play().catch(() => {});
-              }}
-              onCanPlay={() => {
-                videoRef.current?.play().catch(() => {});
-              }}
-              style={{
-                transform: currentZoom === 2 && !hasHardwareZoom ? 'scale(2)' : 'scale(1)',
-                transformOrigin: 'center center',
-                transition: 'transform 0.2s ease-out',
-              }}
-              className="w-full h-full object-cover pointer-events-none select-none"
-            />
+        )}
 
+        {!capturedPreview && !cameraError && (
+          <>
             {/* Controles Flutuantes da Câmera (Lanterna, Zoom 2x/1x e Alternar Câmera) */}
             <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
               {hasTorch && (
@@ -894,8 +954,6 @@ export function CameraCapture({
                 <RefreshCw className="w-4 h-4" />
               </button>
             </div>
-
-
 
             {/* Overlay com Badges Informativos */}
             <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
