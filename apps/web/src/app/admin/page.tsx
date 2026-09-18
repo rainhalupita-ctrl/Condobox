@@ -46,13 +46,15 @@ import {
   Eye,
   Copy,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  Download
 } from 'lucide-react';
 import { BatchResidentImportModal } from '../../components/batch-resident-import-modal';
 import { PackageCard } from '../../components/package-card';
 import { VoiceService } from '../../lib/voice';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/auth-context';
+import { exportCondoSpreadsheet } from '../../lib/export-excel';
 
 export default function AdminPage() {
   const { user, profile, isGuard, isAdmin, effectiveCondoId, isImpersonating, impersonatedCondo, isSuperAdmin, impersonateCondo, loading: authLoading } = useAuth();
@@ -121,6 +123,7 @@ export default function AdminPage() {
   const [editingResident, setEditingResident] = useState<Resident | null>(null);
   const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
+  const [isExportingSpreadsheet, setIsExportingSpreadsheet] = useState(false);
   const [newResName, setNewResName] = useState('');
   const [newResPhone, setNewResPhone] = useState('');
   const [newResEmail, setNewResEmail] = useState('');
@@ -991,6 +994,24 @@ export default function AdminPage() {
     }
   };
 
+  const handleExportSpreadsheet = () => {
+    try {
+      setIsExportingSpreadsheet(true);
+      const activeCondoName =
+        impersonatedCondo?.name ||
+        availableCondos.find((c) => c.id === effectiveCondoId)?.name ||
+        (profile as any)?.condo?.name ||
+        'Condominio';
+
+      exportCondoSpreadsheet(activeCondoName, units, residents);
+    } catch (err: any) {
+      console.error('Erro ao exportar planilha:', err);
+      alert(`Erro ao exportar planilha: ${err?.message || err}`);
+    } finally {
+      setIsExportingSpreadsheet(false);
+    }
+  };
+
   const handleOpenNewResidentModal = () => {
     setEditingResident(null);
     setNewResName('');
@@ -1642,8 +1663,21 @@ export default function AdminPage() {
                 </p>
               </div>
 
-              {/* Filtro por Bloco */}
-              <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Filtro por Bloco e Exportação */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleExportSpreadsheet}
+                  disabled={isExportingSpreadsheet}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-md transition active:scale-95 whitespace-nowrap disabled:opacity-50"
+                  title="Baixar planilha completa (.xlsx) com todos os Blocos, Apartamentos, Moradores, Telefones e E-mails"
+                >
+                  {isExportingSpreadsheet ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  <span>Baixar Planilha</span>
+                </button>
+
+                <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+
                 <button
                   onClick={() => setSelectedBlockFilter('ALL')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
@@ -1802,6 +1836,21 @@ export default function AdminPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportSpreadsheet}
+                disabled={isExportingSpreadsheet}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-950 transition active:scale-95 whitespace-nowrap disabled:opacity-50"
+                title="Baixar planilha completa (.xlsx) com todos os Blocos, Apartamentos, Moradores, Telefones e E-mails"
+              >
+                {isExportingSpreadsheet ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                <span>Baixar Planilha</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsBatchImportModalOpen(true)}
@@ -2522,6 +2571,33 @@ export default function AdminPage() {
                   {printerStatus}
                 </p>
               )}
+            </div>
+
+            {/* 5. EXPORTAR CADASTRO GERAL EM PLANILHA EXCEL */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
+                    <FileSpreadsheet size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Exportar Cadastro em Planilha (.xlsx)</h3>
+                    <p className="text-xs text-slate-400">Download de todos os blocos, unidades, moradores, WhatsApp e e-mails</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportSpreadsheet}
+                  disabled={isExportingSpreadsheet}
+                  className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-cyan-950"
+                >
+                  {isExportingSpreadsheet ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Baixar Planilha Agora
+                </button>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Gera um arquivo Excel compatível com Microsoft Excel, Google Sheets e LibreOffice contendo todos os dados do condomínio estruturados por Bloco, Número da Unidade, Nome do Morador, Número/WhatsApp e E-mail.
+              </p>
             </div>
           </div>
         </div>

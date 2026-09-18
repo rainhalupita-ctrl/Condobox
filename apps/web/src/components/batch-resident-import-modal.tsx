@@ -17,7 +17,8 @@ import {
   Users,
   Phone,
   Mail,
-  FileText
+  FileText,
+  Download
 } from 'lucide-react';
 
 interface ParsedResident {
@@ -135,6 +136,44 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
     } finally {
       setIsParsing(false);
     }
+  };
+
+  // Download do Modelo de Planilha de Exemplo (.xlsx)
+  const handleDownloadTemplate = () => {
+    const templateRows = [
+      {
+        'Bloco': 'Bloco A',
+        'Apartamento': '101',
+        'Nome do Morador': 'Carlos Silva',
+        'WhatsApp / Telefone': '73981953741',
+        'E-mail': 'carlos.silva@exemplo.com',
+      },
+      {
+        'Bloco': 'Bloco A',
+        'Apartamento': '102',
+        'Nome do Morador': 'Maria Santos',
+        'WhatsApp / Telefone': '73991234567',
+        'E-mail': 'maria.santos@exemplo.com',
+      },
+      {
+        'Bloco': 'Bloco B',
+        'Apartamento': '201',
+        'Nome do Morador': 'João Oliveira',
+        'WhatsApp / Telefone': '73988776655',
+        'E-mail': 'joao.oliveira@exemplo.com',
+      },
+    ];
+    const ws = XLSX.utils.json_to_sheet(templateRows);
+    ws['!cols'] = [
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 30 },
+      { wch: 22 },
+      { wch: 30 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Modelo Importação');
+    XLSX.writeFile(wb, 'CondoBox_Modelo_Importacao_Moradores.xlsx');
   };
 
   // Processamento de Texto Colado com Heurística e IA Gemini
@@ -413,28 +452,46 @@ export function BatchResidentImportModal({ isOpen, onClose, onSuccess }: BatchRe
             </div>
 
             {activeMode === 'FILE' ? (
-              /* Upload de Planilha */
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-700 hover:border-emerald-500 bg-slate-950/50 hover:bg-slate-950 rounded-3xl p-8 sm:p-12 text-center space-y-4 cursor-pointer transition group"
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".xlsx, .xls, .csv, .tsv"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto group-hover:scale-110 transition duration-300">
-                  <Upload className="w-8 h-8" />
+              <div className="space-y-3">
+                {/* Upload de Planilha */}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-700 hover:border-emerald-500 bg-slate-950/50 hover:bg-slate-950 rounded-3xl p-8 sm:p-12 text-center space-y-4 cursor-pointer transition group"
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept=".xlsx, .xls, .csv, .tsv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <div className="w-16 h-16 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto group-hover:scale-110 transition duration-300">
+                    <Upload className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-sm font-bold text-slate-200 block">
+                      Clique para selecionar ou arraste sua planilha aqui
+                    </span>
+                    <span className="text-xs text-slate-500 block">
+                      Suporta arquivos Excel (.xlsx, .xls) e CSV (.csv) com colunas: Nome, Bloco, Apto, WhatsApp, Email.
+                    </span>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-sm font-bold text-slate-200 block">
-                    Clique para selecionar ou arraste sua planilha aqui
-                  </span>
-                  <span className="text-xs text-slate-500 block">
-                    Suporta arquivos Excel (.xlsx, .xls) e CSV (.csv) com colunas: Nome, Bloco, Apto, WhatsApp, Email.
-                  </span>
+
+                {/* Download do Modelo de Planilha */}
+                <div className="flex items-center justify-between p-3.5 bg-slate-950/70 rounded-2xl border border-slate-800 text-xs">
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="text-slate-300">Precisa de uma planilha pronta para preencher?</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition border border-slate-700 hover:border-emerald-500/30 shrink-0"
+                    title="Baixar modelo de planilha Excel (.xlsx)"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Baixar Modelo (.xlsx)
+                  </button>
                 </div>
               </div>
             ) : (

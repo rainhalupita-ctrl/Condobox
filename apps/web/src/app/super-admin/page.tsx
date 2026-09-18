@@ -54,6 +54,7 @@ import {
   QrCode
 } from 'lucide-react';
 import { buildSupportWhatsAppUrl, SUPPORT_CONTACTS } from '@/lib/support-contacts';
+import { exportCondoSpreadsheet } from '@/lib/export-excel';
 
 interface AccountItem {
   id: string;
@@ -132,6 +133,7 @@ export default function SuperAdminPage() {
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(null);
   const [loadingData, setLoadingData] = useState(true);
+  const [exportingCondoId, setExportingCondoId] = useState<string | null>(null);
 
   // Inicializa cache do sessionStorage após montagem segura no cliente (evita Hydration Error #418)
   useEffect(() => {
@@ -1039,6 +1041,25 @@ export default function SuperAdminPage() {
     }
   };
 
+  // Exportar Planilha Completa do Condomínio (.xlsx)
+  const handleExportCondoSpreadsheet = async (account: AccountItem) => {
+    try {
+      setExportingCondoId(account.id);
+      const res = await fetch(`/api/super-admin/accounts/export?condo_id=${account.id}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Falha ao buscar dados do condomínio para exportação');
+      }
+      const data = await res.json();
+      exportCondoSpreadsheet(data.condo?.name || account.name, data.units || [], data.residents || []);
+    } catch (err: any) {
+      console.error('Erro ao exportar condomínio:', err);
+      alert(`Erro ao exportar planilha: ${err?.message || err}`);
+    } finally {
+      setExportingCondoId(null);
+    }
+  };
+
   // Abrir Modal de Troca de Senha de Condomínio
   const handleOpenPasswordModal = (account: AccountItem) => {
     setPasswordModalAccount(account);
@@ -1893,6 +1914,21 @@ export default function SuperAdminPage() {
                               title={`Trocar senha de acesso do condomínio ${account.name}`}
                             >
                               <KeyRound size={15} />
+                            </button>
+
+                            {/* Botão de Baixar Planilha Completa */}
+                            <button
+                              type="button"
+                              onClick={() => handleExportCondoSpreadsheet(account)}
+                              disabled={exportingCondoId === account.id}
+                              className="p-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 rounded-xl transition border border-transparent hover:border-cyan-500/30 disabled:opacity-50"
+                              title={`Baixar planilha completa (.xlsx) de ${account.name} (Blocos, Apartamentos, Moradores, Telefones e E-mails)`}
+                            >
+                              {exportingCondoId === account.id ? (
+                                <Loader2 size={15} className="animate-spin text-cyan-400" />
+                              ) : (
+                                <Download size={15} />
+                              )}
                             </button>
 
                             {/* Botão de Alterar Plano & Limites */}
