@@ -104,10 +104,10 @@ export function CameraCapture({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Estados de Zoom (inicia obrigatoriamente em 2x) e Lanterna
-  const [currentZoom, setCurrentZoom] = useState<number>(2);
+  // Estados de Zoom (inicia em 1x, permitindo escolher 2x ou 3x) e Lanterna
+  const [currentZoom, setCurrentZoom] = useState<number>(1);
   const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
-  const [maxHardwareZoom, setMaxHardwareZoom] = useState(2);
+  const [maxHardwareZoom, setMaxHardwareZoom] = useState(3);
   const [hasTorch, setHasTorch] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
 
@@ -218,14 +218,14 @@ export function CameraCapture({
           }
           if (capabilities.zoom) {
             setHasHardwareZoom(true);
-            const zMax = Math.min(Number(capabilities.zoom.max) || 2, 5);
+            const zMax = Math.min(Number(capabilities.zoom.max) || 3, 5);
             setMaxHardwareZoom(zMax);
-            const targetZ = Math.min(Math.max(2, capabilities.zoom.min || 1), zMax);
-            adv.zoom = targetZ; // Abre já com 2x no hardware!
-            setCurrentZoom(targetZ);
+            const targetZ = Math.max(1, capabilities.zoom.min || 1);
+            adv.zoom = targetZ; // Inicia em 1x
+            setCurrentZoom(1);
           } else {
             setHasHardwareZoom(false);
-            setCurrentZoom(2); // Inicia com 2x digital
+            setCurrentZoom(1); // Inicia em 1x
           }
           if (Object.keys(adv).length > 0) {
             await track.applyConstraints({ advanced: [adv] });
@@ -418,19 +418,27 @@ export function CameraCapture({
     }
   };
 
-  const toggleZoom = async () => {
-    const nextZoom = currentZoom === 2 ? 1 : 2;
-    setCurrentZoom(nextZoom);
+  const setZoomLevel = async (targetZoom: number) => {
+    setCurrentZoom(targetZoom);
     if (hasHardwareZoom && streamRef.current) {
       const track = streamRef.current.getVideoTracks()[0];
       if (track) {
         try {
-          await track.applyConstraints({ advanced: [{ zoom: nextZoom } as any] });
+          const capabilities = (track.getCapabilities?.() as any) || {};
+          const minZ = capabilities.zoom?.min || 1;
+          const maxZ = capabilities.zoom?.max || maxHardwareZoom || 3;
+          const clampedZ = Math.min(Math.max(targetZoom, minZ), maxZ);
+          await track.applyConstraints({ advanced: [{ zoom: clampedZ } as any] });
         } catch (err) {
-          console.warn('Falha ao alternar zoom no hardware:', err);
+          console.warn('Falha ao aplicar zoom no hardware:', err);
         }
       }
     }
+  };
+
+  const toggleZoom = () => {
+    const nextZoom = currentZoom === 1 ? 2 : currentZoom === 2 ? 3 : 1;
+    setZoomLevel(nextZoom);
   };
 
   // ─── Captura Rápida de Alta Fidelidade (Instantânea, ~15ms) ──────────────────
@@ -459,11 +467,13 @@ export function CameraCapture({
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    const isDigitalZoom2x = currentZoom === 2 && !hasHardwareZoom;
-    const sx = isDigitalZoom2x ? vw * 0.25 : 0;
-    const sy = isDigitalZoom2x ? vh * 0.25 : 0;
-    const sw = isDigitalZoom2x ? vw * 0.5 : vw;
-    const sh = isDigitalZoom2x ? vh * 0.5 : vh;
+    const isDigitalZoom = !hasHardwareZoom && currentZoom > 1;
+    const factor = currentZoom;
+    const cropFraction = 1 / factor;
+    const sw = isDigitalZoom ? vw * cropFraction : vw;
+    const sh = isDigitalZoom ? vh * cropFraction : vh;
+    const sx = isDigitalZoom ? (vw - sw) / 2 : 0;
+    const sy = isDigitalZoom ? (vh - sh) / 2 : 0;
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
 
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', quality));
@@ -659,11 +669,15 @@ export function CameraCapture({
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'medium';
 
-          const isDigitalZoom2x = currentZoom === 2 && !hasHardwareZoom;
-          const sx = isDigitalZoom2x ? (video.videoWidth || w) * 0.25 : 0;
-          const sy = isDigitalZoom2x ? (video.videoHeight || h) * 0.25 : 0;
-          const sw = isDigitalZoom2x ? (video.videoWidth || w) * 0.5 : (video.videoWidth || w);
-          const sh = isDigitalZoom2x ? (video.videoHeight || h) * 0.5 : (video.videoHeight || h);
+          const isDigitalZoom = !hasHardwareZoom && currentZoom > 1;
+          const factor = currentZoom;
+          const cropFraction = 1 / factor;
+          const vw = video.videoWidth || w;
+          const vh = video.videoHeight || h;
+          const sw = isDigitalZoom ? vw * cropFraction : vw;
+          const sh = isDigitalZoom ? vh * cropFraction : vh;
+          const sx = isDigitalZoom ? (vw - sw) / 2 : 0;
+          const sy = isDigitalZoom ? (vh - sh) / 2 : 0;
           ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
 
           c.toBlob((b) => resolve(b), 'image/jpeg', 0.70);
@@ -883,7 +897,7 @@ export function CameraCapture({
             videoRef.current?.play().catch(() => {});
           }}
           style={{
-            transform: currentZoom === 2 && !hasHardwareZoom ? 'scale(2)' : 'scale(1)',
+            transform: !hasHardwareZoom && currentZoom > 1 ? `scale(${currentZoom})` : 'scale(1)',
             transformOrigin: 'center center',
             transition: 'transform 0.2s ease-out',
           }}
@@ -915,7 +929,7 @@ export function CameraCapture({
 
         {!capturedPreview && !cameraError && (
           <>
-            {/* Controles Flutuantes da Câmera (Lanterna, Zoom 2x/1x e Alternar Câmera) */}
+            {/* Controles Flutuantes da Câmera (Lanterna, Zoom 1x/2x/3x e Alternar Câmera) */}
             <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
               {hasTorch && (
                 <button
@@ -932,18 +946,24 @@ export function CameraCapture({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={toggleZoom}
-                className={`px-3 py-2 rounded-xl text-xs font-black border backdrop-blur-md transition shadow-md ${
-                  currentZoom === 2
-                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-emerald-500/30'
-                    : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
-                }`}
-                title="Alternar Zoom da Câmera (Inicia em 2x)"
-              >
-                {currentZoom}x
-              </button>
+              {/* Seletor de Zoom (Inicia em 1x, permitindo escolher 2x ou 3x) */}
+              <div className="flex items-center bg-slate-900/80 rounded-xl border border-slate-700 p-0.5 backdrop-blur-md shadow-md">
+                {[1, 2, 3].map((z) => (
+                  <button
+                    key={z}
+                    type="button"
+                    onClick={() => setZoomLevel(z)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition ${
+                      currentZoom === z
+                        ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/30'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title={`Zoom ${z}x`}
+                  >
+                    {z}x
+                  </button>
+                ))}
+              </div>
 
               <button
                 type="button"
