@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { databaseService } from '../services/database.service.js';
 import { supabaseService } from '../services/supabase.service.js';
+import { storageService } from '../services/storage.service.js';
 import { whatsappService } from '../services/whatsapp.service.js';
 import { whatsAppEngineService } from '../services/whatsapp-engine.service.js';
 
@@ -53,6 +54,21 @@ export async function packageRoutes(fastify: FastifyInstance) {
     try {
       const body = createPackageSchema.parse(request.body);
 
+      let finalLabelPath = body.labelImagePath;
+
+      // Se a imagem veio como Base64 (fallback garantido do frontend), salva em disco imediatamente
+      if (body.labelImagePath && body.labelImagePath.startsWith('data:')) {
+        try {
+          const base64Data = body.labelImagePath.replace(/^data:image\/\w+;base64,/, '');
+          const buf = Buffer.from(base64Data, 'base64');
+          const stored = await storageService.saveLabelImage(buf, 'jpg');
+          finalLabelPath = stored.relativePath;
+          console.log(`💾 [PackageRoutes] Imagem Base64 persistida com sucesso em disco: ${finalLabelPath}`);
+        } catch (err: any) {
+          console.warn('[PackageRoutes] Falha ao persistir imagem Base64 em disco:', err.message);
+        }
+      }
+
       // 1. Grava no banco de dados SQLite Local (Offline-First garantido)
       const newPackage = databaseService.createPackage({
         unitId: body.unitId,
@@ -60,7 +76,7 @@ export async function packageRoutes(fastify: FastifyInstance) {
         carrier: body.carrier,
         trackingCode: body.trackingCode,
         recipientNameOcr: body.recipientNameOcr,
-        labelImagePath: body.labelImagePath,
+        labelImagePath: finalLabelPath,
         notes: body.notes
       });
 
@@ -354,7 +370,8 @@ export async function packageRoutes(fastify: FastifyInstance) {
             unitInfo,
             carrier: pkg.carrier || 'Transportadora',
             pickupCode: pkg.pickup_code,
-            qrToken: pkg.qr_token || pkg.pickup_code
+            qrToken: pkg.qr_token || pkg.pickup_code,
+            labelImageUrl: pkg.label_image_path || undefined
           });
           if (res.success) {
             sentCount++;

@@ -13,7 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
 import os from 'os';
-import { env } from '../config/env.js';
+import { env, ABSOLUTE_STORAGE_DIR } from '../config/env.js';
 import { supabaseService } from './supabase.service.js';
 
 export interface WhatsAppStatus {
@@ -569,20 +569,117 @@ export class WhatsAppEngineService {
       this.jidToPhoneMap.set(jid, cleanPhone);
       this.jidToPhoneMap.set(cleanPhone, cleanPhone);
 
-      let imageBuffer: Buffer;
+      let imageBuffer: Buffer | null = null;
 
       if (Buffer.isBuffer(imageSource)) {
         imageBuffer = imageSource;
-      } else if (typeof imageSource === 'string' && (imageSource.startsWith('http://') || imageSource.startsWith('https://'))) {
-        const res = await fetch(imageSource, { signal: AbortSignal.timeout(8000) });
-        const arrayBuf = await res.arrayBuffer();
-        imageBuffer = Buffer.from(arrayBuf);
-      } else if (typeof imageSource === 'string' && fs.existsSync(imageSource)) {
-        imageBuffer = fs.readFileSync(imageSource);
-      } else {
-        // Fallback para envio de texto
+      } else if (typeof imageSource === 'string') {
+        const trimmed = imageSource.trim();
+
+        // 1. Data URL (Base64 gerado pelo frontend da portaria ou fallback)
+        if (trimmed.startsWith('data:')) {
+          try {
+            const base64Data = trimmed.split(',')[1] || trimmed;
+            imageBuffer = Buffer.from(base64Data, 'base64');
+            console.log(`⚡ [WhatsApp Engine] Imagem decodificada a partir de Base64 Data URL (${imageBuffer.length} bytes)`);
+          } catch (e: any) {
+            console.warn('[WhatsApp Engine] Falha ao decodificar Base64:', e.message);
+          }
+        }
+
+        // 2. URL Remota ou Local (HTTP / HTTPS)
+        if (!imageBuffer && (trimmed.startsWith('http://') || trimmed.startsWith('https://'))) {
+          // 2.1 Verifica se a URL contém um caminho de imagem que já está no disco local
+          if (trimmed.includes('/images/')) {
+            try {
+              const urlPath = trimmed.split('/images/')[1];
+              if (urlPath) {
+                const cleanRel = decodeURIComponent(urlPath.split('?')[0]);
+                const localCandidates = [
+                  path.resolve(ABSOLUTE_STORAGE_DIR, cleanRel),
+                  path.resolve(ABSOLUTE_STORAGE_DIR, 'labels', cleanRel.replace(/^labels\//, '')),
+                  path.resolve(process.cwd(), 'data', 'packages', cleanRel)
+                ];
+                const found = localCandidates.find(p => {
+                  try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
+                });
+                if (found) {
+                  imageBuffer = fs.readFileSync(found);
+                  console.log(`⚡ [WhatsApp Engine] Imagem resolvida diretamente do disco local: ${found}`);
+                }
+              }
+            } catch {}
+          }
+
+          // 2.2 Se não está em disco local, baixa via HTTP com validação estrita de status e content-type
+          if (!imageBuffer) {
+            try {
+              const res = await fetch(trimmed, { signal: AbortSignal.timeout(10000) });
+              if (res.ok) {
+                const cType = res.headers.get('content-type') || '';
+                // Evita páginas HTML de erro 404 da Vercel ou login
+                if (cType.includes('image') || cType.includes('octet-stream') || !cType.includes('text/html')) {
+                  const arrayBuf = await res.arrayBuffer();
+                  imageBuffer = Buffer.from(arrayBuf);
+                  console.log(`🌐 [WhatsApp Engine] Imagem baixada com sucesso via HTTP (${imageBuffer.length} bytes): ${trimmed}`);
+                } else {
+                  console.warn(`[WhatsApp Engine] URL retornou formato inesperado (${cType}): ${trimmed}`);
+                }
+              } else {
+                console.warn(`[WhatsApp Engine] HTTP ${res.status} ao carregar imagem: ${trimmed}`);
+              }
+            } catch (fetchErr: any) {
+              console.warn(`[WhatsApp Engine] Falha de rede ao baixar imagem (${trimmed}):`, fetchErr.message);
+            }
+          }
+        }
+
+        // 3. Caminho no disco local (caminho relativo ou absoluto da portaria)
+        if (!imageBuffer) {
+          const cleanRel = trimmed.replace(/^\/?images\//, '');
+          const fileCandidates = [
+            trimmed,
+            path.resolve(trimmed),
+            path.resolve(ABSOLUTE_STORAGE_DIR, cleanRel),
+            path.resolve(ABSOLUTE_STORAGE_DIR, 'labels', cleanRel.replace(/^labels\//, '')),
+            path.resolve(process.cwd(), cleanRel),
+            path.resolve(process.cwd(), 'data', 'packages', cleanRel)
+          ];
+          const foundPath = fileCandidates.find(p => {
+            try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
+          });
+          if (foundPath) {
+            try {
+              imageBuffer = fs.readFileSync(foundPath);
+              console.log(`⚡ [WhatsApp Engine] Imagem lida com sucesso do arquivo local: ${foundPath}`);
+            } catch (err: any) {
+              console.warn(`[WhatsApp Engine] Erro ao ler imagem do disco (${foundPath}):`, err.message);
+            }
+          }
+        }
+
+        // 4. Fallback no Supabase Storage caso o arquivo esteja na nuvem e não em disco
+        if (!imageBuffer && supabaseService.isConfigured()) {
+          try {
+            const cleanSub = trimmed.replace(/^\/?images\//, '').replace(/^labels\//, '');
+            const { data: pubData } = supabaseService.getClient().storage.from('labels').getPublicUrl(cleanSub);
+            if (pubData?.publicUrl) {
+              const res = await fetch(pubData.publicUrl, { signal: AbortSignal.timeout(8000) });
+              if (res.ok) {
+                imageBuffer = Buffer.from(await res.arrayBuffer());
+                console.log(`☁️ [WhatsApp Engine] Imagem recuperada do Supabase Storage: ${pubData.publicUrl}`);
+              }
+            }
+          } catch (supErr: any) {
+            console.warn('[WhatsApp Engine] Falha no fallback Supabase Storage:', supErr.message);
+          }
+        }
+      }
+
+      if (!imageBuffer || imageBuffer.length === 0) {
+        console.warn(`⚠️ [WhatsApp Engine] Foto da etiqueta inacessível para ${phone} (origem: ${typeof imageSource === 'string' ? imageSource.slice(0, 100) : 'Buffer'}). Enviando fallback de texto.`);
         if (caption) return this.sendTextMessage(phone, caption);
-        return { success: false, error: 'Imagem inválida' };
+        return { success: false, error: 'Imagem não pôde ser carregada' };
       }
 
       const sent = await this.socket.sendMessage(jid, {
@@ -601,7 +698,7 @@ export class WhatsAppEngineService {
 
       return { success: true, messageId: msgId };
     } catch (err: any) {
-      console.warn('[WhatsApp Engine] Falha no envio de imagem, enviando apenas texto:', err.message);
+      console.warn('[WhatsApp Engine] Falha no envio de imagem para ' + phone + ', enviando apenas texto:', err.message);
       if (caption) {
         return this.sendTextMessage(phone, caption);
       }

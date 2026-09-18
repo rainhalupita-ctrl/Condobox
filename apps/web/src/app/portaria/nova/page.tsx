@@ -452,6 +452,12 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
     // Se a IA já analisou ao vivo em segundo plano com a câmera aberta
     if (precalculatedOcr) {
       applyOcrData(precalculatedOcr);
+      // Já dispara upload rápido em segundo plano para o caminho estar pronto antes do porteiro salvar
+      LocalApiClient.uploadLabelFast(blob).then((fast) => {
+        if (fast?.path) {
+          setOcrData((prev) => (prev ? { ...prev, image: { path: fast.path, url: fast.url } } : prev));
+        }
+      }).catch(() => {});
       return;
     }
 
@@ -645,10 +651,27 @@ function parseBrazilianUnitAndBlock(rawUnit: any, rawBlock: any, rawAddress?: st
       try {
         if (!labelImagePath && snapCapturedBlob) {
           try {
-            const uploadData = await LocalApiClient.uploadLabelAndOCR(snapCapturedBlob);
-            labelImagePath = uploadData?.image?.path || null;
+            // 1. Tenta upload ultra-rápido (< 20ms)
+            const fastUpload = await LocalApiClient.uploadLabelFast(snapCapturedBlob);
+            if (fastUpload?.path) {
+              labelImagePath = fastUpload.path;
+            }
           } catch (uploadErr) {
-            console.warn('[Nova Background] Falha no upload da imagem:', uploadErr);
+            console.warn('[Nova Background] Falha no upload rápido da imagem:', uploadErr);
+          }
+
+          // 2. Se o upload não retornou caminho, converte para Base64 Data URL (100% garantido sem dependência de rede)
+          if (!labelImagePath) {
+            try {
+              labelImagePath = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(snapCapturedBlob);
+              });
+            } catch (b64Err) {
+              console.warn('[Nova Background] Falha ao converter imagem para base64:', b64Err);
+            }
           }
         }
 

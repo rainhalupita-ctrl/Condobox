@@ -359,6 +359,48 @@ export async function POST(request: NextRequest) {
     const base64Image = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
+    const skipOcr = request.nextUrl.searchParams.get('skipOcr') === 'true' || formData.get('skipOcr') === 'true';
+    if (skipOcr) {
+      const ext = mimeType.includes('webp') ? 'webp' : 'jpg';
+      const filename = `label_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+      let imagePublicUrl = `data:${mimeType};base64,${base64Image}`;
+
+      const guardStatus = await checkStorageGuard();
+      if (guardStatus.allowed) {
+        try {
+          const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            { auth: { persistSession: false } }
+          );
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from('labels')
+            .upload(filename, buffer, {
+              contentType: mimeType,
+              upsert: true,
+            });
+
+          if (!uploadErr && uploadData) {
+            const { data: pubData } = supabase.storage.from('labels').getPublicUrl(filename);
+            if (pubData?.publicUrl) {
+              imagePublicUrl = pubData.publicUrl;
+            }
+          }
+        } catch (storageErr: any) {
+          console.warn('[UPLOAD-FAST] Erro no Supabase Storage:', storageErr.message);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        image: { path: imagePublicUrl, url: imagePublicUrl },
+        ocr: {
+          recipientName: null, block: null, unitNumber: null,
+          carrier: 'Outro', trackingCode: null, invoiceNumber: null, confidence: 1
+        }
+      });
+    }
+
     const geminiKey = process.env.GEMINI_API_KEY || '';
     const mistralKey = process.env.MISTRAL_API_KEY || '';
     const groqKey = process.env.GROQ_API_KEY || '';

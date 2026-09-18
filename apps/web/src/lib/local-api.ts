@@ -85,6 +85,47 @@ export class LocalApiClient {
   }
 
   /**
+   * Salva a foto da etiqueta imediatamente no servidor local ou nuvem sem esperar OCR (tempo < 20ms)
+   */
+  static async uploadLabelFast(file: File | Blob): Promise<{ path: string; url: string } | null> {
+    const baseUrl = this.getBaseUrl();
+    const formData = new FormData();
+    formData.append('file', file, 'label.jpg');
+
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/upload-label`, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(4000)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.image?.path) {
+            return { path: data.image.path, url: data.image.url || data.image.path };
+          }
+        }
+      } catch {}
+    }
+
+    try {
+      const res = await fetch('/api/upload?skipOcr=true', {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(5000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.image?.path) {
+          return { path: data.image.path, url: data.image.url || data.image.path };
+        }
+      }
+    } catch {}
+
+    return null;
+  }
+
+  /**
    * Envia a foto da etiqueta para processar e extrair com Gemini OCR (com fallback nuvem automático)
    */
   static async uploadLabelAndOCR(file: File | Blob): Promise<OCRResponse> {
@@ -97,7 +138,7 @@ export class LocalApiClient {
         const res = await fetch(`${baseUrl}/api/upload`, {
           method: 'POST',
           body: formData,
-          signal: AbortSignal.timeout(3500)
+          signal: AbortSignal.timeout(12000)
         });
 
         if (res.ok) {

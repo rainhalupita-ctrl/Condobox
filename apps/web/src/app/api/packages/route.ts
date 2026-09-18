@@ -44,6 +44,37 @@ export async function POST(request: NextRequest) {
     const pickupCode = Array.from({length: 6}, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 36))).join('');
     const qrToken = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+    // Se a imagem veio como Base64 (fallback garantido), salva no Supabase Storage
+    let finalLabelImagePath = labelImagePath || null;
+    if (labelImagePath && labelImagePath.startsWith('data:')) {
+      try {
+        const mimeMatch = labelImagePath.match(/^data:(image\/\w+);base64,/);
+        const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const ext = mime.includes('png') ? 'png' : (mime.includes('webp') ? 'webp' : 'jpg');
+        const base64Data = labelImagePath.replace(/^data:image\/\w+;base64,/, '');
+        const buf = Buffer.from(base64Data, 'base64');
+        const datePrefix = new Date().toISOString().slice(0, 7);
+        const filename = `${datePrefix}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from('labels')
+          .upload(filename, buf, {
+            contentType: mime,
+            upsert: true
+          });
+
+        if (!uploadErr && uploadData) {
+          const { data: pubData } = supabase.storage.from('labels').getPublicUrl(filename);
+          if (pubData?.publicUrl) {
+            finalLabelImagePath = pubData.publicUrl;
+            console.log(`☁️ [API Packages] Imagem Base64 enviada para Supabase Storage: ${finalLabelImagePath}`);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[API Packages] Falha ao enviar imagem Base64 para storage:', err.message);
+      }
+    }
+
     // 2. Insere a encomenda no Supabase
     const { data: newPackage, error: dbError } = await supabase
       .from('packages')
@@ -54,7 +85,7 @@ export async function POST(request: NextRequest) {
         carrier,
         tracking_code: trackingCode || null,
         recipient_name_ocr: recipientNameOcr || null,
-        label_image_path: labelImagePath || null,
+        label_image_path: finalLabelImagePath,
         notes: notes || null,
         delivered_to_name: deliveredToName || null,
         pickup_code: pickupCode,
@@ -115,9 +146,18 @@ export async function POST(request: NextRequest) {
         const evolutionUrl = process.env.EVOLUTION_API_URL;
         const evolutionKey = process.env.EVOLUTION_API_KEY;
         const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'portaria';
-        const labelImageUrl = labelImagePath && (labelImagePath.startsWith('http://') || labelImagePath.startsWith('https://'))
-          ? labelImagePath
-          : undefined;
+        let labelImageUrl: string | undefined = undefined;
+        if (finalLabelImagePath) {
+          if (finalLabelImagePath.startsWith('http://') || finalLabelImagePath.startsWith('https://') || finalLabelImagePath.startsWith('data:')) {
+            labelImageUrl = finalLabelImagePath;
+          } else {
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            if (supabaseUrl) {
+              const cleanPath = finalLabelImagePath.replace(/^\/?images\//, '').replace(/^labels\//, '');
+              labelImageUrl = `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/labels/${cleanPath}`;
+            }
+          }
+        }
 
         // Só tenta conexão HTTP direta se houver uma URL remota válida (não localhost/127.0.0.1)
         const isRemoteEvolution = Boolean(

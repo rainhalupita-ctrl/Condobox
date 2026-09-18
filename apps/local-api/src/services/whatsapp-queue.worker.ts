@@ -1,7 +1,9 @@
+import fs from 'fs';
+import path from 'path';
 import { supabaseService } from './supabase.service.js';
 import { whatsappService } from './whatsapp.service.js';
 import { deliveryBatcherService } from './delivery-batcher.service.js';
-import { env } from '../config/env.js';
+import { env, ABSOLUTE_STORAGE_DIR } from '../config/env.js';
 
 interface QueuedArrivalItem {
   packageId: string;
@@ -500,6 +502,40 @@ export class WhatsAppQueueWorker {
 
       console.log(`📤 [WhatsApp Worker] Disparando Chegada para ${residentName} (${phone}) - ${unitInfo}...`);
 
+      let resolvedLabelImage: string | undefined = undefined;
+      if (pkg.label_image_path) {
+        const rawPath = String(pkg.label_image_path).trim();
+        if (rawPath.startsWith('data:') || rawPath.startsWith('http://') || rawPath.startsWith('https://')) {
+          resolvedLabelImage = rawPath;
+        } else {
+          // Checa no disco local da portaria
+          const cleanRel = rawPath.replace(/^\/?images\//, '');
+          const localCandidates = [
+            path.resolve(ABSOLUTE_STORAGE_DIR, cleanRel),
+            path.resolve(ABSOLUTE_STORAGE_DIR, 'labels', cleanRel.replace(/^labels\//, '')),
+            path.resolve(process.cwd(), cleanRel),
+            path.resolve(process.cwd(), 'data', 'packages', cleanRel)
+          ];
+          const foundPath = localCandidates.find(p => {
+            try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
+          });
+
+          if (foundPath) {
+            resolvedLabelImage = foundPath;
+          } else if (supabaseService.isConfigured()) {
+            const cleanSub = cleanRel.replace(/^labels\//, '');
+            const { data: pubData } = supabaseService.getClient().storage.from('labels').getPublicUrl(cleanSub);
+            if (pubData?.publicUrl) {
+              resolvedLabelImage = pubData.publicUrl;
+            }
+          }
+
+          if (!resolvedLabelImage) {
+            resolvedLabelImage = localCandidates[0];
+          }
+        }
+      }
+
       const res = await whatsappService.notifyPackageArrival({
         phone,
         residentName,
@@ -507,11 +543,7 @@ export class WhatsAppQueueWorker {
         carrier: pkg.carrier || 'Encomenda',
         pickupCode: pkg.pickup_code,
         qrToken: pkg.qr_token,
-        labelImageUrl: pkg.label_image_path
-          ? (pkg.label_image_path.startsWith('http')
-              ? pkg.label_image_path
-              : `${whatsappService.getPublicWebUrl().replace(/\/$/, '')}/images/${pkg.label_image_path}`)
-          : undefined
+        labelImageUrl: resolvedLabelImage
       });
 
       if (res.success) {
