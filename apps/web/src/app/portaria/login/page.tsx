@@ -60,7 +60,7 @@ function PortariaLoginForm() {
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
         .map(e => e.trim().toLowerCase());
-      const isMasterOwner = role === 'ADMIN' || superAdminEmails.includes(userEmail);
+      const isMasterOwner = (!profile?.condo_id && role === 'ADMIN') || superAdminEmails.includes(userEmail);
 
       // Se for o Dono do Sistema (Sócio Proprietário), direciona direto para o Painel Master
       if (isMasterOwner && (!redirectTo || redirectTo === '/portaria' || !redirectTo.includes('view='))) {

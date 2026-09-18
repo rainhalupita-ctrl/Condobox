@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(data as UserProfile);
 
       // Super Admin (Sócio Proprietário) só busca licença se estiver impersonando um condomínio
-      const isMasterRole = data.role === 'ADMIN';
+      const isMasterRole = !data.condo_id && (data.role === 'ADMIN' || (user?.email && superAdminEmails.includes(user.email.toLowerCase())));
       const targetCondoId = impersonatedCondo?.id || (isMasterRole ? null : data.condo_id);
       if (targetCondoId) {
         fetchLicenseForCondo(targetCondoId);
@@ -111,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Se mudar o condomínio impersonado, atualiza a licença ativa
   useEffect(() => {
-    const isMasterRole = profile?.role === 'ADMIN' || (user?.email && superAdminEmails.includes(user.email.toLowerCase()));
+    const isMasterRole = !profile?.condo_id && (profile?.role === 'ADMIN' || (user?.email && superAdminEmails.includes(user.email.toLowerCase())));
     const targetCondoId = impersonatedCondo?.id || (isMasterRole ? null : profile?.condo_id);
     if (targetCondoId) {
       fetchLicenseForCondo(targetCondoId);
@@ -181,7 +181,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isMasterByEmail = !!userEmail && superAdminEmails.includes(userEmail);
 
   // O Dono do Sistema / Sócio Proprietário tem acesso Master global (não pertence a condomínio algum)
-  const isSuperAdmin = role === 'ADMIN' || isMasterByEmail;
+  // Administradores de condomínio (role === 'ADMIN' com condo_id) pertencem ao condomínio e têm os mesmos privilégios que o Síndico!
+  const isSuperAdmin = isMasterByEmail || (role === 'ADMIN' && !profile?.condo_id);
   const canImpersonate = isSuperAdmin;
 
   // Está impersonando se for Super Admin e tiver selecionado um condomínio para atuar
@@ -195,10 +196,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     : (profile?.condo_id || null);
 
   // Sócio Proprietário só assume abas/permissões de Portaria ou Administração quando estiver personificando um condomínio!
+  // Administradores de condomínio têm o MESMO acesso pleno que o Síndico (Portaria + Administração)
   const isGuard = !isSuperAdmin && role === 'GUARD';
-  const isPortaria = isSuperAdmin ? isImpersonating : (role === 'SYNDIC' || role === 'GUARD');
-  const isAdmin = isSuperAdmin ? isImpersonating : (role === 'SYNDIC');
-  const isMorador = !isSuperAdmin && (role === 'RESIDENT' || role === 'SYNDIC');
+  const isPortaria = isSuperAdmin ? isImpersonating : (role === 'SYNDIC' || role === 'ADMIN' || role === 'GUARD');
+  const isAdmin = isSuperAdmin ? isImpersonating : (role === 'SYNDIC' || role === 'ADMIN');
+  const isMorador = !isSuperAdmin && (role === 'RESIDENT' || role === 'SYNDIC' || role === 'ADMIN');
 
   // Se o usuário logado não for admin mas houver impersonação salva, limpa imediatamente
   useEffect(() => {

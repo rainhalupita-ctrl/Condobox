@@ -19,6 +19,7 @@ export function Navbar() {
 
   const isMasterRoute = pathname.startsWith('/super-admin') || pathname.startsWith('/master');
   const isPorteiro = isGuard || profile?.role === 'GUARD';
+  const isCondoAdmin = !isSuperAdmin && profile?.role === 'ADMIN';
 
   // Regra Estrita de Acesso:
   // Se for Porteiro (GUARD), tem acesso ÚNICO E EXCLUSIVO à aba da Portaria (ícone Shield)
@@ -116,12 +117,13 @@ export function Navbar() {
                 <span className="hidden md:block max-w-[120px] truncate text-xs font-semibold">{profile.name}</span>
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase whitespace-nowrap ${
                   isSuperAdmin ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                  isCondoAdmin ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
                   isAdmin ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
                   isPorteiro ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
                   isPortaria ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
                   'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                 }`}>
-                  {isSuperAdmin ? 'Sócio Proprietário' : isAdmin ? 'Síndico' : isPorteiro ? 'Porteiro' : isPortaria ? 'Portaria' : 'Morador'}
+                  {isSuperAdmin ? 'Sócio Proprietário' : isCondoAdmin ? 'Administrador' : isAdmin ? 'Síndico' : isPorteiro ? 'Porteiro' : isPortaria ? 'Portaria' : 'Morador'}
                 </span>
                 <ChevronDown size={13} className="text-slate-500" />
               </button>

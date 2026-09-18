@@ -36,9 +36,9 @@ export async function POST(request: Request) {
     const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
       .split(',')
       .map(e => e.trim().toLowerCase());
-    const isSuperAdmin = adminProfile?.role === 'ADMIN' || (!!userEmail && superAdminEmails.includes(userEmail));
+    const isSuperAdmin = (adminProfile?.role === 'ADMIN' && !adminProfile?.condo_id) || (!!userEmail && superAdminEmails.includes(userEmail));
 
-    if (!isSuperAdmin && (!adminProfile || adminProfile.role !== 'SYNDIC')) {
+    if (!isSuperAdmin && (!adminProfile || (adminProfile.role !== 'SYNDIC' && adminProfile.role !== 'ADMIN'))) {
       return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou administradores podem criar equipe.' }, { status: 403 });
     }
 
@@ -54,6 +54,10 @@ export async function POST(request: Request) {
         { error: 'Todos os campos obrigatórios devem ser preenchidos.' },
         { status: 400 }
       );
+    }
+
+    if (!['GUARD', 'SYNDIC', 'ADMIN'].includes(role)) {
+      return NextResponse.json({ error: 'Tipo de conta inválido.' }, { status: 400 });
     }
 
     const cleanPhone = (phone || '').replace(/\D/g, '');
@@ -107,7 +111,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       userId,
-      message: `Conta de ${role === 'GUARD' ? 'Porteiro' : 'Síndico'} criada com sucesso para ${name}!`,
+      message: `Conta de ${role === 'GUARD' ? 'Porteiro' : role === 'ADMIN' ? 'Administrador' : 'Síndico'} criada com sucesso para ${name}!`,
     });
   } catch (error: any) {
     console.error('[Staff API] Erro interno:', error);
@@ -137,9 +141,9 @@ export async function DELETE(request: Request) {
     const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
       .split(',')
       .map(e => e.trim().toLowerCase());
-    const isSuperAdmin = adminProfile?.role === 'ADMIN' || (!!userEmail && superAdminEmails.includes(userEmail));
+    const isSuperAdmin = (adminProfile?.role === 'ADMIN' && !adminProfile?.condo_id) || (!!userEmail && superAdminEmails.includes(userEmail));
 
-    if (!isSuperAdmin && (!adminProfile || adminProfile.role !== 'SYNDIC')) {
+    if (!isSuperAdmin && (!adminProfile || (adminProfile.role !== 'SYNDIC' && adminProfile.role !== 'ADMIN'))) {
       return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou administradores podem gerenciar equipe.' }, { status: 403 });
     }
 

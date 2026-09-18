@@ -36,9 +36,9 @@ export async function GET(request: Request) {
     const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
       .split(',')
       .map(e => e.trim().toLowerCase());
-    const isSuperAdmin = adminProfile?.role === 'ADMIN' || (!!userEmail && superAdminEmails.includes(userEmail));
+    const isSuperAdmin = (adminProfile?.role === 'ADMIN' && !adminProfile?.condo_id) || (!!userEmail && superAdminEmails.includes(userEmail));
 
-    if (!isSuperAdmin && (!adminProfile || adminProfile.role !== 'SYNDIC')) {
+    if (!isSuperAdmin && (!adminProfile || (adminProfile.role !== 'SYNDIC' && adminProfile.role !== 'ADMIN'))) {
       return NextResponse.json({ error: 'Acesso negado. Apenas síndicos ou administradores podem gerar códigos de acesso.' }, { status: 403 });
     }
 
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
       || 'https://web-eight-rust-97.vercel.app';
 
     // Determinar destino pós-login de acordo com o papel do membro
-    const targetDest = targetProfile.role === 'SYNDIC' ? '/admin' : '/portaria';
+    const targetDest = (targetProfile.role === 'SYNDIC' || targetProfile.role === 'ADMIN') ? '/admin' : '/portaria';
     
     // Se temos o OTP (código numérico do magiclink), montamos o link direto para o /auth/callback
     // garantindo que nunca seja redirecionado indevidamente para localhost:3000 pelo Supabase

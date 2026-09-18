@@ -57,7 +57,7 @@ export default function ResidentLoginPage() {
     const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
       .split(',')
       .map(e => e.trim().toLowerCase());
-    const isMaster = role === 'ADMIN' || superAdminEmails.includes(userEmail);
+    const isMaster = (!profile?.condo_id && role === 'ADMIN') || superAdminEmails.includes(userEmail);
 
     // Se for o Dono do Sistema (Master)
     if (isMaster) {

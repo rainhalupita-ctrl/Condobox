@@ -59,7 +59,7 @@ function SyndicLoginForm() {
         if (msg.includes('rate limit') || msg.includes('too many requests')) {
           setError('Muitas tentativas recentes. Aguarde alguns minutos antes de tentar novamente.');
         } else {
-          setError('E-mail ou senha incorretos. Verifique suas credenciais de síndico.');
+          setError('E-mail ou senha incorretos. Verifique suas credenciais de síndico ou administrador.');
         }
         setLoading(false);
         return;
@@ -76,7 +76,7 @@ function SyndicLoginForm() {
       const superAdminEmails = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || 'rainhalupita@gmail.com,klebervenancio2002@icloud.com')
         .split(',')
         .map(e => e.trim().toLowerCase());
-      const isMasterOwner = profile?.role === 'ADMIN' || superAdminEmails.includes(userEmail);
+      const isMasterOwner = (!profile?.condo_id && profile?.role === 'ADMIN') || superAdminEmails.includes(userEmail);
 
       // 2. Validação: Este portal é para Síndicos, Administradores e Sócios Proprietários
       const isSyndicRole = profile?.role === 'SYNDIC' || profile?.role === 'ADMIN' || isMasterOwner;
@@ -125,10 +125,10 @@ function SyndicLoginForm() {
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              CondoBox <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300">Síndico</span>
+              CondoBox <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300">Síndico & Adm</span>
             </h1>
             <p className="text-slate-400 text-xs sm:text-sm mt-1.5 leading-relaxed">
-              Gestão Condominial • Unidades, Moradores e Portaria
+              Gestão Condominial • Síndico, Administrador e Portaria
             </p>
           </div>
 

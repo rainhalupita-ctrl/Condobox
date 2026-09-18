@@ -95,7 +95,7 @@ export default function AdminPage() {
   const [staffName, setStaffName] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPhone, setStaffPhone] = useState('');
-  const [staffRole, setStaffRole] = useState<'GUARD' | 'SYNDIC'>('GUARD');
+  const [staffRole, setStaffRole] = useState<'GUARD' | 'SYNDIC' | 'ADMIN'>('GUARD');
   const [staffPassword, setStaffPassword] = useState('');
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffSuccess, setStaffSuccess] = useState('');
@@ -616,7 +616,7 @@ export default function AdminPage() {
         return;
       }
 
-      setStaffSuccess(data.message || `Conta de ${staffRole === 'GUARD' ? 'Porteiro' : 'Síndico'} criada para ${staffName}!`);
+      setStaffSuccess(data.message || `Conta de ${staffRole === 'GUARD' ? 'Porteiro' : staffRole === 'ADMIN' ? 'Administrador' : 'Síndico'} criada para ${staffName}!`);
       setStaffName('');
       setStaffEmail('');
       setStaffPhone('');
@@ -1168,7 +1168,7 @@ export default function AdminPage() {
             <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Administração Geral</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-100 mt-1 flex items-center gap-2 flex-wrap">
-            <span>Painel do Síndico</span>
+            <span>{profile?.role === 'ADMIN' ? 'Painel de Administração' : 'Painel do Síndico'}</span>
             {isSuperAdmin && availableCondos.length > 0 ? (
               <div className="flex items-center gap-2 bg-slate-900 border border-indigo-500/40 rounded-xl px-3 py-1.5 text-xs shadow-inner">
                 <span className="text-indigo-400 font-bold">Condomínio:</span>
@@ -2095,13 +2095,13 @@ export default function AdminPage() {
               {/* Tipo de conta */}
               <div>
                 <label className="text-xs font-medium text-slate-400 uppercase tracking-wider block mb-2">Tipo de conta</label>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setStaffRole('GUARD')}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${
+                    className={`py-2.5 px-2 rounded-xl text-xs sm:text-sm font-semibold border transition flex items-center justify-center gap-1.5 ${
                       staffRole === 'GUARD'
-                        ? 'bg-blue-600 border-blue-500 text-white'
+                        ? 'bg-blue-600 border-blue-500 text-white shadow-md'
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
                     }`}
                   >
@@ -2110,13 +2110,24 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => setStaffRole('SYNDIC')}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${
+                    className={`py-2.5 px-2 rounded-xl text-xs sm:text-sm font-semibold border transition flex items-center justify-center gap-1.5 ${
                       staffRole === 'SYNDIC'
-                        ? 'bg-purple-600 border-purple-500 text-white'
+                        ? 'bg-purple-600 border-purple-500 text-white shadow-md'
                         : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
                     }`}
                   >
                     👑 Síndico
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStaffRole('ADMIN')}
+                    className={`py-2.5 px-2 rounded-xl text-xs sm:text-sm font-semibold border transition flex items-center justify-center gap-1.5 ${
+                      staffRole === 'ADMIN'
+                        ? 'bg-emerald-600 border-emerald-500 text-white shadow-md'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    💼 Administrador
                   </button>
                 </div>
               </div>
@@ -2167,7 +2178,7 @@ export default function AdminPage() {
                   type="text" required
                   value={staffPassword}
                   onChange={e => setStaffPassword(e.target.value)}
-                  placeholder="Senha que você vai informar ao porteiro"
+                  placeholder="Senha que você vai informar ao funcionário"
                   className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono transition"
                 />
                 <p className="text-xs text-slate-500 mt-1">
@@ -2180,10 +2191,10 @@ export default function AdminPage() {
                 disabled={staffLoading}
                 className={`w-full py-3 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all ${
                   staffLoading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110'
-                } ${staffRole === 'SYNDIC' ? 'bg-purple-600' : 'bg-blue-600'}`}
+                } ${staffRole === 'ADMIN' ? 'bg-emerald-600' : staffRole === 'SYNDIC' ? 'bg-purple-600' : 'bg-blue-600'}`}
               >
                 {staffLoading ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
-                {staffLoading ? 'Criando conta...' : `Criar conta de ${staffRole === 'GUARD' ? 'Porteiro' : 'Síndico'}`}
+                {staffLoading ? 'Criando conta...' : `Criar conta de ${staffRole === 'GUARD' ? 'Porteiro' : staffRole === 'ADMIN' ? 'Administrador' : 'Síndico'}`}
               </button>
             </form>
           </div>
@@ -2216,13 +2227,13 @@ export default function AdminPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={`text-xs px-2.5 py-1 rounded-lg font-bold ${
-                        member.role === 'ADMIN' ? 'bg-red-500/20 text-red-400' :
-                        member.role === 'SYNDIC' ? 'bg-purple-500/20 text-purple-400' :
-                        'bg-blue-500/20 text-blue-400'
+                        member.role === 'ADMIN' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                        member.role === 'SYNDIC' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                        'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                       }`}>
-                        {member.role === 'ADMIN' ? 'Admin' : member.role === 'SYNDIC' ? 'Síndico' : 'Porteiro'}
+                        {member.role === 'ADMIN' ? 'Administrador' : member.role === 'SYNDIC' ? 'Síndico' : 'Porteiro'}
                       </span>
-                      {member.role !== 'ADMIN' && (
+                      {member.id !== user?.id && (
                         <>
                           <button
                             onClick={() => handleGenerateQR(member.id, member.name)}
