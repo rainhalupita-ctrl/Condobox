@@ -14,7 +14,7 @@ if %ERRORLEVEL% neq 0 (
 
 netstat -ano | findstr :3001 >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c npm run dev' -WorkingDirectory '%~dp0apps\local-api' -WindowStyle Hidden"
+    powershell -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd.exe -ArgumentList '/c npm start' -WorkingDirectory '%~dp0apps\local-api' -WindowStyle Hidden"
 )
 
 REM 2.1 Garante que o Microservico EasyOCR (5055) esteja rodando em segundo plano

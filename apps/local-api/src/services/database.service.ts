@@ -62,7 +62,7 @@ export interface CreatePackageLocalInput {
 }
 
 export class DatabaseService {
-  private db: Database.Database;
+  public db: Database.Database;
   private dbPath: string;
 
   constructor() {
@@ -156,15 +156,217 @@ export class DatabaseService {
         updated_at TEXT DEFAULT (datetime('now'))
       );
 
+      CREATE TABLE IF NOT EXISTS whatsapp_sent_notifications (
+        msg_id TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        remote_jid TEXT,
+        resident_name TEXT,
+        carrier TEXT,
+        pickup_code TEXT NOT NULL,
+        qr_token TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS lid_mappings (
+        lid TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_packages_status ON packages(status);
       CREATE INDEX IF NOT EXISTS idx_packages_pickup_code ON packages(pickup_code);
       CREATE INDEX IF NOT EXISTS idx_packages_qr_token ON packages(qr_token);
       CREATE INDEX IF NOT EXISTS idx_packages_sync ON packages(sync_status);
       CREATE INDEX IF NOT EXISTS idx_residents_phone ON residents(phone);
       CREATE INDEX IF NOT EXISTS idx_ai_patterns_intent ON ai_learned_patterns(intent);
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_sent_notif_phone ON whatsapp_sent_notifications(phone);
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_sent_notif_code ON whatsapp_sent_notifications(pickup_code);
+      CREATE INDEX IF NOT EXISTS idx_lid_mappings_phone ON lid_mappings(phone);
     `);
 
     console.log(`📦 [Database Service] Banco SQLite inicializado com sucesso em: ${this.dbPath}`);
+  }
+
+  public saveSentNotification(data: {
+    msgId: string;
+    phone: string;
+    remoteJid?: string;
+    residentName: string;
+    carrier: string;
+    pickupCode: string;
+    qrToken?: string;
+    createdAt?: number;
+  }): void {
+    try {
+      const cleanPhone = data.phone.replace(/\D/g, '');
+      const ts = data.createdAt || Date.now();
+      this.db.prepare(`
+        INSERT OR REPLACE INTO whatsapp_sent_notifications 
+        (msg_id, phone, remote_jid, resident_name, carrier, pickup_code, qr_token, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        data.msgId,
+        cleanPhone,
+        data.remoteJid || null,
+        data.residentName,
+        data.carrier,
+        data.pickupCode,
+        data.qrToken || null,
+        ts
+      );
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao salvar notificação enviada:', err.message);
+    }
+  }
+
+  public getSentNotificationByMsgId(msgId: string): any | null {
+    try {
+      const row = this.db.prepare(`
+        SELECT * FROM whatsapp_sent_notifications WHERE msg_id = ?
+      `).get(msgId) as any;
+      if (!row) return null;
+      return {
+        msgId: row.msg_id,
+        phone: row.phone,
+        remoteJid: row.remote_jid,
+        residentName: row.resident_name,
+        carrier: row.carrier,
+        pickupCode: row.pickup_code,
+        qrToken: row.qr_token,
+        timestamp: row.created_at
+      };
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao buscar notificação por msg_id:', err.message);
+      return null;
+    }
+  }
+
+  public getLatestSentNotificationForPhone(phone: string): any | null {
+    try {
+      const clean = phone.replace(/\D/g, '');
+      const last8 = clean.slice(-8);
+      const rows = this.db.prepare(`
+        SELECT * FROM whatsapp_sent_notifications 
+        WHERE created_at > ?
+        ORDER BY created_at DESC 
+        LIMIT 50
+      `).all(Date.now() - 48 * 60 * 60 * 1000) as any[];
+
+      for (const row of rows) {
+        const rowPhone = (row.phone || '').replace(/\D/g, '');
+        const rowLast8 = rowPhone.slice(-8);
+        if (rowLast8 && (rowLast8 === last8 || rowPhone.endsWith(last8) || clean.endsWith(rowLast8))) {
+          return {
+            msgId: row.msg_id,
+            phone: row.phone,
+            remoteJid: row.remote_jid,
+            residentName: row.resident_name,
+            carrier: row.carrier,
+            pickupCode: row.pickup_code,
+            qrToken: row.qr_token,
+            timestamp: row.created_at
+          };
+        }
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao buscar última notificação por telefone:', err.message);
+      return null;
+    }
+  }
+
+  public getLatestSentNotificationForJid(remoteJid: string): any | null {
+    try {
+      const cleanJid = remoteJid.trim();
+      const row = this.db.prepare(`
+        SELECT * FROM whatsapp_sent_notifications 
+        WHERE remote_jid = ? AND created_at > ?
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `).get(cleanJid, Date.now() - 48 * 60 * 60 * 1000) as any;
+      if (!row) return null;
+      return {
+        msgId: row.msg_id,
+        phone: row.phone,
+        remoteJid: row.remote_jid,
+        residentName: row.resident_name,
+        carrier: row.carrier,
+        pickupCode: row.pickup_code,
+        qrToken: row.qr_token,
+        timestamp: row.created_at
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public getLatestSentNotification(): any | null {
+    try {
+      const row = this.db.prepare(`
+        SELECT * FROM whatsapp_sent_notifications 
+        WHERE created_at > ?
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `).get(Date.now() - 48 * 60 * 60 * 1000) as any;
+      if (!row) return null;
+      return {
+        msgId: row.msg_id,
+        phone: row.phone,
+        remoteJid: row.remote_jid,
+        residentName: row.resident_name,
+        carrier: row.carrier,
+        pickupCode: row.pickup_code,
+        qrToken: row.qr_token,
+        timestamp: row.created_at
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public saveLidMapping(lid: string, phone: string): void {
+    try {
+      const cleanLid = lid.replace(/\D/g, '');
+      const cleanPhone = phone.replace(/\D/g, '');
+      if (!cleanLid || !cleanPhone) return;
+      this.db.prepare(`
+        INSERT OR REPLACE INTO lid_mappings (lid, phone, updated_at)
+        VALUES (?, ?, ?)
+      `).run(cleanLid, cleanPhone, Date.now());
+    } catch (err: any) {
+      console.warn('[DatabaseService] Erro ao salvar lid_mapping no SQLite:', err.message);
+    }
+  }
+
+  public getPhoneForLid(lid: string): string | null {
+    try {
+      const cleanLid = lid.replace(/\D/g, '');
+      if (!cleanLid) return null;
+      const row = this.db.prepare(`
+        SELECT phone FROM lid_mappings WHERE lid = ?
+      `).get(cleanLid) as any;
+      return row?.phone || null;
+    } catch (err: any) {
+      return null;
+    }
+  }
+
+  public getLidForPhone(phone: string): string | null {
+    try {
+      const clean = phone.replace(/\D/g, '');
+      const last8 = clean.slice(-8);
+      if (!last8) return null;
+      const rows = this.db.prepare(`SELECT lid, phone FROM lid_mappings`).all() as any[];
+      for (const r of rows) {
+        const rPhone = (r.phone || '').replace(/\D/g, '');
+        if (rPhone.endsWith(last8) || clean.endsWith(rPhone.slice(-8))) {
+          return r.lid;
+        }
+      }
+      return null;
+    } catch (err: any) {
+      return null;
+    }
   }
 
   public getUnitsAndResidents(condoId?: string): { units: LocalUnit[]; residents: LocalResident[] } {
@@ -626,16 +828,25 @@ export class DatabaseService {
             .select('id, status')
             .in('id', checkIds);
 
-          if (!chkErr) {
+          // CRÍTICO: Só processa se não houve erro de rede E a nuvem retornou dados válidos
+          // Se houve erro (rede offline, timeout, etc.), mantém os dados locais intactos!
+          if (!chkErr && cloudExists !== null) {
             const cloudMap = new Map((cloudExists || []).map(cp => [cp.id, cp]));
             const validRows: any[] = [];
 
             for (const r of rows) {
               const cp = cloudMap.get(r.id);
               if (!cp) {
-                // Encomenda foi excluída definitivamente no sistema central/nuvem!
-                console.log(`🛑 [DatabaseService] Trava acionada: Encomenda ${r.id} (${r.pickup_code}) excluída na nuvem. Limpando do SQLite local.`);
-                this.deletePackage(r.id);
+                // Só remove se a nuvem retornou dados mas o pacote não está lá
+                // (confirma que foi excluído propositalmente, não é falha de rede)
+                if (cloudExists && cloudExists.length > 0) {
+                  console.log(`🛑 [DatabaseService] Trava acionada: Encomenda ${r.id} (${r.pickup_code}) excluída na nuvem. Limpando do SQLite local.`);
+                  this.deletePackage(r.id);
+                } else {
+                  // Nuvem retornou lista vazia - pode ser problema de permissão ou filtro. Preserva local.
+                  console.warn(`⚠️ [DatabaseService] Nuvem retornou lista vazia ao verificar ${r.pickup_code}. Preservando dado local.`);
+                  validRows.push(r);
+                }
               } else if (cp.status === 'RECEIVED' || cp.status === 'NOTIFIED') {
                 validRows.push(r);
               } else {
@@ -646,11 +857,13 @@ export class DatabaseService {
             }
             rows = validRows;
           }
+          // Se chkErr (erro de rede/Supabase), mantém rows intactos sem tocar nos dados locais
         }
       } catch (err: any) {
-        console.warn('[DatabaseService] Erro ao validar integridade com a nuvem:', err.message);
+        console.warn('[DatabaseService] Erro ao validar integridade com a nuvem (dados locais preservados):', err.message);
       }
     }
+
 
     // 3. Fallback na Nuvem (Supabase) se não encontrar no SQLite local
     if (rows.length === 0 && (last8 || mentionedCode)) {

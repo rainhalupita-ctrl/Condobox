@@ -17,6 +17,8 @@ import pino from 'pino';
 import os from 'os';
 import { env, ABSOLUTE_STORAGE_DIR } from '../config/env.js';
 import { supabaseService } from './supabase.service.js';
+import { databaseService } from './database.service.js';
+import { aiIntentService } from './ai-intent.service.js';
 
 export interface WhatsAppStatus {
   status: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED';
@@ -102,6 +104,19 @@ export class WhatsAppEngineService {
         }
       } catch {}
     }
+
+    // Carrega também mapeamentos persistidos no SQLite
+    try {
+      const rows = databaseService.db?.prepare('SELECT lid, phone FROM lid_mappings').all() as any[];
+      if (rows) {
+        for (const r of rows) {
+          if (r.lid && r.phone) {
+            this.lidCache.set(r.lid, r.phone);
+          }
+        }
+      }
+    } catch {}
+
     console.log(`📱 [WhatsApp Engine] Cache de LIDs carregado com ${this.lidCache.size} mapeamentos.`);
   }
 
@@ -111,6 +126,12 @@ export class WhatsAppEngineService {
     if (!cleanLid || !cleanPhone) return;
 
     this.lidCache.set(cleanLid, cleanPhone);
+    this.jidToPhoneMap.set(cleanLid, cleanPhone);
+
+    // Persiste no SQLite
+    try {
+      databaseService.saveLidMapping(cleanLid, cleanPhone);
+    } catch {}
 
     const dirs = [
       this.sessionDir,
@@ -212,6 +233,14 @@ export class WhatsAppEngineService {
 
       const sockLogger = pino({ level: 'warn' });
 
+      const msgRetryCounterMap = new Map<string, any>();
+      const msgRetryCounterCache = {
+        get: <T>(key: string): T | undefined => msgRetryCounterMap.get(key) as T | undefined,
+        set: <T>(key: string, value: T): void => { msgRetryCounterMap.set(key, value); },
+        del: (key: string): void => { msgRetryCounterMap.delete(key); },
+        flushAll: (): void => { msgRetryCounterMap.clear(); },
+      };
+
       this.socket = makeWASocket({
         version,
         logger: sockLogger,
@@ -226,6 +255,10 @@ export class WhatsAppEngineService {
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 15000,
+        msgRetryCounterCache,
+        retryRequestDelayMs: 250,
+        maxMsgRetryCount: 5,
+        enableAutoSessionRecreation: true,
         getMessage: async (key) => {
           if (key?.id && this.recentSentMessagesRaw.has(key.id)) {
             return this.recentSentMessagesRaw.get(key.id);
@@ -871,10 +904,27 @@ export class WhatsAppEngineService {
         }
       }
 
+      let targetJid: string | null = null;
       try {
-        const targetJid = await this.resolveJid(params.phone);
+        targetJid = await this.resolveJid(params.phone);
         this.recentNotificationByJid.set(targetJid, notifData);
       } catch {}
+
+      // Persiste no banco de dados SQLite para sobreviver a qualquer reinicialização
+      if (res.messageId) {
+        try {
+          databaseService.saveSentNotification({
+            msgId: res.messageId,
+            phone: params.phone,
+            remoteJid: targetJid || undefined,
+            residentName: params.residentName,
+            carrier: params.carrier,
+            pickupCode: params.pickupCode,
+            qrToken: params.qrToken,
+            createdAt: notifData.timestamp
+          });
+        } catch {}
+      }
 
       if (this.recentSentNotifications.size > 500) {
         const first = this.recentSentNotifications.keys().next().value;
@@ -1000,7 +1050,21 @@ export class WhatsAppEngineService {
     } catch {}
   }
 
-  private resolvePhoneFromRemoteJid(remoteJid: string): string {
+  private resolvePhoneFromRemoteJid(remoteJid: string, remoteJidAlt?: string): string {
+    // 0. Se o Baileys forneceu remoteJidAlt (ex: 557381953741@s.whatsapp.net), usa imediatamente
+    if (remoteJidAlt) {
+      const altPhone = remoteJidAlt.replace(/@s\.whatsapp\.net|@c\.us|@lid|\D/g, '');
+      if (altPhone && altPhone.length >= 10) {
+        if (remoteJid.includes('@lid')) {
+          const cleanLid = remoteJid.replace(/@lid|\D/g, '');
+          this.lidCache.set(cleanLid, altPhone);
+          this.recordLidMapping(cleanLid, altPhone);
+          this.logToFile(`🎯 LID ${cleanLid} resolvido instantaneamente via remoteJidAlt: ${altPhone}`);
+        }
+        return altPhone;
+      }
+    }
+
     if (remoteJid.includes('@lid')) {
       const cleanLid = remoteJid.replace(/@lid|\D/g, '');
 
@@ -1019,7 +1083,31 @@ export class WhatsAppEngineService {
         return phone;
       }
 
-      // 2. Leitura direta O(1) do arquivo reverso sem varredura pesada de diretório
+      // 2. Consulta ao banco de dados SQLite persistente (sobrevive a restarts)
+      try {
+        const dbPhone = databaseService.getPhoneForLid(cleanLid);
+        if (dbPhone) {
+          this.lidCache.set(cleanLid, dbPhone);
+          this.logToFile(`🎯 LID ${cleanLid} resolvido para telefone: ${dbPhone} via SQLite lid_mappings`);
+          return dbPhone;
+        }
+      } catch {}
+
+      // 3. Consulta ao signalRepository interno do Baileys
+      try {
+        const pn = (this.socket as any)?.signalRepository?.lidMapping?.getPNForLID?.(remoteJid);
+        if (pn) {
+          const cleanPn = String(pn).replace(/@s\.whatsapp\.net|@c\.us|@lid|\D/g, '');
+          if (cleanPn && cleanPn.length >= 10) {
+            this.lidCache.set(cleanLid, cleanPn);
+            this.recordLidMapping(cleanLid, cleanPn);
+            this.logToFile(`🎯 LID ${cleanLid} resolvido para telefone: ${cleanPn} via signalRepository`);
+            return cleanPn;
+          }
+        }
+      } catch {}
+
+      // 4. Leitura direta O(1) do arquivo reverso sem varredura pesada de diretório
       const dirs = [
         this.sessionDir,
         path.join(process.env.APPDATA || '', 'condobox-desktop', 'data', 'whatsapp_session'),
@@ -1033,14 +1121,15 @@ export class WhatsAppEngineService {
             const content = fs.readFileSync(revFile, 'utf-8').trim().replace(/\D/g, '');
             if (content) {
               this.lidCache.set(cleanLid, content);
-              this.logToFile(`LID ${cleanLid} resolvido para telefone: ${content} via disco`);
+              this.recordLidMapping(cleanLid, content);
+              this.logToFile(`🎯 LID ${cleanLid} resolvido para telefone: ${content} via disco`);
               return content;
             }
           }
         } catch {}
       }
 
-      // 3. Verificação direta nos arquivos Baileys: se algum telefone recente mapeia para este cleanLid
+      // 5. Verificação direta nos arquivos Baileys: se algum telefone recente mapeia para este cleanLid
       const candidatePhones = new Set<string>();
       for (const notif of this.recentNotificationByPhone.values()) {
         if (notif.phone) candidatePhones.add(notif.phone.replace(/\D/g, ''));
@@ -1058,7 +1147,7 @@ export class WhatsAppEngineService {
               if (lidVal === cleanLid) {
                 this.lidCache.set(cleanLid, phone);
                 this.recordLidMapping(cleanLid, phone);
-                this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via lid-mapping direto`);
+                this.logToFile(`🎯 LID ${cleanLid} resolvido para telefone: ${phone} via lid-mapping direto`);
                 return phone;
               }
             }
@@ -1066,13 +1155,25 @@ export class WhatsAppEngineService {
         }
       }
 
-      // 4. Fallback via notificação recente enviada por JID
+      // 6. Fallback via notificação recente enviada por JID no SQLite
+      try {
+        const notif = databaseService.getLatestSentNotificationForJid(remoteJid);
+        if (notif?.phone) {
+          const phone = notif.phone.replace(/\D/g, '');
+          this.lidCache.set(cleanLid, phone);
+          this.recordLidMapping(cleanLid, phone);
+          this.logToFile(`🎯 LID ${cleanLid} resolvido para telefone: ${phone} via SQLite whatsapp_sent_notifications (JID)`);
+          return phone;
+        }
+      } catch {}
+
+      // 7. Fallback via notificação recente enviada por JID em memória
       if (this.recentNotificationByJid.has(remoteJid)) {
         const notif = this.recentNotificationByJid.get(remoteJid)!;
         const phone = notif.phone.replace(/\D/g, '');
         this.lidCache.set(cleanLid, phone);
         this.recordLidMapping(cleanLid, phone);
-        this.logToFile(`LID ${cleanLid} resolvido para telefone: ${phone} via notificação recente`);
+        this.logToFile(`🎯 LID ${cleanLid} resolvido para telefone: ${phone} via notificação recente em memória`);
         return phone;
       }
     }
@@ -1214,8 +1315,16 @@ export class WhatsAppEngineService {
       const isContest = ['👎', '❌', '🚫', '😡', '😠'].some(e => emoji.includes(e));
       const simulatedText = isContest ? 'Não reconheço essa encomenda ❌' : 'Ciente, obrigado 👍';
 
+      const remoteJidAlt =
+        (reactionUpdate.reaction?.key as any)?.remoteJidAlt ||
+        (reactionUpdate.key as any)?.remoteJidAlt ||
+        (reactionUpdate.reaction?.key as any)?.participantAlt ||
+        (reactionUpdate.key as any)?.participantAlt ||
+        '';
+
       await this.processIncomingContent({
         remoteJid,
+        remoteJidAlt,
         text: simulatedText,
         quotedMsgId: targetMsgId,
         isReaction: true
@@ -1324,30 +1433,34 @@ export class WhatsAppEngineService {
       // 2. Provedor Fallback: Google Gemini Flash Multimodal
       const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
       if (geminiKey) {
-        try {
-          const genAI = new GoogleGenerativeAI(geminiKey);
-          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-          const base64Data = buffer.toString('base64');
+        const geminiModels = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+        const base64Data = buffer.toString('base64');
 
-          const result = await model.generateContent([
-            {
-              inlineData: {
-                mimeType: cleanMime,
-                data: base64Data,
+        for (const mName of geminiModels) {
+          try {
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            const model = genAI.getGenerativeModel({ model: mName });
+
+            const result = await model.generateContent([
+              {
+                inlineData: {
+                  mimeType: cleanMime,
+                  data: base64Data,
+                },
               },
-            },
-            {
-              text: 'Transcreva este áudio em português com máxima fidelidade. Retorne APENAS o texto falado, sem aspas, introduções ou explicações. Se inaudível ou silêncio, retorne vazio.',
-            },
-          ]);
+              {
+                text: 'Transcreva este áudio em português com máxima fidelidade. Retorne APENAS o texto falado, sem aspas, introduções ou explicações. Se inaudível ou silêncio, retorne vazio.',
+              },
+            ]);
 
-          const transcribed = result.response.text().trim();
-          if (transcribed) {
-            this.logToFile(`🎙️ [Áudio Transcrito via Gemini Flash]: "${transcribed}"`);
-            return transcribed;
+            const transcribed = result.response.text().trim();
+            if (transcribed) {
+              this.logToFile(`🎙️ [Áudio Transcrito via Gemini Flash (${mName})]: "${transcribed}"`);
+              return transcribed;
+            }
+          } catch (geminiErr: any) {
+            this.logToFile(`⚠️ Falha na chamada do Gemini Flash (${mName}) para áudio: ${geminiErr.message}`);
           }
-        } catch (geminiErr: any) {
-          this.logToFile(`⚠️ Falha na chamada do Gemini Flash para áudio: ${geminiErr.message}`);
         }
       }
 
@@ -1371,7 +1484,19 @@ export class WhatsAppEngineService {
         remoteJid.includes('@broadcast')
       ) return;
 
-      this.logToFile(`📩 Mensagem recebida via socket de ${remoteJid} (fromMe: ${msg.key.fromMe}, id: ${msg.key.id})`);
+      const remoteJidAlt = (msg.key as any).remoteJidAlt || (msg.key as any).participantAlt || '';
+      if (remoteJid.includes('@lid') && remoteJidAlt) {
+        const altPhone = remoteJidAlt.replace(/@s\.whatsapp\.net|@c\.us|@lid|\D/g, '');
+        if (altPhone && altPhone.length >= 10) {
+          this.recordLidMapping(remoteJid, altPhone);
+        }
+      }
+
+      if ((msg as any).messageStubType) {
+        this.logToFile(`ℹ️ Mensagem com stubType=${(msg as any).messageStubType} de ${remoteJid} (alt: ${remoteJidAlt})`);
+      }
+
+      this.logToFile(`📩 Mensagem recebida via socket de ${remoteJid}${remoteJidAlt ? ` (alt: ${remoteJidAlt})` : ''} (fromMe: ${msg.key.fromMe}, id: ${msg.key.id})`);
 
       // Ignora mensagens históricas muito antigas (> 12 horas) recebidas em sincronizações iniciais
       const rawTs = typeof msg.messageTimestamp === 'number'
@@ -1412,6 +1537,7 @@ export class WhatsAppEngineService {
         const simulatedText = isContest ? 'Não reconheço essa encomenda ❌' : 'Ciente, obrigado 👍';
         await this.processIncomingContent({
           remoteJid,
+          remoteJidAlt,
           text: simulatedText,
           quotedMsgId: targetMsgId,
           isReaction: true
@@ -1433,7 +1559,7 @@ export class WhatsAppEngineService {
           this.logToFile(`🧠 [Áudio Compreendido]: Morador disse: "${text}"`);
         } else {
           this.logToFile(`ℹ️ [Áudio Inaudível] Áudio de ${remoteJid} sem voz compreensível.`);
-          const cleanP = this.resolvePhoneFromRemoteJid(remoteJid);
+          const cleanP = this.resolvePhoneFromRemoteJid(remoteJid, remoteJidAlt);
           const hasRecentNotif = this.recentNotificationByJid.has(remoteJid) || this.recentNotificationByPhone.has(cleanP);
           if (hasRecentNotif) {
             const promptText =
@@ -1464,6 +1590,7 @@ export class WhatsAppEngineService {
 
       await this.processIncomingContent({
         remoteJid,
+        remoteJidAlt,
         text,
         quotedText,
         quotedMsgId,
@@ -1476,25 +1603,17 @@ export class WhatsAppEngineService {
 
   private async processIncomingContent(params: {
     remoteJid: string;
+    remoteJidAlt?: string;
     text: string;
     quotedText?: string;
     quotedMsgId?: string;
     isReaction?: boolean;
     isFromAudio?: boolean;
   }): Promise<void> {
-    const { remoteJid, text, quotedText = '', quotedMsgId, isReaction, isFromAudio } = params;
+    const { remoteJid, remoteJidAlt, text, quotedText = '', quotedMsgId, isReaction, isFromAudio } = params;
 
-    let cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid);
+    let cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid, remoteJidAlt);
     this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone: ${cleanPhone}, Áudio: ${Boolean(isFromAudio)}): "${text}"`);
-
-    // Import dinâmico do banco e da IA
-    const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
-    if (!databaseService) {
-      this.logToFile('databaseService não pôde ser importado.');
-      return;
-    }
-
-    const { aiIntentService } = await import('./ai-intent.service.js');
 
     // 1. Resolução inteligente de identidade via notificação citada / recente
     let targetNotif: { phone: string; residentName: string; carrier: string; pickupCode: string; qrToken?: string; timestamp: number } | null = null;
@@ -1507,9 +1626,21 @@ export class WhatsAppEngineService {
         if (remoteJid.includes('@lid')) {
           this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
         }
-        this.logToFile(`🎯 Morador identificado via histórico da mensagem citada (${quotedMsgId}): ${found.residentName} (${cleanPhone})`);
+        this.logToFile(`🎯 Morador identificado via histórico da mensagem citada em memória (${quotedMsgId}): ${found.residentName} (${cleanPhone})`);
       }
-    } else if (this.recentNotificationByJid.has(remoteJid)) {
+    } else if (quotedMsgId) {
+      const dbNotif = databaseService.getSentNotificationByMsgId(quotedMsgId);
+      if (dbNotif) {
+        targetNotif = dbNotif;
+        cleanPhone = dbNotif.phone;
+        if (remoteJid.includes('@lid')) {
+          this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        }
+        this.logToFile(`🎯 Morador identificado via histórico da mensagem citada no SQLite (${quotedMsgId}): ${dbNotif.residentName} (${cleanPhone})`);
+      }
+    }
+
+    if (!targetNotif && this.recentNotificationByJid.has(remoteJid)) {
       const found = this.recentNotificationByJid.get(remoteJid);
       if (found) {
         targetNotif = found;
@@ -1517,11 +1648,88 @@ export class WhatsAppEngineService {
         if (remoteJid.includes('@lid')) {
           this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
         }
-        this.logToFile(`🎯 Morador identificado via notificação enviada para JID (${remoteJid}): ${found.residentName} (${cleanPhone})`);
+        this.logToFile(`🎯 Morador identificado via notificação enviada para JID em memória (${remoteJid}): ${found.residentName} (${cleanPhone})`);
       }
-    } else if (this.recentNotificationByPhone.has(cleanPhone)) {
+    }
+
+    if (!targetNotif) {
+      const dbJidNotif = databaseService.getLatestSentNotificationForJid(remoteJid);
+      if (dbJidNotif) {
+        targetNotif = dbJidNotif;
+        cleanPhone = dbJidNotif.phone.replace(/\D/g, '');
+        if (remoteJid.includes('@lid')) {
+          this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        }
+        this.logToFile(`🎯 Morador identificado via última notificação para JID no SQLite (${remoteJid}): ${dbJidNotif.residentName} (${cleanPhone})`);
+      }
+    }
+
+    if (!targetNotif && this.recentNotificationByPhone.has(cleanPhone)) {
       targetNotif = this.recentNotificationByPhone.get(cleanPhone) || null;
     }
+
+    if (!targetNotif) {
+      // Fallback: tenta todas as variações do telefone na memória
+      const phoneVariants: string[] = [];
+      if (cleanPhone.startsWith('55') && cleanPhone.length >= 12) {
+        const without55 = cleanPhone.slice(2);
+        phoneVariants.push(without55);
+        if (without55.length === 11 && without55[2] === '9') {
+          phoneVariants.push(`55${without55.slice(0, 2)}${without55.slice(3)}`);
+          phoneVariants.push(`${without55.slice(0, 2)}${without55.slice(3)}`);
+        } else if (without55.length === 10) {
+          phoneVariants.push(`55${without55.slice(0, 2)}9${without55.slice(2)}`);
+          phoneVariants.push(`${without55.slice(0, 2)}9${without55.slice(2)}`);
+        }
+      } else if (cleanPhone.length >= 10) {
+        phoneVariants.push(`55${cleanPhone}`);
+        if (cleanPhone.length === 11 && cleanPhone[2] === '9') {
+          phoneVariants.push(`55${cleanPhone.slice(0, 2)}${cleanPhone.slice(3)}`);
+          phoneVariants.push(`${cleanPhone.slice(0, 2)}${cleanPhone.slice(3)}`);
+        }
+      }
+      for (const variant of phoneVariants) {
+        if (this.recentNotificationByPhone.has(variant)) {
+          targetNotif = this.recentNotificationByPhone.get(variant) || null;
+          if (targetNotif) {
+            this.logToFile(`🎯 Notificação encontrada via variação de telefone em memória ${variant} (original: ${cleanPhone})`);
+            break;
+          }
+        }
+      }
+    }
+
+    if (!targetNotif) {
+      // Fallback: busca última notificação por telefone no SQLite
+      const dbPhoneNotif = databaseService.getLatestSentNotificationForPhone(cleanPhone);
+      if (dbPhoneNotif) {
+        targetNotif = dbPhoneNotif;
+        this.logToFile(`🎯 Notificação encontrada via SQLite por telefone ${cleanPhone}: ${dbPhoneNotif.residentName} (${dbPhoneNotif.pickupCode})`);
+      }
+    }
+
+    // Fallback de segurança máxima: se cleanPhone ainda for um LID não mapeado e houver notificação enviada no condomínio nas últimas 4 horas
+    if (!targetNotif && remoteJid.includes('@lid')) {
+      const latestNotif = databaseService.getLatestSentNotification();
+      if (latestNotif && Date.now() - latestNotif.timestamp < 4 * 60 * 60 * 1000) {
+        targetNotif = latestNotif;
+        cleanPhone = latestNotif.phone.replace(/\D/g, '');
+        this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        this.logToFile(`🎯 Morador associado via última notificação recente no condomínio: ${latestNotif.residentName} (${cleanPhone})`);
+      }
+    }
+
+    // Se encontramos notificação mas cleanPhone ainda era um LID ou difere do telefone real da notificação
+    if (targetNotif && targetNotif.phone) {
+      const realPhone = targetNotif.phone.replace(/\D/g, '');
+      if (realPhone && realPhone.length >= 10 && cleanPhone !== realPhone) {
+        if (remoteJid.includes('@lid')) {
+          this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), realPhone);
+        }
+        cleanPhone = realPhone;
+      }
+    }
+
 
     // 2. Extrai código de retirada mencionado no texto ou no texto citado
     const codeFromText = aiIntentService.extractCode(text) || (quotedText ? aiIntentService.extractCode(quotedText) : null);
@@ -1585,39 +1793,77 @@ export class WhatsAppEngineService {
       return;
     }
 
-    let residentName = 'Morador(a)';
+    let residentName = targetNotif?.residentName || 'Morador(a)';
     let packagesInfo = '';
 
     if (pendingPkgs && pendingPkgs.length > 0) {
       const first = pendingPkgs[0];
-      residentName = first.resident?.name || first.recipient_name_ocr || 'Morador(a)';
+      residentName = first.resident?.name || first.recipient_name_ocr || targetNotif?.residentName || 'Morador(a)';
       packagesInfo = pendingPkgs.map((p: any) => `${p.carrier} (Código: ${p.pickup_code})`).join(', ');
     } else if (matchedPkgByCode) {
-      residentName = matchedPkgByCode.resident?.name || matchedPkgByCode.recipient_name_ocr || 'Morador(a)';
+      residentName = matchedPkgByCode.resident?.name || matchedPkgByCode.recipient_name_ocr || targetNotif?.residentName || 'Morador(a)';
       packagesInfo = `${matchedPkgByCode.carrier} (Código: ${matchedPkgByCode.pickup_code})`;
     } else {
       const recentDelivered = await databaseService.getRecentDeliveredPackageForPhone(cleanPhone);
       if (recentDelivered) {
-        residentName = recentDelivered.resident?.name || recentDelivered.recipient_name_ocr || 'Morador(a)';
+        residentName = recentDelivered.resident?.name || recentDelivered.recipient_name_ocr || targetNotif?.residentName || 'Morador(a)';
         packagesInfo = `${recentDelivered.carrier} (Código: ${recentDelivered.pickup_code})`;
       }
     }
 
     // 🧠 CLASSIFICAÇÃO INTELIGENTE: Heurística Direta + IA (Groq -> Gemini -> NVIDIA)
     const directConfirmKeywords = [
-      'ok', 'sim', 'eu mesmo', 'eu mesma', 'vou eu', 'vou eu mesmo', 'eu que vou',
-      'eu que vou buscar', 'vou eu buscar', 'beleza', 'blz', 'show', 'top', 'joia',
-      'valeu', 'vlw', 'obg', 'obrigado', 'obrigada', 'ciente', 'estou ciente', 'to ciente',
-      'tô ciente', 'ja vou buscar', 'vou buscar', 'vou retirar', 'ja to descendo',
-      'to descendo', 'tô descendo', 'pode ser', 'confirmado'
+      // Afirmações simples
+      'ok', 'ok!', 'sim', 'sim!', 's', 'ss', 'sss', '1', '👍',
+      // Confirmações pessoais (eu mesmo)
+      'eu mesmo', 'eu mesma', 'eu msm', 'eu mmo', 'sou eu', 'sou eu mesmo',
+      'vou eu', 'vou eu mesmo', 'vou eu mesma', 'eu que vou', 'eu que vou buscar',
+      'vou eu buscar', 'eu busco', 'eu vou buscar', 'eu vou pegar', 'eu pego',
+      'vou pegar', 'vou la', 'vou lá', 'já vou', 'ja vou', 'já vou lá', 'ja vou la',
+      'já vou buscar', 'ja vou buscar', 'já vou pegar', 'ja vou pegar',
+      // Indo agora
+      'tô indo', 'to indo', 'estou indo', 'vou indo', 'indo buscar', 'indo pegar',
+      'to descendo', 'tô descendo', 'estou descendo', 'ja to descendo', 'já to descendo',
+      'to indo la', 'tô indo lá', 'indo la', 'indo lá',
+      'ja desci', 'já desci', 'to la', 'tô lá', 'ja to la', 'já to lá',
+      // Confirmações de ciência
+      'ciente', 'estou ciente', 'to ciente', 'tô ciente', 'estou sabendo', 'ja sei', 'já sei',
+      'ja sabia', 'já sabia', 'tá bom', 'ta bom', 'tá', 'ta', 'combinado', 'confirmado',
+      'entendido', 'entendi', 'recebi', 'vi', 'vi sim', 'ok sim', 'tudo bem',
+      // Retirada pessoal
+      'vou buscar', 'vou retirar', 'vou retirar pessoalmente', 'vou pegar pessoalmente',
+      'busco hoje', 'pego hoje', 'retiro hoje', 'vou hoje',
+      // Expressões coloquiais
+      'beleza', 'blz', 'blza', 'show', 'top', 'joia', 'jóia', 'pode', 'pode ser',
+      'valeu', 'vlw', 'obg', 'obrigado', 'obrigada', 'tmj', 'flw', 'falou',
+      'massa', 'bora', 'bora la', 'bora lá', 'perfeito',
     ];
+    // Remove diacritics for more robust comparison
+    const normNoAccent = normText.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const isDirectConfirm =
-      ['👍', '👌', '✅', '❤️', '👏', '🙏'].some(e => text.includes(e)) ||
+      ['👍', '👌', '✅', '❤️', '👏', '🙏', '🤙', '💪', '🫶', '🫡'].some(e => text.includes(e)) ||
       directConfirmKeywords.includes(normText) ||
+      directConfirmKeywords.includes(normNoAccent) ||
       normText.startsWith('eu mesmo') ||
+      normText.startsWith('eu mesma') ||
       normText.startsWith('eu que vou') ||
       normText.startsWith('vou eu') ||
-      normText.startsWith('ja vou buscar');
+      normText.startsWith('ja vou') ||
+      normNoAccent.startsWith('ja vou') ||
+      normText.startsWith('já vou') ||
+      normText.startsWith('to indo') ||
+      normText.startsWith('tô indo') ||
+      normNoAccent.startsWith('to indo') ||
+      normText.startsWith('to descendo') ||
+      normText.startsWith('tô descendo') ||
+      normText.startsWith('estou descendo') ||
+      normText.startsWith('vou buscar') ||
+      normText.startsWith('vou pegar') ||
+      normText.startsWith('vou la') ||
+      normText.startsWith('vou lá') ||
+      normNoAccent.startsWith('vou la') ||
+      normText.startsWith('indo ') ||
+      (normText.length <= 20 && (normText.includes('vou') || normText.includes('buscar') || normText.includes('pegar') || normText.includes('retirar')) && !normText.includes('nao') && !normText.includes('não'));
 
     let aiResult: any;
     if (isReaction) {
@@ -1831,8 +2077,28 @@ export class WhatsAppEngineService {
         return;
       }
 
-      this.logToFile(`Processando confirmação de ciência para ${cleanPhone} (Código: ${aiResult.extractedCode || codeFromText || 'automático'})...`);
-      const result = await databaseService.acknowledgePackageByPhone(cleanPhone, aiResult.extractedCode || codeFromText);
+      const codeToAck = aiResult.extractedCode || codeFromText || candidateCode;
+      this.logToFile(`Processando confirmação de ciência para ${cleanPhone} (Código: ${codeToAck || 'automático'})...`);
+      let result = await databaseService.acknowledgePackageByPhone(cleanPhone, codeToAck);
+
+      if (!result && pendingPkgs && pendingPkgs.length > 0) {
+        // Se a busca direta por telefone falhou mas temos pendingPkgs conhecidos, confirma diretamente!
+        const nowIso = new Date().toISOString();
+        for (const row of pendingPkgs) {
+          const updatedNotes = row.notes?.includes('CIENTE:') ? row.notes : (row.notes ? `${row.notes};CIENTE:${nowIso}` : `CIENTE:${nowIso}`);
+          row.notes = updatedNotes;
+          try {
+            databaseService.db.prepare(`
+              UPDATE packages
+              SET status = CASE WHEN status = 'RECEIVED' THEN 'NOTIFIED' ELSE status END,
+                  notes = ?,
+                  sync_status = 'PENDING'
+              WHERE id = ?
+            `).run(updatedNotes, row.id);
+          } catch {}
+        }
+        result = { pkgs: pendingPkgs, pkg: pendingPkgs[0], alreadyAcknowledged: false };
+      }
 
       const pkgs: any[] = result?.pkgs && result.pkgs.length > 0
         ? result.pkgs
