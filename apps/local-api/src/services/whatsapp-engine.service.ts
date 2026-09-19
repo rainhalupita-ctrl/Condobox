@@ -1102,13 +1102,41 @@ export class WhatsAppEngineService {
     }
   }
 
+  private unwrapWAMessage(msg: WAMessage): WAMessage {
+    if (!msg.message) return msg;
+    let m: any = msg.message;
+    if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+    if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+    if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+    if (m.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
+    if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+    return {
+      ...msg,
+      message: m,
+    };
+  }
+
+  private getAudioMessageFromWAMessage(msg: WAMessage): any | null {
+    const unwrapped = this.unwrapWAMessage(msg);
+    const m = unwrapped.message;
+    if (!m) return null;
+    if (m.audioMessage) return m.audioMessage;
+    if (m.documentMessage?.mimetype?.startsWith('audio/')) return m.documentMessage;
+    return null;
+  }
+
   private async transcribeAudioMessage(msg: WAMessage): Promise<string> {
     try {
-      const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-      if (!apiKey) return '';
+      const unwrappedMsg = this.unwrapWAMessage(msg);
+      const audioMsg = this.getAudioMessageFromWAMessage(unwrappedMsg);
+      if (!audioMsg) {
+        this.logToFile('⚠️ Nenhum payload de áudio detectado na mensagem.');
+        return '';
+      }
 
+      this.logToFile('📥 Baixando arquivo de áudio com Baileys...');
       const buffer = await downloadMediaMessage(
-        msg,
+        unwrappedMsg,
         'buffer',
         {},
         {
@@ -1120,34 +1148,90 @@ export class WhatsAppEngineService {
         }
       );
 
-      if (!buffer || buffer.length === 0) return '';
+      if (!buffer || buffer.length === 0) {
+        this.logToFile('⚠️ Buffer de áudio vazio retornado pelo Baileys.');
+        return '';
+      }
 
-      const base64Data = buffer.toString('base64');
-      const audioMime = msg.message?.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+      this.logToFile(`🔊 Áudio recebido (${buffer.length} bytes). Transcrevendo com IA...`);
+
+      const audioMime = audioMsg.mimetype || 'audio/ogg; codecs=opus';
       const cleanMime = audioMime.split(';')[0].trim() || 'audio/ogg';
 
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+      // 1. Provedor Primário: Groq Whisper Large V3 Turbo (ultrarrápido, ~200ms, alta precisão em português)
+      const groqKey = env.GROQ_API_KEY || process.env.GROQ_API_KEY;
+      if (groqKey) {
+        try {
+          const blob = new Blob([buffer], { type: cleanMime });
+          const formData = new FormData();
+          formData.append('file', blob, 'audio.ogg');
+          formData.append('model', 'whisper-large-v3-turbo');
+          formData.append('language', 'pt');
+          formData.append('response_format', 'json');
+          formData.append('temperature', '0.0');
+          formData.append(
+            'prompt',
+            'Áudio de WhatsApp de morador de condomínio sobre encomenda, código de retirada, ciência de pacote, eu mesmo vou buscar ou autorizando terceiro (esposa, marido, filho, etc.).'
+          );
 
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: cleanMime,
-            data: base64Data,
-          },
-        },
-        {
-          text: 'Transcreva o áudio em português com precisão. Retorne APENAS o texto falado, sem aspas, introduções ou comentários adicionais. Se inaudível ou ruído, retorne vazio.',
-        },
-      ]);
+          const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${groqKey}`,
+            },
+            body: formData,
+          });
 
-      const transcribed = result.response.text().trim();
-      if (transcribed) {
-        this.logToFile(`🎙️ [Áudio Transcrito com Gemini]: "${transcribed}"`);
+          if (res.ok) {
+            const data: any = await res.json();
+            const transcribed = (data.text || '').trim();
+            if (transcribed) {
+              this.logToFile(`🎙️ [Áudio Transcrito via Groq Whisper]: "${transcribed}"`);
+              return transcribed;
+            }
+          } else {
+            const errText = await res.text().catch(() => '');
+            this.logToFile(`⚠️ Groq Whisper status ${res.status}: ${errText}`);
+          }
+        } catch (groqErr: any) {
+          this.logToFile(`⚠️ Falha na chamada do Groq Whisper: ${groqErr.message}`);
+        }
       }
-      return transcribed;
+
+      // 2. Provedor Fallback: Google Gemini Flash Multimodal
+      const geminiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+      if (geminiKey) {
+        try {
+          const genAI = new GoogleGenerativeAI(geminiKey);
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+          const base64Data = buffer.toString('base64');
+
+          const result = await model.generateContent([
+            {
+              inlineData: {
+                mimeType: cleanMime,
+                data: base64Data,
+              },
+            },
+            {
+              text: 'Transcreva este áudio em português com máxima fidelidade. Retorne APENAS o texto falado, sem aspas, introduções ou explicações. Se inaudível ou silêncio, retorne vazio.',
+            },
+          ]);
+
+          const transcribed = result.response.text().trim();
+          if (transcribed) {
+            this.logToFile(`🎙️ [Áudio Transcrito via Gemini Flash]: "${transcribed}"`);
+            return transcribed;
+          }
+        } catch (geminiErr: any) {
+          this.logToFile(`⚠️ Falha na chamada do Gemini Flash para áudio: ${geminiErr.message}`);
+        }
+      }
+
+      this.logToFile('⚠️ Não foi possível transcrever o áudio por nenhum dos provedores disponíveis.');
+      return '';
     } catch (err: any) {
-      this.logToFile(`⚠️ Falha ao transcrever áudio com Gemini: ${err.message}`);
+      this.logToFile(`❌ Falha geral ao transcrever áudio: ${err.message}`);
       return '';
     }
   }
@@ -1189,21 +1273,24 @@ export class WhatsAppEngineService {
       }
 
       let text = this.extractTextFromMessage(msg).trim();
-      const isAudio = Boolean((msg.message as any)?.audioMessage);
+      const audioMsg = this.getAudioMessageFromWAMessage(msg);
 
-      // Se for mensagem de áudio, tenta transcrever com Gemini
-      if (isAudio && !text) {
-        this.logToFile(`🎤 Mensagem de áudio recebida de ${remoteJid}. Tentando transcrição inteligente...`);
+      let isFromAudio = false;
+      // Se for mensagem de áudio, transcreve com IA para entender a fala do morador
+      if (audioMsg && !text) {
+        this.logToFile(`🎤 Mensagem de voz/áudio recebida de ${remoteJid}. Iniciando transcrição inteligente...`);
         const transcribed = await this.transcribeAudioMessage(msg);
         if (transcribed) {
           text = transcribed.trim();
+          isFromAudio = true;
+          this.logToFile(`🧠 [Áudio Compreendido]: Morador disse: "${text}"`);
         } else {
-          this.logToFile(`ℹ️ [Silenciado] Áudio de ${remoteJid} inaudível ou não transcrito. Nenhuma ação automática disparada.`);
+          this.logToFile(`ℹ️ [Silenciado] Áudio de ${remoteJid} inaudível ou sem voz compreensível. Nenhuma ação automática disparada.`);
           return;
         }
       }
 
-      this.logToFile(`📝 Texto bruto extraído de ${remoteJid}: "${text}"`);
+      this.logToFile(`📝 Texto processado de ${remoteJid} (de áudio: ${isFromAudio}): "${text}"`);
       if (!text) {
         const msgKeys = Object.keys(msg.message || {}).join(', ');
         if (msgKeys) {
@@ -1218,7 +1305,8 @@ export class WhatsAppEngineService {
         remoteJid,
         text,
         quotedText,
-        quotedMsgId
+        quotedMsgId,
+        isFromAudio,
       });
     } catch (err: any) {
       this.logToFile(`❌ Erro ao tratar mensagem recebida: ${err.message}`);
@@ -1231,11 +1319,12 @@ export class WhatsAppEngineService {
     quotedText?: string;
     quotedMsgId?: string;
     isReaction?: boolean;
+    isFromAudio?: boolean;
   }): Promise<void> {
-    const { remoteJid, text, quotedText = '', quotedMsgId, isReaction } = params;
+    const { remoteJid, text, quotedText = '', quotedMsgId, isReaction, isFromAudio } = params;
 
     let cleanPhone = this.resolvePhoneFromRemoteJid(remoteJid);
-    this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone: ${cleanPhone}): "${text}"`);
+    this.logToFile(`📩 Mensagem recebida de ${remoteJid} (Telefone: ${cleanPhone}, Áudio: ${Boolean(isFromAudio)}): "${text}"`);
 
     // Import dinâmico do banco e da IA
     const { databaseService } = await import('./database.service.js').catch(() => ({ databaseService: null as any }));
@@ -1388,11 +1477,13 @@ export class WhatsAppEngineService {
       const carrierName = targetPkg?.carrier || 'Encomenda';
       const pickupCode = targetPkg?.pickup_code || codeFromText || '';
 
+      const audioAck = isFromAudio ? `🎙️ _(Mensagem de voz compreendida: "${text}")_\n\n` : '';
       let replyText = '';
       if (isWithdrawal) {
         replyText =
           `🚨 *ALERTA DE CONTESTAÇÃO DE RETIRADA REGISTRADO!*\n\n` +
           `Olá, *${residentName}*!\n\n` +
+          `${audioAck}` +
           `Recebemos com máxima prioridade seu aviso de que você *NÃO realizou a retirada* da encomenda da *${carrierName}*${pickupCode ? ` (Código: *${pickupCode}*)` : ''}.\n\n` +
           `🚨 *A equipe da portaria já foi alertada com alarme de emergência na tela do sistema!*\n` +
           `O porteiro foi orientado a conferir imediatamente o livro de registros, assinatura digital e imagens de câmeras.\n\n` +
@@ -1401,6 +1492,7 @@ export class WhatsAppEngineService {
         replyText =
           `⚠️ *REGISTRO DE NÃO RECONHECIMENTO DE ENCOMENDA*\n\n` +
           `Olá, *${residentName}*!\n\n` +
+          `${audioAck}` +
           `Registramos no sistema que você *não reconhece* ou *não tem ciência* da encomenda da *${carrierName}*${pickupCode ? ` (Código: *${pickupCode}*)` : ''}.\n\n` +
           `🚨 *A equipe da portaria já foi alertada imediatamente na tela do sistema!* O pacote foi retido para conferência física de etiqueta, destinatário e apartamento.\n\n` +
           `Agradecemos o aviso! Caso necessário, a portaria entrará em contato com você.`;
@@ -1419,6 +1511,7 @@ export class WhatsAppEngineService {
         return;
       }
 
+      const audioAck = isFromAudio ? `🎙️ _(Mensagem de voz compreendida: "${text}")_\n\n` : '';
       let replyText = '';
       if (pendingPkgs.length === 1) {
         const pkg = pendingPkgs[0];
@@ -1428,7 +1521,9 @@ export class WhatsAppEngineService {
 
         replyText =
           `📦 *DADOS DA SUA ENCOMENDA*\n\n` +
-          `Olá, *${residentName}*! Aqui estão os dados para retirada da sua encomenda da *${carrierName}*:\n\n` +
+          `Olá, *${residentName}*!\n\n` +
+          `${audioAck}` +
+          `Aqui estão os dados para retirada da sua encomenda da *${carrierName}*:\n\n` +
           `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
           `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
           `🏢 Apresente o código ou QR Code no balcão da portaria para retirar.`;
@@ -1443,6 +1538,7 @@ export class WhatsAppEngineService {
         replyText =
           `📦 *DADOS DAS SUAS ENCOMENDAS*\n\n` +
           `Olá, *${residentName}*! Você possui *${pendingPkgs.length} encomendas pendentes* para retirada:\n\n` +
+          `${audioAck}` +
           `${listItems}\n\n` +
           `🏢 Apresente os códigos ou QR Codes na portaria para retirar todas as suas encomendas.`;
       }
@@ -1478,6 +1574,7 @@ export class WhatsAppEngineService {
       if (pkgs.length > 0) {
         this.acknowledgmentCooldown.set(cleanPhone, Date.now());
 
+        const audioAck = isFromAudio ? `🎙️ _(Mensagem de voz compreendida: "${text}")_\n\n` : '';
         const relationLabel = thirdPartyRelation ? ` (${thirdPartyRelation})` : '';
         let replyText = '';
 
@@ -1490,6 +1587,7 @@ export class WhatsAppEngineService {
           replyText =
             `🤝 *RETIRADA POR TERCEIRO AUTORIZADA!*\n\n` +
             `Olá, *${residentName}*! 👋\n\n` +
+            `${audioAck}` +
             `Registramos no sistema da portaria que *${thirdPartyName}*${relationLabel} está autorizado(a) a retirar sua encomenda da *${carrierName}*.\n\n` +
             `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
             `📱 *Link do QR Code para repassar ao terceiro:*\n${pickupUrl}\n\n` +
@@ -1505,6 +1603,7 @@ export class WhatsAppEngineService {
           replyText =
             `🤝 *RETIRADA POR TERCEIRO AUTORIZADA!*\n\n` +
             `Olá, *${residentName}*! 👋\n\n` +
+            `${audioAck}` +
             `Registramos no sistema da portaria que *${thirdPartyName}*${relationLabel} está autorizado(a) a retirar suas *${pkgs.length} encomendas*.\n\n` +
             `Aqui estão os dados e links para você repassar à pessoa autorizada:\n\n` +
             `${listItems}\n\n` +
@@ -1544,6 +1643,7 @@ export class WhatsAppEngineService {
       if (pkgs.length > 0) {
         this.acknowledgmentCooldown.set(cleanPhone, Date.now());
 
+        const audioAck = isFromAudio ? `🎙️ _(Mensagem de voz compreendida: "${text}")_\n\n` : '';
         let replyText = '';
         const isReAck = Boolean(result?.alreadyAcknowledged);
 
@@ -1561,6 +1661,7 @@ export class WhatsAppEngineService {
           replyText =
             `${title}\n\n` +
             `${header}\n\n` +
+            `${audioAck}` +
             `🔑 *Código de Retirada:* *${pkg.pickup_code}*\n\n` +
             `📱 *Acesse seu QR Code para retirada aqui:*\n${pickupUrl}\n\n` +
             `🏢 Apresente o QR Code no balcão da portaria para retirar.`;
