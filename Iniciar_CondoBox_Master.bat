@@ -1,8 +1,10 @@
 @echo off
 title CondoBox SaaS Master
 
-REM 1. Fecha eventuais instancias anteriores do Electron
+REM 1. Fecha eventuais instancias anteriores do Electron e da Portaria
 taskkill /F /IM electron.exe >nul 2>&1
+taskkill /F /IM "CondoBox Portaria.exe" >nul 2>&1
+taskkill /F /IM "CondoBox SaaS Master.exe" >nul 2>&1
 
 REM 2. Garante que o servidor web (3000) e a API local (3001) estejam rodando de forma 100% invisivel
 netstat -ano | findstr :3000 >nul 2>&1
