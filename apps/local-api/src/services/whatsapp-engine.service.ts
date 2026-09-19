@@ -42,6 +42,8 @@ export class WhatsAppEngineService {
   private recentNotificationByJid: Map<string, any> = new Map();
   private processedMessageIds: Set<string> = new Set();
   private acknowledgmentCooldown: Map<string, number> = new Map();
+  private recentSentMessagesRaw: Map<string, any> = new Map();
+  private watchdogInterval: NodeJS.Timeout | null = null;
   private recentSentNotifications: Map<string, {
     packageId?: string;
     phone: string;
@@ -224,7 +226,12 @@ export class WhatsAppEngineService {
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 15000,
-        getMessage: async () => undefined
+        getMessage: async (key) => {
+          if (key?.id && this.recentSentMessagesRaw.has(key.id)) {
+            return this.recentSentMessagesRaw.get(key.id);
+          }
+          return undefined;
+        }
       });
 
       this.socket.ev.on('creds.update', saveCreds);
@@ -244,6 +251,7 @@ export class WhatsAppEngineService {
         }
 
         if (connection === 'close') {
+          this.stopSocketWatchdog();
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
@@ -278,6 +286,7 @@ export class WhatsAppEngineService {
           if (this.connectedPhone && this.connectedPhone !== 'Conectado') {
             this.syncConnectedPhoneToCondo(this.connectedPhone);
           }
+          this.startSocketWatchdog();
           this.broadcastStatus();
         }
       });
@@ -347,7 +356,43 @@ export class WhatsAppEngineService {
     }
   }
 
+  private startSocketWatchdog(): void {
+    this.stopSocketWatchdog();
+    this.watchdogInterval = setInterval(async () => {
+      try {
+        if (!this.socket || this.currentStatus !== 'CONNECTED') return;
+
+        // 1. Verifica estado do WebSocket nativo
+        const ws = (this.socket as any).ws;
+        if (ws && typeof ws.readyState === 'number' && ws.readyState !== 1) { // 1 = OPEN
+          this.logToFile(`⚠️ [Watchdog] WebSocket em estado não-aberto (${ws.readyState}). Reconectando...`);
+          this.scheduleReconnect();
+          return;
+        }
+
+        // 2. Ping de presença leve para evitar conexões zumbis
+        try {
+          await Promise.race([
+            this.socket.sendPresenceUpdate('available'),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Watchdog Ping Timeout')), 6000))
+          ]);
+        } catch (pingErr: any) {
+          this.logToFile(`⚠️ [Watchdog] Socket zumbi detectado (${pingErr?.message}). Reconectando...`);
+          this.scheduleReconnect();
+        }
+      } catch {}
+    }, 25000);
+  }
+
+  private stopSocketWatchdog(): void {
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+      this.watchdogInterval = null;
+    }
+  }
+
   public async logout(): Promise<void> {
+    this.stopSocketWatchdog();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -542,6 +587,13 @@ export class WhatsAppEngineService {
 
       const sent = await this.socket.sendMessage(jid, { text });
       const msgId = sent?.key?.id || 'ok';
+      if (sent?.key?.id && sent.message) {
+        this.recentSentMessagesRaw.set(sent.key.id, sent.message);
+        if (this.recentSentMessagesRaw.size > 500) {
+          const firstKey = this.recentSentMessagesRaw.keys().next().value;
+          if (firstKey) this.recentSentMessagesRaw.delete(firstKey);
+        }
+      }
       if (sent?.key?.remoteJid) {
         this.jidToPhoneMap.set(sent.key.remoteJid, cleanPhone);
         if (sent.key.remoteJid.includes('@lid')) {
@@ -691,6 +743,13 @@ export class WhatsAppEngineService {
       });
 
       const msgId = sent?.key?.id || 'ok';
+      if (sent?.key?.id && sent.message) {
+        this.recentSentMessagesRaw.set(sent.key.id, sent.message);
+        if (this.recentSentMessagesRaw.size > 500) {
+          const firstKey = this.recentSentMessagesRaw.keys().next().value;
+          if (firstKey) this.recentSentMessagesRaw.delete(firstKey);
+        }
+      }
       if (sent?.key?.remoteJid) {
         this.jidToPhoneMap.set(sent.key.remoteJid, cleanPhone);
         if (sent.key.remoteJid.includes('@lid')) {
@@ -774,8 +833,44 @@ export class WhatsAppEngineService {
         timestamp: Date.now()
       };
       this.recentSentNotifications.set(res.messageId, notifData);
-      const cleanP = params.phone.replace(/\D/g, '');
-      this.recentNotificationByPhone.set(cleanP, notifData);
+
+      // Armazena em todas as variações de número de telefone (com/sem 55, com/sem 9)
+      const phoneVariations = new Set<string>();
+      const rawDigits = params.phone.replace(/\D/g, '');
+      if (rawDigits) {
+        phoneVariations.add(rawDigits);
+        if (rawDigits.startsWith('55')) {
+          const without55 = rawDigits.slice(2);
+          phoneVariations.add(without55);
+          if (without55.length === 11 && without55[2] === '9') {
+            phoneVariations.add(`55${without55.slice(0, 2)}${without55.slice(3)}`);
+            phoneVariations.add(`${without55.slice(0, 2)}${without55.slice(3)}`);
+          } else if (without55.length === 10) {
+            phoneVariations.add(`55${without55.slice(0, 2)}9${without55.slice(2)}`);
+            phoneVariations.add(`${without55.slice(0, 2)}9${without55.slice(2)}`);
+          }
+        } else {
+          phoneVariations.add(`55${rawDigits}`);
+          if (rawDigits.length === 11 && rawDigits[2] === '9') {
+            phoneVariations.add(`55${rawDigits.slice(0, 2)}${rawDigits.slice(3)}`);
+            phoneVariations.add(`${rawDigits.slice(0, 2)}${rawDigits.slice(3)}`);
+          } else if (rawDigits.length === 10) {
+            phoneVariations.add(`55${rawDigits.slice(0, 2)}9${rawDigits.slice(2)}`);
+            phoneVariations.add(`${rawDigits.slice(0, 2)}9${rawDigits.slice(2)}`);
+          }
+        }
+      }
+
+      for (const pVar of phoneVariations) {
+        this.recentNotificationByPhone.set(pVar, notifData);
+        // Vincula também o JID de LID conhecido para este morador
+        for (const [lid, ph] of this.lidCache.entries()) {
+          if (phoneVariations.has(ph)) {
+            this.recentNotificationByJid.set(`${lid}@lid`, notifData);
+          }
+        }
+      }
+
       try {
         const targetJid = await this.resolveJid(params.phone);
         this.recentNotificationByJid.set(targetJid, notifData);
@@ -1067,7 +1162,10 @@ export class WhatsAppEngineService {
     try {
       if (this.socket) {
         this.logToFile(`Enviando resposta diretamente para conversa ativa: ${remoteJid}...`);
-        await this.socket.sendMessage(remoteJid, { text: replyText });
+        const sent = await this.socket.sendMessage(remoteJid, { text: replyText });
+        if (sent?.key?.id && sent.message) {
+          this.recentSentMessagesRaw.set(sent.key.id, sent.message);
+        }
       } else {
         await this.sendTextMessage(cleanPhone, replyText);
       }
@@ -1079,15 +1177,40 @@ export class WhatsAppEngineService {
 
   private async handleIncomingReaction(reactionUpdate: any): Promise<void> {
     try {
-      const remoteJid = reactionUpdate.key?.remoteJid || reactionUpdate.reaction?.key?.remoteJid || '';
-      if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.includes('@g.us')) return;
+      this.logToFile(`🔍 [DEBUG Reaction] Payload recebido: ${JSON.stringify(reactionUpdate)}`);
 
-      const emoji = (reactionUpdate.reaction?.text || '').trim();
-      if (!emoji) return; // Reação removida pelo morador
+      // 1. Extração robusta do JID da conversa
+      const remoteJid =
+        reactionUpdate.reaction?.key?.remoteJid ||
+        reactionUpdate.key?.remoteJid ||
+        reactionUpdate.remoteJid ||
+        '';
 
-      const targetMsgId = reactionUpdate.reaction?.key?.id || reactionUpdate.key?.id;
+      if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.includes('@g.us') || remoteJid.includes('@newsletter')) {
+        return;
+      }
+
+      // 2. Extração do Emoji da reação
+      const emoji = (
+        reactionUpdate.reaction?.text ||
+        reactionUpdate.text ||
+        reactionUpdate.reaction?.emoji ||
+        reactionUpdate.emoji ||
+        ''
+      ).trim();
+
+      if (!emoji) {
+        this.logToFile(`ℹ️ Reação vazia ou desfeita em ${remoteJid}`);
+        return;
+      }
+
+      // 3. Extração correta do ID da mensagem original curtida (notificação)
+      // reactionUpdate.key é o WAMessageKey da mensagem ALVO curtida!
+      // reactionUpdate.reaction.key é a chave do próprio evento de reação!
+      const targetMsgId = reactionUpdate.key?.id || reactionUpdate.reaction?.key?.id;
       this.logToFile(`👍 Reação recebida em ${remoteJid} (Msg: ${targetMsgId}): "${emoji}"`);
 
+      // 4. Se a reação for contestação vs afirmação
       const isContest = ['👎', '❌', '🚫', '😡', '😠'].some(e => emoji.includes(e));
       const simulatedText = isContest ? 'Não reconheço essa encomenda ❌' : 'Ciente, obrigado 👍';
 
@@ -1272,6 +1395,30 @@ export class WhatsAppEngineService {
         }
       }
 
+      // 1. Detecção direta de Reação (ReactionMessage) recebida via messages.upsert
+      const reactionMsg =
+        msg.message?.reactionMessage ||
+        (msg.message as any)?.ephemeralMessage?.message?.reactionMessage;
+
+      if (reactionMsg) {
+        const emoji = (reactionMsg.text || '').trim();
+        const targetMsgId = reactionMsg.key?.id;
+        this.logToFile(`👍 [ReactionMessage via Upsert] de ${remoteJid} (Alvo: ${targetMsgId}): "${emoji}"`);
+        if (!emoji) {
+          this.logToFile(`ℹ️ Reação removida por ${remoteJid}`);
+          return;
+        }
+        const isContest = ['👎', '❌', '🚫', '😡', '😠'].some(e => emoji.includes(e));
+        const simulatedText = isContest ? 'Não reconheço essa encomenda ❌' : 'Ciente, obrigado 👍';
+        await this.processIncomingContent({
+          remoteJid,
+          text: simulatedText,
+          quotedMsgId: targetMsgId,
+          isReaction: true
+        });
+        return;
+      }
+
       let text = this.extractTextFromMessage(msg).trim();
       const audioMsg = this.getAudioMessageFromWAMessage(msg);
 
@@ -1285,7 +1432,21 @@ export class WhatsAppEngineService {
           isFromAudio = true;
           this.logToFile(`🧠 [Áudio Compreendido]: Morador disse: "${text}"`);
         } else {
-          this.logToFile(`ℹ️ [Silenciado] Áudio de ${remoteJid} inaudível ou sem voz compreensível. Nenhuma ação automática disparada.`);
+          this.logToFile(`ℹ️ [Áudio Inaudível] Áudio de ${remoteJid} sem voz compreensível.`);
+          const cleanP = this.resolvePhoneFromRemoteJid(remoteJid);
+          const hasRecentNotif = this.recentNotificationByJid.has(remoteJid) || this.recentNotificationByPhone.has(cleanP);
+          if (hasRecentNotif) {
+            const promptText =
+              `Olá, Morador(a)! 👋\n\n` +
+              `Recebemos seu áudio, porém o som ficou um pouco baixo ou inaudível.\n\n` +
+              `💬 *Para liberarmos seu Código e QR Code na hora, por favor:*\n` +
+              `• Se for você mesmo retirar: responda *"Eu mesmo"* ou *"OK"* (ou reaja com 👍 nesta mensagem).\n` +
+              `• Se for outra pessoa retirar: informe o nome dela (ex: *"Minha esposa Maria"*).\n\n` +
+              `Assim que você responder, liberamos seus dados de retirada imediatamente! 🔑\n\n` +
+              `🏢 Portaria do Condomínio`;
+            await this.sendWhatsAppReply(remoteJid, cleanP, promptText);
+            this.logToFile(`💬 Enviada orientação de áudio inaudível para ${cleanP}.`);
+          }
           return;
         }
       }
@@ -1336,29 +1497,40 @@ export class WhatsAppEngineService {
     const { aiIntentService } = await import('./ai-intent.service.js');
 
     // 1. Resolução inteligente de identidade via notificação citada / recente
+    let targetNotif: { phone: string; residentName: string; carrier: string; pickupCode: string; qrToken?: string; timestamp: number } | null = null;
+
     if (quotedMsgId && this.recentSentNotifications.has(quotedMsgId)) {
-      const notif = this.recentSentNotifications.get(quotedMsgId)!;
-      cleanPhone = notif.phone;
-      if (remoteJid.includes('@lid')) {
-        this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+      const found = this.recentSentNotifications.get(quotedMsgId);
+      if (found) {
+        targetNotif = found;
+        cleanPhone = found.phone;
+        if (remoteJid.includes('@lid')) {
+          this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        }
+        this.logToFile(`🎯 Morador identificado via histórico da mensagem citada (${quotedMsgId}): ${found.residentName} (${cleanPhone})`);
       }
-      this.logToFile(`🎯 Morador identificado via histórico da mensagem citada (${quotedMsgId}): ${notif.residentName} (${cleanPhone})`);
     } else if (this.recentNotificationByJid.has(remoteJid)) {
-      const notif = this.recentNotificationByJid.get(remoteJid)!;
-      cleanPhone = notif.phone.replace(/\D/g, '');
-      if (remoteJid.includes('@lid')) {
-        this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+      const found = this.recentNotificationByJid.get(remoteJid);
+      if (found) {
+        targetNotif = found;
+        cleanPhone = found.phone ? found.phone.replace(/\D/g, '') : cleanPhone;
+        if (remoteJid.includes('@lid')) {
+          this.recordLidMapping(remoteJid.replace(/@lid|\D/g, ''), cleanPhone);
+        }
+        this.logToFile(`🎯 Morador identificado via notificação enviada para JID (${remoteJid}): ${found.residentName} (${cleanPhone})`);
       }
-      this.logToFile(`🎯 Morador identificado via notificação enviada para JID (${remoteJid}): ${notif.residentName} (${cleanPhone})`);
+    } else if (this.recentNotificationByPhone.has(cleanPhone)) {
+      targetNotif = this.recentNotificationByPhone.get(cleanPhone) || null;
     }
 
     // 2. Extrai código de retirada mencionado no texto ou no texto citado
     const codeFromText = aiIntentService.extractCode(text) || (quotedText ? aiIntentService.extractCode(quotedText) : null);
+    const candidateCode = codeFromText || targetNotif?.pickupCode || null;
 
     // 3. Busca encomenda pelo código (inclusive DELIVERED) se houver código
     let matchedPkgByCode: any = null;
-    if (codeFromText) {
-      matchedPkgByCode = await databaseService.findPackageByCode(codeFromText);
+    if (candidateCode) {
+      matchedPkgByCode = await databaseService.findPackageByCode(candidateCode);
       if (matchedPkgByCode?.resident?.phone) {
         cleanPhone = matchedPkgByCode.resident.phone;
         if (remoteJid.includes('@lid')) {
@@ -1368,24 +1540,21 @@ export class WhatsAppEngineService {
     }
 
     // 4. Busca contexto das encomendas pendentes do morador
-    let pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone, codeFromText);
+    let pendingPkgs = await databaseService.getPendingPackagesForPhone(cleanPhone, candidateCode);
     if ((!pendingPkgs || pendingPkgs.length === 0) && matchedPkgByCode && matchedPkgByCode.status !== 'DELIVERED') {
       pendingPkgs = [matchedPkgByCode];
     }
 
     // Se ainda não achou mas há notificação recente enviada para este contato:
-    if ((!pendingPkgs || pendingPkgs.length === 0) && this.recentNotificationByPhone.has(cleanPhone)) {
-      const notif = this.recentNotificationByPhone.get(cleanPhone)!;
-      if (notif.pickupCode) {
-        const pkg = await databaseService.findPackageByCode(notif.pickupCode);
-        if (pkg && pkg.status !== 'DELIVERED') {
-          pendingPkgs = [pkg];
-        }
+    if ((!pendingPkgs || pendingPkgs.length === 0) && targetNotif?.pickupCode) {
+      const pkg = await databaseService.findPackageByCode(targetNotif.pickupCode);
+      if (pkg && pkg.status !== 'DELIVERED') {
+        pendingPkgs = [pkg];
       }
     }
 
     // Verifica se a mensagem possui sinal claro de contestação ou retirada indevida
-    const normText = (text || '').toLowerCase();
+    const normText = (text || '').toLowerCase().trim();
     const isContestSignal =
       normText.includes('não fiz a retirada') ||
       normText.includes('nao fiz a retirada') ||
@@ -1434,16 +1603,45 @@ export class WhatsAppEngineService {
       }
     }
 
-    // 🧠 CLASSIFICAÇÃO INTELIGENTE COM IA (Groq -> Gemini -> NVIDIA -> Heurística)
-    const aiResult = isReaction
-      ? (text.includes('Não reconheço')
-          ? { intent: 'CONTEST_PACKAGE' as const, confidence: 1.0, reasoning: 'Emoji de reação negativo', extractedCode: codeFromText, source: 'heuristic' as const }
-          : { intent: 'CONFIRM_SCIENCE' as const, confidence: 1.0, reasoning: 'Emoji de reação afirmativo', extractedCode: codeFromText, source: 'heuristic' as const })
-      : await aiIntentService.classify(text, {
-          quotedText,
-          residentName,
-          packagesInfo
-        });
+    // 🧠 CLASSIFICAÇÃO INTELIGENTE: Heurística Direta + IA (Groq -> Gemini -> NVIDIA)
+    const directConfirmKeywords = [
+      'ok', 'sim', 'eu mesmo', 'eu mesma', 'vou eu', 'vou eu mesmo', 'eu que vou',
+      'eu que vou buscar', 'vou eu buscar', 'beleza', 'blz', 'show', 'top', 'joia',
+      'valeu', 'vlw', 'obg', 'obrigado', 'obrigada', 'ciente', 'estou ciente', 'to ciente',
+      'tô ciente', 'ja vou buscar', 'vou buscar', 'vou retirar', 'ja to descendo',
+      'to descendo', 'tô descendo', 'pode ser', 'confirmado'
+    ];
+    const isDirectConfirm =
+      ['👍', '👌', '✅', '❤️', '👏', '🙏'].some(e => text.includes(e)) ||
+      directConfirmKeywords.includes(normText) ||
+      normText.startsWith('eu mesmo') ||
+      normText.startsWith('eu que vou') ||
+      normText.startsWith('vou eu') ||
+      normText.startsWith('ja vou buscar');
+
+    let aiResult: any;
+    if (isReaction) {
+      aiResult = text.includes('Não reconheço')
+        ? { intent: 'CONTEST_PACKAGE' as const, confidence: 1.0, reasoning: 'Emoji de reação negativo', extractedCode: candidateCode, source: 'heuristic' as const }
+        : { intent: 'CONFIRM_SCIENCE' as const, confidence: 1.0, reasoning: 'Emoji de reação afirmativo', extractedCode: candidateCode, source: 'heuristic' as const };
+    } else if (isDirectConfirm) {
+      aiResult = {
+        intent: 'CONFIRM_SCIENCE' as const,
+        confidence: 1.0,
+        reasoning: 'Confirmação afirmativa direta do morador',
+        extractedCode: candidateCode,
+        source: 'heuristic' as const
+      };
+    } else {
+      aiResult = await aiIntentService.classify(text, {
+        quotedText,
+        residentName,
+        packagesInfo
+      });
+      if (!aiResult.extractedCode && candidateCode) {
+        aiResult.extractedCode = candidateCode;
+      }
+    }
 
     this.logToFile(
       `🤖 [IA: ${aiResult.source.toUpperCase()}] Intenção: ${aiResult.intent} (Confiança: ${aiResult.confidence}) - Motivo: "${aiResult.reasoning}"`
